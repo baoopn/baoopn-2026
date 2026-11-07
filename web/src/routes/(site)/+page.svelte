@@ -7,6 +7,7 @@
 	import PostItem from '#lib/site/components/PostItem.svelte';
 	import NowPlayingCard from '#lib/site/components/NowPlayingCard.svelte';
 	import RecentPlays from '#lib/site/components/RecentPlays.svelte';
+	import TopPlaylists from '#lib/site/components/TopPlaylists.svelte';
 	import { absolute, safeImage, safeUrl } from '#lib/site/format.js';
 	import { LISTENING_URL } from '#lib/links.js';
 	import type { PageProps } from './$types';
@@ -168,6 +169,7 @@
 				<RecentPlays items={data.recent} />
 			</div>
 		</div>
+		<TopPlaylists data={data.topPlaylists} />
 	</section>
 </div>
 
