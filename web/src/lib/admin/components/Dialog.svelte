@@ -7,6 +7,7 @@
 		title,
 		description,
 		variant = 'modal',
+		size = 'md',
 		children,
 		footer,
 		onclose
@@ -16,6 +17,8 @@
 		description?: string;
 		/** `modal`: centred dialog, `drawer`: right-hand side panel. */
 		variant?: 'modal' | 'drawer';
+		/** Modal width: `md` 32rem, `lg` 52rem. */
+		size?: 'md' | 'lg';
 		children: Snippet;
 		footer?: Snippet;
 		onclose?: () => void;
@@ -40,7 +43,7 @@
 <dialog
 	{@attach modal}
 	aria-labelledby={titleId}
-	class={['dlg', variant === 'drawer' ? 'dlg-drawer' : 'dlg-modal']}
+	class={['dlg', variant === 'drawer' ? 'dlg-drawer' : 'dlg-modal', size === 'lg' && 'dlg-lg']}
 	onclose={handleClose}
 	onclick={(e) => {
 		if (e.target === e.currentTarget) handleClose();
@@ -90,6 +93,9 @@
 		max-height: calc(100dvh - 2rem);
 		margin: auto;
 		border-radius: 1.25rem;
+	}
+	.dlg-modal.dlg-lg {
+		width: min(52rem, calc(100vw - 2rem));
 	}
 	.dlg-drawer {
 		width: min(36rem, 100vw);
