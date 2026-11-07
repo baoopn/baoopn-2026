@@ -9,27 +9,20 @@
 
 	let { data }: PageProps = $props();
 
-	function href(next: { tag?: string; series?: string; page?: number }): string {
+	function href(next: { tag?: string; page?: number }): string {
 		const q = new URLSearchParams();
 		const tag = next.tag ?? data.tag;
-		const series = next.series ?? data.series;
 		if (tag) q.set('tag', tag);
-		if (series) q.set('series', series);
 		if (next.page && next.page > 1) q.set('page', String(next.page));
 		const s = q.toString();
 		return s ? `/blog?${s}` : '/blog';
 	}
 
-	const seriesTitle = $derived(
-		data.series ? data.posts.find((p) => p.series === data.series)?.series_title || data.series : ''
-	);
-	const heading = $derived(
-		data.tag ? `Tagged #${data.tag}` : data.series ? `Series: ${seriesTitle}` : 'Blog'
-	);
+	const heading = $derived(data.tag ? `Tagged #${data.tag}` : 'Blog');
 </script>
 
 <Seo
-	title={data.tag || data.series ? heading : 'Blog'}
+	title={data.tag ? heading : 'Blog'}
 	description="Notes on building software: case studies, how-tos and lessons from Bao Nguyen's projects."
 	noindex={data.page > 1 && !data.posts.length}
 />
@@ -41,7 +34,7 @@
 			<h1 class="mt-3 font-display text-5xl font-semibold tracking-[-0.035em] break-words sm:text-6xl">
 				{heading}
 			</h1>
-			{#if data.tag || data.series}
+			{#if data.tag}
 				<a href="/blog" class="link mt-2 inline-flex min-h-11 items-center text-ink-soft">Clear filter</a>
 			{:else}
 				<p class="mt-3 max-w-2xl text-lg text-ink-soft">
@@ -57,9 +50,9 @@
 			{#if data.posts.length === 0}
 				<div class="py-14">
 					<p class="text-lg text-ink-soft">
-						{data.tag || data.series ? 'No posts match this filter.' : 'No posts yet. Check back soon.'}
+						{data.tag ? 'No posts match this filter.' : 'No posts yet. Check back soon.'}
 					</p>
-					{#if data.tag || data.series || data.page > 1}
+					{#if data.tag || data.page > 1}
 						<a href="/blog" class="btn btn-secondary mt-4">See all posts</a>
 					{/if}
 				</div>
@@ -100,7 +93,7 @@
 						{@const on = data.tag === t.tag}
 						<li>
 							<a
-								href={on ? href({ tag: '', page: 1 }) : href({ tag: t.tag, series: '', page: 1 })}
+								href={on ? href({ tag: '', page: 1 }) : href({ tag: t.tag, page: 1 })}
 								class="tag"
 								aria-current={on ? 'page' : undefined}
 							>
