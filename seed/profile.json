@@ -7,22 +7,118 @@
 	"cover_url": "https://cdn.baoopn.com/data/img/Bao_cover.jpg",
 	"resume_url": "",
 	"available_for_work": false,
-	"bio_md": "Hi, I'm Bao Nguyen, a passionate Full-Stack Web and App Developer with a drive for creating innovative solutions. With a solid background in modern technologies and a knack for problem-solving, I bring creativity and technical expertise to every project I undertake.\n\nOver the years, I have developed a deep understanding of both front-end and back-end technologies. From building responsive user interfaces to designing efficient databases, I strive to deliver seamless and robust applications. My journey has involved working with a variety of frameworks and tools, including React, Next.js, Node.js, and more.\n\nI'm constantly exploring new trends in the tech world and learning new skills to stay ahead. Whether you're looking for a dynamic web application or a complex backend system, I am excited to collaborate and bring your vision to life.\n\nLet's connect and create something amazing together!",
+	"bio_md": "I build web and desktop apps from end to end: the API, the database, the screens people use, and the servers they run on.\n\nI build software for TL Portraitz, a wedding photo and video studio. Most of my time goes into NarraFlo, the studio's video project tool. Clients and the team use it to share footage, review videos, pay invoices and chat. I work on its Hono backend, its SvelteKit admin and client portals, and its Flutter desktop app for Windows, macOS and Linux. I also wrote its transcoder in Go: a set of workers that turn raw footage into streams up to 4K, with watermarks when needed.\n\nI also build Vow Portal, a directory of verified wedding vendors for TL Portraitz couples. It runs on a Go API and a SvelteKit site. Vendors get profile pages, inquiries that become email threads, referrals and analytics. An MCP server lets an AI assistant act for a signed-in vendor.\n\nOn my own projects, I write Go. I rebuilt this site as a Go API and a SvelteKit app, with its own admin, blog editor, email threads and analytics. I built [spotify-tracker](https://listening.baoopn.com), a set of Go services that log every song I play and show it live. I also built sites for AT Creations, a handmade gift and ceramics store, and MUBEN, a fashion brand. I host most of it myself on Coolify, behind Cloudflare.\n\nNot all of my work happens at a desk. I shoot weddings as a videographer and photographer, so I know what a studio needs from its software. A wedding gives you one chance at each moment. It teaches you to plan ahead and stay calm.\n\nI also work as a restaurant server. The job keeps me quick on my feet, and it reminds me that good service starts with paying attention to people. On the tech side, I set up the online booking system for Saigon Taste, a restaurant in Edmonton, and wrote a small service that sends an alert for each new reservation.\n\nIf you have a project in mind, send me a message.",
 	"socials": [
-		{ "label": "GitHub", "url": "https://github.com/baoopn", "icon": "github", "handle": "@baoopn" },
-		{ "label": "LinkedIn", "url": "https://www.linkedin.com/in/baoopn", "icon": "linkedin", "handle": "Bao Nguyen" },
-		{ "label": "Instagram", "url": "https://www.instagram.com/baoongisoo", "icon": "instagram", "handle": "@baoongisoo" },
-		{ "label": "Email", "url": "mailto:me@baoopn.com", "icon": "email", "handle": "me@baoopn.com" }
+		{
+			"label": "GitHub",
+			"url": "https://github.com/baoopn",
+			"icon": "github",
+			"handle": "@baoopn"
+		},
+		{
+			"label": "LinkedIn",
+			"url": "https://www.linkedin.com/in/baoopn",
+			"icon": "linkedin",
+			"handle": "Bao Nguyen"
+		},
+		{
+			"label": "Instagram",
+			"url": "https://www.instagram.com/baoopn.me",
+			"icon": "instagram",
+			"handle": "@baoopn.me"
+		},
+		{
+			"label": "Email",
+			"url": "mailto:me@baoopn.com",
+			"icon": "email",
+			"handle": "me@baoopn.com"
+		}
 	],
 	"skills": [
-		{ "group": "Frontend", "items": ["React", "Next.js", "TypeScript"] },
-		{ "group": "Backend", "items": ["Node.js", "Express", "Spring Boot"] },
-		{ "group": "Data", "items": ["MongoDB", "Redis"] }
+		{
+			"group": "Languages",
+			"items": [
+				"Go",
+				"TypeScript",
+				"JavaScript",
+				"Dart",
+				"SQL",
+				"PHP"
+			]
+		},
+		{
+			"group": "Frontend",
+			"items": [
+				"SvelteKit",
+				"Svelte 5",
+				"React",
+				"Tailwind CSS",
+				"TanStack Query"
+			]
+		},
+		{
+			"group": "Backend",
+			"items": [
+				"chi",
+				"Fiber",
+				"Hono",
+				"Node.js",
+				"Deno",
+				"gRPC",
+				"REST",
+				"SSE",
+				"MCP"
+			]
+		},
+		{
+			"group": "Desktop",
+			"items": [
+				"Flutter (Windows, macOS, Linux)",
+				"Riverpod"
+			]
+		},
+		{
+			"group": "Data",
+			"items": [
+				"PostgreSQL",
+				"Drizzle ORM",
+				"Redis",
+				"SQLite",
+				"MongoDB"
+			]
+		},
+		{
+			"group": "Media",
+			"items": [
+				"Video transcoding (HLS, WebM, up to 4K)",
+				"Image processing (WebP, HEIC)",
+				"Object storage (R2, S3)"
+			]
+		},
+		{
+			"group": "Infra and services",
+			"items": [
+				"Docker",
+				"Coolify",
+				"Cloudflare (R2, Workers, Email Routing)",
+				"Clerk",
+				"GitHub Actions",
+				"Self-hosted CI runners"
+			]
+		},
+		{
+			"group": "Beyond code",
+			"items": [
+				"Wedding videography",
+				"Wedding photography",
+				"Restaurant service"
+			]
+		}
 	],
 	"experience": [],
 	"seo": {
 		"title": "Bao Nguyen | Full-stack Web Developer",
-		"description": "Bao Nguyen is a full-stack web and app developer building responsive interfaces and robust backends with React, Next.js and Node.js.",
-		"og_image": "https://cdn.baoopn.com/data/img/Bao_cover.jpg"
+		"description": "Bao Nguyen builds web and desktop apps with Go, SvelteKit, Flutter and TypeScript, and shoots weddings as a videographer and photographer.",
+		"og_image": "https://media.baoopn.com/profile-cover-076cc40c.jpg"
 	}
 }
