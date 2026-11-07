@@ -37,7 +37,11 @@
 	--baoopn-font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
 	--baoopn-font-mono: 'JetBrains Mono', ui-monospace, monospace;
 	--baoopn-radius: 14px;
-	--logo-plate-dark: var(--baoopn-navy); /* plate for light logos (logo_bg='ink'), both themes */
+}
+
+/* ---------- site tokens shared by both themes ---------- */
+:root {
+	--logo-plate-dark: var(--baoopn-navy); /* plate for light logos (logo_bg='ink') */
 }
 
 /* ---------- pastel day ---------- */
