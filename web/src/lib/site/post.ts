@@ -1,4 +1,4 @@
-import type { PostDetail, PostPartRef } from '#lib/api/types.js';
+import type { PostCategory, PostDetail, PostPartRef } from '#lib/api/types.js';
 import { required } from '#lib/site/data.js';
 
 type Fetch = typeof fetch;
@@ -21,9 +21,35 @@ export async function loadPost(f: Fetch, slug: string, no: number): Promise<Post
 	const part = { ...post.part, title: post.part?.title ?? '', toc: post.part?.toc ?? [] };
 	return {
 		...post,
+		category: parseCategory(post.category) || 'tech',
 		tags: post.tags ?? [],
 		part,
 		parts: post.parts?.length ? post.parts : [{ no: part.no, title: part.title }],
 		part_count: post.part_count || post.parts?.length || 1
 	};
+}
+
+/** The blog categories, in tab order. */
+export const CATEGORIES: readonly PostCategory[] = ['tech', 'life'];
+
+const CATEGORY_LABELS: Record<PostCategory, string> = { tech: 'Tech', life: 'Life' };
+
+/** Display label of a category ("Tech", "Life"); an unknown value reads "Tech". */
+export function categoryLabel(c: string | null | undefined): string {
+	return CATEGORY_LABELS[parseCategory(c) || 'tech'];
+}
+
+/** A valid category, or '' for anything else (no filter). */
+export function parseCategory(c: string | null | undefined): PostCategory | '' {
+	return c === 'tech' || c === 'life' ? c : '';
+}
+
+/** The blog list filtered to one category. */
+export function categoryHref(c: PostCategory): string {
+	return `/blog?category=${c}`;
+}
+
+/** Chip colour of a category label. */
+export function categoryChip(c: string | null | undefined): string {
+	return parseCategory(c) === 'life' ? 'var(--spot-peach)' : 'var(--spot-sky)';
 }

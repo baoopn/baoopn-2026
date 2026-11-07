@@ -1,6 +1,6 @@
 {
 	"name": "Bao Nguyen",
-	"headline": "Full-stack Web Developer & UI Designer",
+	"headline": "Full-stack Web Developer",
 	"location": "",
 	"email": "me@baoopn.com",
 	"avatar_url": "/Bao_photo.jpg",
@@ -21,7 +21,7 @@
 	],
 	"experience": [],
 	"seo": {
-		"title": "Bao Nguyen | Full-stack Web Developer & UI Designer",
+		"title": "Bao Nguyen | Full-stack Web Developer",
 		"description": "Bao Nguyen is a full-stack web and app developer building responsive interfaces and robust backends with React, Next.js and Node.js.",
 		"og_image": "https://cdn.baoopn.com/data/img/Bao_cover.jpg"
 	}

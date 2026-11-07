@@ -5,25 +5,47 @@
 	import Seo from '#lib/site/components/Seo.svelte';
 	import PostItem from '#lib/site/components/PostItem.svelte';
 	import { pad2 } from '#lib/site/format.js';
+	import { CATEGORIES, categoryLabel } from '#lib/site/post.js';
+	import type { PostCategory } from '#lib/api/types.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
-	function href(next: { tag?: string; page?: number }): string {
+	function href(next: { category?: PostCategory | ''; tag?: string; page?: number }): string {
 		const q = new URLSearchParams();
+		const category = next.category ?? data.category;
 		const tag = next.tag ?? data.tag;
+		if (category) q.set('category', category);
 		if (tag) q.set('tag', tag);
 		if (next.page && next.page > 1) q.set('page', String(next.page));
 		const s = q.toString();
 		return s ? `/blog?${s}` : '/blog';
 	}
 
+	const tabs = $derived([
+		{ id: '' as const, label: 'All' },
+		...CATEGORIES.map((c) => ({ id: c, label: categoryLabel(c) }))
+	]);
+	const catLabel = $derived(data.category ? categoryLabel(data.category) : '');
 	const heading = $derived(data.tag ? `Tagged #${data.tag}` : 'Blog');
+	const seoTitle = $derived(
+		[data.tag ? heading : '', catLabel ? `${catLabel} posts` : ''].filter(Boolean).join(' · ') || 'Blog'
+	);
+	const emptyText = $derived(
+		data.tag
+			? 'No posts match this filter.'
+			: catLabel
+				? `No ${catLabel.toLowerCase()} posts yet. Check back soon.`
+				: 'No posts yet. Check back soon.'
+	);
 </script>
 
 <Seo
-	title={data.tag ? heading : 'Blog'}
-	description="Notes on building software: case studies, how-tos and lessons from Bao Nguyen's projects."
+	title={seoTitle}
+	description={data.category === 'life'
+		? "Life posts: notes from Bao Nguyen's life outside of code."
+		: "Notes on building software: case studies, how-tos and lessons from Bao Nguyen's projects."}
+	path={data.category ? `/blog?category=${data.category}` : '/blog'}
 	noindex={data.page > 1 && !data.posts.length}
 />
 
@@ -35,7 +57,11 @@
 				{heading}
 			</h1>
 			{#if data.tag}
-				<a href="/blog" class="link mt-2 inline-flex min-h-11 items-center text-ink-soft">Clear filter</a>
+				<a href={href({ tag: '', page: 1 })} class="link mt-2 inline-flex min-h-11 items-center text-ink-soft">
+					Clear filter
+				</a>
+			{:else if data.category === 'life'}
+				<p class="mt-3 max-w-2xl text-lg text-ink-soft">Life outside of code: places, people and small things.</p>
 			{:else}
 				<p class="mt-3 max-w-2xl text-lg text-ink-soft">
 					Case studies, how-tos and things learned the hard way.
@@ -45,14 +71,25 @@
 		<a href="/rss.xml" class="btn btn-secondary"><Rss class="size-4" aria-hidden="true" /> RSS</a>
 	</header>
 
+	<nav aria-label="Categories" class="mt-4 flex flex-wrap gap-1.5">
+		{#each tabs as t (t.id)}
+			{@const on = data.category === t.id}
+			<a
+				href={href({ category: t.id, tag: '', page: 1 })}
+				class="tab label"
+				aria-current={on ? 'page' : undefined}
+			>
+				{t.label}
+			</a>
+		{/each}
+	</nav>
+
 	<div class="grid gap-10 pt-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
 		<section aria-label="Posts" class="min-w-0">
 			{#if data.posts.length === 0}
 				<div class="py-14">
-					<p class="text-lg text-ink-soft">
-						{data.tag ? 'No posts match this filter.' : 'No posts yet. Check back soon.'}
-					</p>
-					{#if data.tag || data.page > 1}
+					<p class="text-lg text-ink-soft">{emptyText}</p>
+					{#if data.tag || data.category || data.page > 1}
 						<a href="/blog" class="btn btn-secondary mt-4">See all posts</a>
 					{/if}
 				</div>
@@ -109,6 +146,23 @@
 </div>
 
 <style>
+	.tab {
+		display: inline-flex;
+		align-items: center;
+		min-height: 2.75rem;
+		padding: 0 1rem;
+		border-radius: 999px;
+		border: 1px solid var(--rule-strong);
+		transition: background-color 160ms ease-out;
+	}
+	.tab:hover {
+		background: var(--paper-2);
+	}
+	.tab[aria-current='page'] {
+		background: var(--spot-select);
+		border-color: var(--on-spot);
+		color: var(--on-spot);
+	}
 	.tag {
 		display: flex;
 		align-items: center;

@@ -13,9 +13,9 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/profile` | – | `Profile` |
 | GET | `/projects` | `featured=1` (optional) | `ProjectSummary[]` (visible only, ordered) |
 | GET | `/projects/{slug}` | – | `ProjectDetail` (404 if hidden) |
-| GET | `/posts` | `tag`, `q` (title, excerpt and part text), `page` (1+), `limit` (1–50, default 10) | `PostSummary[]` + `meta` (one entry per post) |
+| GET | `/posts` | `category` (`tech` or `life`; none = all, anything else 400), `tag`, `q` (title, excerpt and part text), `page` (1+), `limit` (1–50, default 10) | `PostSummary[]` + `meta` (one entry per post) |
 | GET | `/posts/{slug}` | `part` (1+, default 1) | `PostDetail` with the requested part (published and `published_at <= now` only; 404 if the part does not exist) |
-| GET | `/tags` | – | `TagCount[]` |
+| GET | `/tags` | `category` (`tech` or `life`; none = all) | `TagCount[]` (visible posts of that category) |
 | POST | `/contact` | `ContactInput` | `201 { ok: true }`; 422 `validation` with message; 429 `rate_limited` (5/hour/IP) |
 | POST | `/events` | `BeaconEvent` (text/plain or JSON, max 2 KB) | `202` empty |
 | GET | `/listening/now-playing` | – | `NowPlaying \| null` (cached 5 s) |
@@ -41,8 +41,8 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | DELETE | `/projects/{id}` | – | `204` (a synced repo comes back hidden on next sync unless archived) |
 | POST | `/projects/sync` | – | `SyncResult` (pull repos of `GITHUB_USER`; new ones are hidden) |
 | POST | `/projects/reorder` | `{ ids: number[] }` | `204` (sort_order = index) |
-| GET | `/posts` | `state`, `q` | `AdminPost[]` |
-| POST | `/posts` | `PostInput` | `AdminPost` (409 `slug_taken`) |
+| GET | `/posts` | `state`, `category`, `q` | `AdminPost[]` |
+| POST | `/posts` | `PostInput` (`category` missing or empty = `tech`; other values 422) | `AdminPost` (409 `slug_taken`) |
 | GET | `/posts/{id}` | – | `AdminPost` |
 | PUT | `/posts/{id}` | `PostInput` | `AdminPost` |
 | DELETE | `/posts/{id}` | – | `204` |

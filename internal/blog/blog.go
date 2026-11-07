@@ -52,6 +52,7 @@ type PostInput struct {
 	Title       string      `json:"title"`
 	Excerpt     string      `json:"excerpt"`
 	CoverURL    string      `json:"cover_url"`
+	Category    string      `json:"category"` // "tech" (default when empty) or "life"
 	Tags        []string    `json:"tags"`
 	Status      string      `json:"status"`
 	PublishedAt *time.Time  `json:"published_at"`
@@ -64,6 +65,7 @@ type PostSummary struct {
 	Title          string    `json:"title"`
 	Excerpt        string    `json:"excerpt"`
 	CoverURL       string    `json:"cover_url"`
+	Category       string    `json:"category"`
 	Tags           []string  `json:"tags"`
 	PartCount      int       `json:"part_count"`
 	PublishedAt    time.Time `json:"published_at"`
@@ -110,6 +112,7 @@ type AdminPost struct {
 	Title          string          `json:"title"`
 	Excerpt        string          `json:"excerpt"`
 	CoverURL       string          `json:"cover_url"`
+	Category       string          `json:"category"`
 	Tags           []string        `json:"tags"`
 	Status         string          `json:"status"`
 	State          string          `json:"state"`
@@ -129,6 +132,15 @@ type TagCount struct {
 
 // MaxParts is the most parts a post may have.
 const MaxParts = 20
+
+// Categories keep tech posts and life posts apart.
+const (
+	CategoryTech = "tech"
+	CategoryLife = "life"
+)
+
+// ValidCategory reports whether c is a known category.
+func ValidCategory(c string) bool { return c == CategoryTech || c == CategoryLife }
 
 var (
 	// ErrSlugTaken is returned when an explicit slug is already in use.
@@ -237,6 +249,12 @@ func validate(in *PostInput, now time.Time) (generated bool, err error) {
 	}
 	if in.Tags, err = normalizeTags(in.Tags); err != nil {
 		return false, err
+	}
+	in.Category = strings.TrimSpace(in.Category)
+	if in.Category == "" {
+		in.Category = CategoryTech
+	} else if !ValidCategory(in.Category) {
+		return false, invalid(`category must be "tech" or "life"`)
 	}
 	switch in.Status {
 	case "draft":

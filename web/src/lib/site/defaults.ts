@@ -3,7 +3,7 @@ import type { Profile } from '#lib/api/types.js';
 /** Used when the API is down or returns an incomplete profile. */
 export const DEFAULT_PROFILE: Profile = {
 	name: 'Bao Nguyen',
-	headline: 'Full-stack developer',
+	headline: 'Full-stack Web Developer',
 	location: '',
 	email: 'me@baoopn.com',
 	avatar_url: '',

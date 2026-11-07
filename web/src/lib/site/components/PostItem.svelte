@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { dateShort, count } from '#lib/site/format.js';
+	import { categoryChip, categoryLabel } from '#lib/site/post.js';
 	import type { PostSummary } from '#lib/api/types.js';
 
 	let { post, compact = false }: { post: PostSummary; compact?: boolean } = $props();
@@ -11,11 +12,12 @@
 		<span>{post.reading_minutes || 1} min read</span>
 	</div>
 	<div class="min-w-0">
-		{#if post.part_count > 1}
-			<p class="mb-1.5">
+		<p class="mb-1.5 flex flex-wrap items-center gap-1.5">
+			<span class="chip label" style:--chip={categoryChip(post.category)}>{categoryLabel(post.category)}</span>
+			{#if post.part_count > 1}
 				<span class="chip label [--chip:var(--spot-lilac)]">{post.part_count} parts</span>
-			</p>
-		{/if}
+			{/if}
+		</p>
 		<h3 class={['font-display font-semibold tracking-[-0.015em] text-balance', compact ? 'text-xl' : 'text-2xl']}>
 			<a href="/blog/{post.slug}" class="link">{post.title}</a>
 		</h3>

@@ -130,6 +130,23 @@ func TestValidatePublishedDefaultsAndLimits(t *testing.T) {
 	}
 }
 
+func TestValidateCategory(t *testing.T) {
+	now := time.Now()
+	for in, want := range map[string]string{"": "tech", " ": "tech", "tech": "tech", "life": "life", " life ": "life"} {
+		p := PostInput{Title: "t", Status: "draft", Category: in, Parts: []PartInput{{}}}
+		if _, err := validate(&p, now); err != nil || p.Category != want {
+			t.Errorf("category %q: %v %q", in, err, p.Category)
+		}
+	}
+	for _, bad := range []string{"Tech", "food", "all"} {
+		p := PostInput{Title: "t", Status: "draft", Category: bad, Parts: []PartInput{{}}}
+		var ve *ValidationError
+		if _, err := validate(&p, now); !errors.As(err, &ve) {
+			t.Errorf("category %q accepted: %v", bad, err)
+		}
+	}
+}
+
 func TestEscapeLike(t *testing.T) {
 	if got := escapeLike(`50%_off\`); got != `50\%\_off\\` {
 		t.Fatalf("escape %q", got)

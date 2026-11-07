@@ -3,6 +3,7 @@
 		ChartLine,
 		ExternalLink,
 		FolderGit2,
+		Headphones,
 		Inbox,
 		LayoutDashboard,
 		NotebookPen,
@@ -12,6 +13,7 @@
 	} from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { MediaQuery } from 'svelte/reactivity';
+	import { LISTENING_ADMIN_URL } from '#lib/links.js';
 	import BrandMark from '../BrandMark.svelte';
 	import { auth } from '../../auth.svelte';
 	import { inbox } from '../../inbox.svelte';
@@ -97,6 +99,20 @@
 					</a>
 				</li>
 			{/each}
+			<li class="mt-2 border-t border-rule pt-2">
+				<a
+					href={LISTENING_ADMIN_URL}
+					target="_blank"
+					rel="noopener"
+					onclick={() => (open = false)}
+					class="flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink-soft transition-colors duration-150 hover:bg-paper-3 hover:text-ink"
+				>
+					<Headphones class="size-[1.125rem] shrink-0" aria-hidden="true" />
+					<span class="flex-1">Listening admin</span>
+					<ExternalLink class="size-3.5 shrink-0" aria-hidden="true" />
+					<span class="sr-only">(opens in a new tab)</span>
+				</a>
+			</li>
 		</ul>
 	</nav>
 
