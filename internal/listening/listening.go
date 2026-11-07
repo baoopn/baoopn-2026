@@ -1,6 +1,7 @@
 // Package listening proxies the spotify-tracker public API (now playing,
-// recent plays, top artists), trimmed to the types.ts shapes and cached, and
-// relays the upstream now-playing SSE stream through one shared connection.
+// recent plays, top artists, top playlists), trimmed to the types.ts shapes and
+// cached, and relays the upstream now-playing SSE stream through one shared
+// connection.
 package listening
 
 import (
@@ -122,11 +123,15 @@ func (m *Module) Public(r chi.Router) {
 		empty := func(w http.ResponseWriter, _ *http.Request) { httpapi.JSON(w, http.StatusOK, []any{}) }
 		r.Get("/listening/recent", empty)
 		r.Get("/listening/top-artists", empty)
+		r.Get("/listening/top-playlists", func(w http.ResponseWriter, _ *http.Request) {
+			httpapi.JSON(w, http.StatusOK, emptyTopPlaylists())
+		})
 		return
 	}
 	r.Get("/listening/now-playing", m.nowPlaying)
 	r.Get("/listening/recent", m.recent)
 	r.Get("/listening/top-artists", m.topArtists)
+	r.Get("/listening/top-playlists", m.topPlaylists)
 }
 
 // Admin implements httpapi.Module (no admin routes).
