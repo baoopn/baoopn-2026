@@ -1,0 +1,65 @@
+{
+  "slug": "at-creations",
+  "title": "Rebuilding AT Creations: a bilingual catalogue in Go and SvelteKit",
+  "excerpt": "I rewrote a bilingual (English/Vietnamese) shop catalogue from Express to a Go API, a SvelteKit storefront and a SvelteKit admin, with security fixed by design.",
+  "tags": [
+    "go",
+    "sveltekit",
+    "mongodb",
+    "redis",
+    "clerk",
+    "security"
+  ],
+  "parts": [
+    {
+      "title": "Why I rewrote the store",
+      "file": "part-1.md"
+    },
+    {
+      "title": "The Go API: chi, MongoDB, Redis and an OpenAPI contract",
+      "file": "part-2.md"
+    },
+    {
+      "title": "Auth, security and image uploads",
+      "file": "part-3.md"
+    },
+    {
+      "title": "The bilingual SvelteKit storefront",
+      "file": "part-4.md"
+    },
+    {
+      "title": "The admin dashboard and the data migration",
+      "file": "part-5.md"
+    },
+    {
+      "title": "Deploying, and what I learned",
+      "file": "part-6.md"
+    }
+  ],
+  "screenshots": [
+    {
+      "id": "storefront-home-en",
+      "url": "https://atcreations.ca/en",
+      "what": "Storefront home page in English, desktop 1440x900, light mode, top of page (header and hero)",
+      "caption": "The storefront home page in English."
+    },
+    {
+      "id": "storefront-products-vi",
+      "url": "https://atcreations.ca/vi/products",
+      "what": "Product list in Vietnamese, desktop 1440x900, light mode, scrolled so the filters and the first rows of product cards show",
+      "caption": "The same catalogue, served under /vi."
+    },
+    {
+      "id": "storefront-search-vi",
+      "url": "https://atcreations.ca/vi/search?q=gom",
+      "what": "Vietnamese search results for 'gom' typed without accents, desktop 1440x900, light mode, top of results",
+      "caption": "Accent-folded search: 'gom' finds products named with 'Gốm'."
+    },
+    {
+      "id": "storefront-product-en",
+      "url": "https://atcreations.ca/en/products/handmade-wool-crochet-cactus",
+      "what": "A product page in English, desktop 1440x900, light mode, top of page showing the gallery, name and price",
+      "caption": "A product page with its image gallery."
+    }
+  ]
+}
