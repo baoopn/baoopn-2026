@@ -11,6 +11,8 @@ require (
 	github.com/caarlos0/env/v11 v11.4.2
 	github.com/clerk/clerk-sdk-go/v2 v2.8.0
 	github.com/fergusstrange/embedded-postgres v1.34.0
+	github.com/gen2brain/heic v0.7.2
+	github.com/gen2brain/webp v0.6.4
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-chi/httprate v0.16.1
 	github.com/jackc/pgx/v5 v5.12.0
@@ -18,6 +20,10 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/yuin/goldmark v1.8.7
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
+	golang.org/x/image v0.47.0
+	golang.org/x/sync v0.24.0
+	google.golang.org/grpc v1.85.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -34,6 +40,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
@@ -55,11 +62,12 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sethvargo/go-retry v0.5.0 // indirect
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.61.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect
 )

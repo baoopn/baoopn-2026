@@ -3,10 +3,14 @@
 // records them in the media table (deduplicated by content hash) and serves
 // them at /media/<filename> (from disk, streamed from the bucket, or as a
 // redirect to the bucket's public domain).
+//
+// Raster uploads are not stored as sent: the original is kept privately in
+// MEDIA_DIR/originals and a job is queued (queue.go) for the media worker,
+// which converts it to WebP over gRPC. SVG, PDF, AVIF and animated GIF/WebP
+// files are stored as they are.
 package media
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -15,16 +19,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/baoopn/baoopn-2026/internal/imagemeta"
 	"github.com/baoopn/baoopn-2026/internal/logging"
 )
 
@@ -35,8 +38,25 @@ type Deps struct {
 	Dir      string
 	MaxBytes int64
 	// S3 moves storage to a bucket when S3.Enabled(); Dir then only holds
-	// upload temp files and the files still to migrate.
+	// upload temp files, the private originals and the files still to migrate.
 	S3 S3Config
+
+	// MaxPixels rejects raster uploads with more pixels (decompression bombs).
+	MaxPixels int64
+	// UploadWait is how long POST /media waits for a queued conversion.
+	UploadWait time.Duration
+	// JobLease is how long a worker owns a leased job.
+	JobLease time.Duration
+	// MaxAttempts per job before it falls back or fails.
+	MaxAttempts int
+	// FallbackAfter: a conversion job not leased for this long is published
+	// as its (stripped) original, or failed when browsers cannot show it.
+	FallbackAfter time.Duration
+	// FailedRetention keeps a failed job's original for a retry.
+	FailedRetention time.Duration
+	// OnRename is called when a fallback publishes a file under a new name
+	// (the WebP name changes extension), so stored references can follow.
+	OnRename func(ctx context.Context, oldURL, newURL string) error
 }
 
 // Store saves, lists, deletes and serves media files.
@@ -48,7 +68,22 @@ type Store struct {
 	files    backend
 	s3       *s3Backend // the bucket when files is one; nil: local disk
 	public   string     // bucket's public origin; "" = served by the API
+
+	maxPixels       int64
+	uploadWait      time.Duration
+	jobLease        time.Duration
+	maxAttempts     int
+	fallbackAfter   time.Duration
+	failedRetention time.Duration
+	onRename        func(ctx context.Context, oldURL, newURL string) error
 }
+
+// Media statuses.
+const (
+	StatusReady      = "ready"
+	StatusProcessing = "processing"
+	StatusFailed     = "failed"
+)
 
 // Media is one stored file (types.ts Media).
 type Media struct {
@@ -58,17 +93,39 @@ type Media struct {
 	Original    string    `json:"original"`
 	ContentType string    `json:"content_type"`
 	SizeBytes   int64     `json:"size_bytes"`
+	Status      string    `json:"status"`
+	Error       string    `json:"error"`
+	Converted   bool      `json:"converted"`
 	CreatedAt   time.Time `json:"created_at"`
 }
+
+// Crop is an optional upload crop in original pixels, after EXIF orientation.
+type Crop struct{ X, Y, W, H int }
 
 var (
 	// ErrTooLarge is returned when the file exceeds MaxBytes.
 	ErrTooLarge = errors.New("media: file too large")
 	// ErrUnsupported is returned when the content type is not allowed.
 	ErrUnsupported = errors.New("media: unsupported file type")
+	// ErrUndecodable is returned when an image's header cannot be read.
+	ErrUndecodable = errors.New("media: the image could not be decoded")
+	// ErrTooManyPixels is the decompression-bomb guard.
+	ErrTooManyPixels = errors.New("media: image dimensions too large")
+	// ErrBadCrop is returned when the crop does not fit the image.
+	ErrBadCrop = errors.New("media: crop rectangle is outside the image")
+	// ErrOriginalsUnavailable means the private originals store is not writable.
+	ErrOriginalsUnavailable = errors.New("media: originals store unavailable")
 )
 
-const defaultMaxBytes = 10 << 20
+const (
+	defaultMaxBytes        = 10 << 20
+	defaultMaxPixels       = 50_000_000
+	defaultUploadWait      = 10 * time.Second
+	defaultJobLease        = 5 * time.Minute
+	defaultMaxAttempts     = 5
+	defaultFallbackAfter   = 2 * time.Minute
+	defaultFailedRetention = 24 * time.Hour
+)
 
 // New creates the media directory (0o755) and returns the store.
 func New(d Deps) (*Store, error) {
@@ -84,13 +141,30 @@ func New(d Deps) (*Store, error) {
 	if d.MaxBytes <= 0 {
 		d.MaxBytes = defaultMaxBytes
 	}
-	s := &Store{db: d.DB, log: d.Log, dir: d.Dir, maxBytes: d.MaxBytes, files: localDisk{d.Dir}}
+	s := &Store{db: d.DB, log: d.Log, dir: d.Dir, maxBytes: d.MaxBytes, files: localDisk{d.Dir},
+		maxPixels: orDefault(d.MaxPixels, defaultMaxPixels), uploadWait: d.UploadWait,
+		jobLease: orDefault(d.JobLease, defaultJobLease), maxAttempts: orDefault(d.MaxAttempts, defaultMaxAttempts),
+		fallbackAfter:   orDefault(d.FallbackAfter, defaultFallbackAfter),
+		failedRetention: orDefault(d.FailedRetention, defaultFailedRetention), onRename: d.OnRename}
+	if s.uploadWait == 0 {
+		s.uploadWait = defaultUploadWait
+	}
+	if s.uploadWait < 0 { // negative: do not wait (tests)
+		s.uploadWait = 0
+	}
 	if d.S3.Enabled() {
 		s.s3 = newS3Backend(d.S3)
 		s.files = s.s3
 		s.public = strings.TrimRight(d.S3.PublicURL, "/")
 	}
 	return s, nil
+}
+
+func orDefault[T int | int64 | time.Duration](v, def T) T {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // UsesBucket reports whether files are stored in the S3 bucket.
@@ -105,75 +179,6 @@ func (s *Store) URL(filename string) string {
 	return "/media/" + filename
 }
 
-// extByType maps the allowed content types to file extensions.
-var extByType = map[string]string{
-	"image/png":       ".png",
-	"image/jpeg":      ".jpg",
-	"image/gif":       ".gif",
-	"image/webp":      ".webp",
-	"image/avif":      ".avif",
-	"application/pdf": ".pdf",
-	"image/svg+xml":   ".svg",
-}
-
-// typeByExt is the inverse of extByType, used when serving.
-var typeByExt = func() map[string]string {
-	m := make(map[string]string, len(extByType))
-	for t, e := range extByType {
-		m[e] = t
-	}
-	return m
-}()
-
-const sniffLen = 4096
-
-// sniff detects an allowed content type from the first bytes of a file.
-func sniff(head []byte, original string) (ctype, ext string, ok bool) {
-	ct := http.DetectContentType(head)
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = ct[:i]
-	}
-	ct = strings.TrimSpace(ct)
-	if ct != "image/svg+xml" {
-		if e, found := extByType[ct]; found {
-			return ct, e, true
-		}
-	}
-	if len(head) >= 12 {
-		if b := string(head[4:12]); b == "ftypavif" || b == "ftypavis" {
-			return "image/avif", ".avif", true
-		}
-	}
-	if (ct == "text/xml" || ct == "text/plain") && strings.HasSuffix(strings.ToLower(original), ".svg") {
-		h := head
-		if len(h) > sniffLen {
-			h = h[:sniffLen]
-		}
-		if bytes.Contains(bytes.ToLower(h), []byte("<svg")) {
-			return "image/svg+xml", ".svg", true
-		}
-	}
-	return "", "", false
-}
-
-// cleanOriginal keeps the base name, without control characters, ≤ 200 runes.
-func cleanOriginal(name string) string {
-	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
-	if name == "." || name == "/" {
-		return ""
-	}
-	name = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, name)
-	if r := []rune(name); len(r) > 200 {
-		name = string(r[:200])
-	}
-	return strings.TrimSpace(name)
-}
-
 // headWriter keeps the first sniffLen bytes written to it.
 type headWriter struct{ buf []byte }
 
@@ -184,9 +189,16 @@ func (h *headWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Save stores the contents of r. An identical file (same sha256) already in
-// the table is reused instead of written again.
+// Save stores the contents of r without a crop.
 func (s *Store) Save(ctx context.Context, original string, r io.Reader) (Media, error) {
+	return s.SaveCrop(ctx, original, r, nil)
+}
+
+// SaveCrop stores the contents of r. An identical file (same sha256, or the
+// same uncropped original) already in the table is reused instead. A raster
+// image is queued for WebP conversion and returned as processing; crop
+// applies to those only.
+func (s *Store) SaveCrop(ctx context.Context, original string, r io.Reader, crop *Crop) (Media, error) {
 	tmp, err := os.CreateTemp(s.dir, ".up-*")
 	if err != nil {
 		return Media{}, fmt.Errorf("media: temp file: %w", err)
@@ -209,6 +221,9 @@ func (s *Store) Save(ctx context.Context, original string, r io.Reader) (Media, 
 	if n > s.maxBytes {
 		return Media{}, ErrTooLarge
 	}
+	if err := tmp.Close(); err != nil {
+		return Media{}, fmt.Errorf("media: close: %w", err)
+	}
 	original = cleanOriginal(original)
 	ctype, ext, ok := sniff(head.buf, original)
 	if !ok {
@@ -216,31 +231,63 @@ func (s *Store) Save(ctx context.Context, original string, r io.Reader) (Media, 
 	}
 	sum := hex.EncodeToString(hash.Sum(nil))
 
-	existing, err := s.bySHA(ctx, sum)
-	if err == nil {
-		return existing, nil
+	raster := imagemeta.Raster(ctype)
+	var info imagemeta.Info
+	if raster {
+		data, err := os.ReadFile(tmpName)
+		if err != nil {
+			return Media{}, fmt.Errorf("media: read upload: %w", err)
+		}
+		if info, err = imagemeta.Probe(data, ctype); err != nil {
+			return Media{}, ErrUndecodable
+		}
+		if info.Animated {
+			raster = false // animated GIF/WebP: stored as they are
+		} else {
+			if info.SizeKnown && info.Pixels() > s.maxPixels {
+				return Media{}, ErrTooManyPixels
+			}
+			if crop != nil && info.SizeKnown {
+				w, h := info.Oriented()
+				if !cropFits(*crop, w, h) {
+					return Media{}, ErrBadCrop
+				}
+			}
+		}
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Media{}, fmt.Errorf("media: dedupe lookup: %w", err)
+	if !raster {
+		crop = nil
+	}
+	if crop == nil {
+		existing, err := s.bySHA(ctx, sum)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return Media{}, fmt.Errorf("media: dedupe lookup: %w", err)
+		}
 	}
 
-	if err := tmp.Close(); err != nil {
-		return Media{}, fmt.Errorf("media: close: %w", err)
+	stem := randomStem()
+	if raster {
+		m, err := s.enqueue(ctx, stem, original, ctype, sum, n, info.Orientation, crop, tmpName)
+		if err == nil {
+			keep = true // moved into originals/
+		}
+		return m, err
 	}
-	rnd := make([]byte, 12)
-	_, _ = rand.Read(rnd)
-	filename := hex.EncodeToString(rnd) + ext
+
+	filename := stem + ext
 	if err := s.files.put(ctx, filename, ctype, tmpName, n); err != nil {
 		return Media{}, err
 	}
 	if s.s3 == nil {
 		keep = true // renamed into place
 	}
-
-	m := Media{Filename: filename, Original: original, ContentType: ctype, SizeBytes: n}
+	m := Media{Filename: filename, Original: original, ContentType: ctype, SizeBytes: n, Status: StatusReady}
 	err = s.db.QueryRow(ctx, `
-		INSERT INTO media (filename, original, content_type, size_bytes, sha256)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
+		INSERT INTO media (filename, original, content_type, size_bytes, sha256, original_sha256)
+		VALUES ($1, $2, $3, $4, $5, $5) RETURNING id, created_at`,
 		filename, original, ctype, n, sum).Scan(&m.ID, &m.CreatedAt)
 	if err != nil {
 		s.removeFile(ctx, filename)
@@ -249,12 +296,42 @@ func (s *Store) Save(ctx context.Context, original string, r io.Reader) (Media, 
 	return s.finish(m), nil
 }
 
-func (s *Store) bySHA(ctx context.Context, sum string) (Media, error) {
+func cropFits(c Crop, w, h int) bool {
+	return c.X >= 0 && c.Y >= 0 && c.W >= 1 && c.H >= 1 && c.X <= w-c.W && c.Y <= h-c.H
+}
+
+func randomStem() string {
+	rnd := make([]byte, 12)
+	_, _ = rand.Read(rnd)
+	return hex.EncodeToString(rnd)
+}
+
+// mediaCols are the columns scanMedia reads, in order.
+const mediaCols = `id, filename, original, content_type, size_bytes, status, error, converted, created_at`
+
+type scanner interface{ Scan(dest ...any) error }
+
+func scanMedia(row scanner, extra ...any) (Media, error) {
 	var m Media
-	err := s.db.QueryRow(ctx, `
-		SELECT id, filename, original, content_type, size_bytes, created_at
-		FROM media WHERE sha256 = $1 LIMIT 1`, sum).
-		Scan(&m.ID, &m.Filename, &m.Original, &m.ContentType, &m.SizeBytes, &m.CreatedAt)
+	err := row.Scan(append([]any{&m.ID, &m.Filename, &m.Original, &m.ContentType, &m.SizeBytes,
+		&m.Status, &m.Error, &m.Converted, &m.CreatedAt}, extra...)...)
+	return m, err
+}
+
+// bySHA finds a non-failed file whose stored bytes or uncropped original
+// have this hash.
+func (s *Store) bySHA(ctx context.Context, sum string) (Media, error) {
+	m, err := scanMedia(s.db.QueryRow(ctx, `SELECT `+mediaCols+` FROM media
+		WHERE (sha256 = $1 OR original_sha256 = $1) AND status <> 'failed' ORDER BY id LIMIT 1`, sum))
+	if err != nil {
+		return Media{}, err
+	}
+	return s.finish(m), nil
+}
+
+// Get returns one media row; pgx.ErrNoRows when it does not exist.
+func (s *Store) Get(ctx context.Context, id int64) (Media, error) {
+	m, err := scanMedia(s.db.QueryRow(ctx, `SELECT `+mediaCols+` FROM media WHERE id = $1`, id))
 	if err != nil {
 		return Media{}, err
 	}
@@ -270,7 +347,7 @@ func (s *Store) finish(m Media) Media {
 // List returns one page of media, newest first, and the total count.
 func (s *Store) List(ctx context.Context, page, limit int) ([]Media, int64, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, filename, original, content_type, size_bytes, created_at, count(*) OVER ()
+		SELECT `+mediaCols+`, count(*) OVER ()
 		FROM media ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`,
 		limit, (page-1)*limit)
 	if err != nil {
@@ -280,8 +357,8 @@ func (s *Store) List(ctx context.Context, page, limit int) ([]Media, int64, erro
 	out := []Media{}
 	var total int64
 	for rows.Next() {
-		var m Media
-		if err := rows.Scan(&m.ID, &m.Filename, &m.Original, &m.ContentType, &m.SizeBytes, &m.CreatedAt, &total); err != nil {
+		m, err := scanMedia(rows, &total)
+		if err != nil {
 			return nil, 0, err
 		}
 		out = append(out, s.finish(m))
@@ -298,7 +375,8 @@ func (s *Store) List(ctx context.Context, page, limit int) ([]Media, int64, erro
 	return out, total, nil
 }
 
-// Delete removes the row and its file. It reports false when no row matched.
+// Delete removes the row (and its job), its file and any kept original. It
+// reports false when no row matched.
 func (s *Store) Delete(ctx context.Context, id int64) (bool, error) {
 	var filename string
 	err := s.db.QueryRow(ctx, `DELETE FROM media WHERE id = $1 RETURNING filename`, id).Scan(&filename)
@@ -309,6 +387,7 @@ func (s *Store) Delete(ctx context.Context, id int64) (bool, error) {
 		return false, err
 	}
 	s.removeFile(ctx, filename)
+	s.removeOriginal(stemOf(filename))
 	return true, nil
 }
 
@@ -351,3 +430,7 @@ func (s *Store) removeFile(ctx context.Context, filename string) {
 		}
 	}
 }
+
+// CreateTemp creates a temp file in MEDIA_DIR (same filesystem as the
+// stored files, so local storage can rename it into place).
+func (s *Store) CreateTemp(pattern string) (*os.File, error) { return os.CreateTemp(s.dir, pattern) }

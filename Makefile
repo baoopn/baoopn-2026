@@ -23,13 +23,22 @@ deps: ## Start local Postgres and RustFS (dev media bucket)
 run-api: ## Run the Go API on :8080
 	$(GO) run ./cmd/api
 
+.PHONY: run-mediaworker
+run-mediaworker: ## Run the WebP media worker against the local API (needs INTERNAL_API_TOKEN)
+	$(GO) run -tags nodynamic ./cmd/mediaworker
+
+.PHONY: proto
+proto: ## Lint and regenerate gRPC code (buf, protoc-gen-go, protoc-gen-go-grpc)
+	buf lint
+	buf generate
+
 .PHONY: web-dev
 web-dev: ## Run the SvelteKit dev server on :5173 (proxies /api to :8080)
 	pnpm --dir web dev
 
 .PHONY: build
 build: ## Build the API binary and the web app
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/ ./cmd/...
+	CGO_ENABLED=0 $(GO) build -trimpath -tags nodynamic -ldflags '$(LDFLAGS)' -o bin/ ./cmd/...
 	pnpm --dir web install --frozen-lockfile
 	pnpm --dir web build
 

@@ -212,21 +212,37 @@ func (c *harness) upload(name string, content []byte) *httptest.ResponseRecorder
 func TestContractMedia(t *testing.T) {
 	c := newHarness(t)
 
+	// A raster image is queued for WebP conversion (no worker here: 202).
 	w := c.upload("cover.png", pngBytes())
-	if w.Code != 201 {
+	if w.Code != 202 {
 		t.Fatalf("upload png = %d %s", w.Code, w.Body)
+	}
+	img := decodeData(t, w, mediaShape)
+	if u, _ := field(img, "url").(string); !strings.HasSuffix(u, ".webp") || field(img, "status") != "processing" ||
+		field(img, "content_type") != "image/webp" {
+		t.Errorf("queued media = %v", img)
+	}
+	c.ok("GET", "/api/admin/media/"+idOf(img), nil, 200, mediaShape, false)
+	c.fail("GET", "/api/admin/media/999999", nil, 404, "not_found")
+	c.fail("POST", "/api/admin/media/"+idOf(img)+"/retry", nil, 409, "conflict")
+
+	// A PDF is stored as is and ready at once.
+	w = c.upload("doc.pdf", []byte("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj\n"))
+	if w.Code != 201 {
+		t.Fatalf("upload pdf = %d %s", w.Code, w.Body)
 	}
 	m := decodeData(t, w, mediaShape)
 	url, _ := field(m, "url").(string)
-	if !strings.HasPrefix(url, "/media/") || field(m, "content_type") != "image/png" {
+	if !strings.HasPrefix(url, "/media/") || field(m, "content_type") != "application/pdf" ||
+		field(m, "status") != "ready" || field(m, "converted") != false {
 		t.Errorf("media = %v", m)
 	}
 	c.ok("GET", "/api/admin/media?page=1&limit=10", nil, 200, arr(mediaShape), true)
 
 	got := c.raw("GET", url, nil, nil)
-	if got.Code != 200 || got.Header().Get("Content-Type") != "image/png" ||
+	if got.Code != 200 || got.Header().Get("Content-Type") != "application/pdf" ||
 		got.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Errorf("serve png = %d %v", got.Code, got.Header())
+		t.Errorf("serve pdf = %d %v", got.Code, got.Header())
 	}
 
 	// HTML is rejected however it is named.

@@ -24,7 +24,7 @@ func (s *Store) MigrateToBucket(ctx context.Context) (MigrateStats, error) {
 	if s.s3 == nil {
 		return st, nil
 	}
-	rows, err := s.db.Query(ctx, `SELECT filename, content_type FROM media ORDER BY id`)
+	rows, err := s.db.Query(ctx, `SELECT filename, content_type FROM media WHERE status = 'ready' ORDER BY id`)
 	if err != nil {
 		return st, err
 	}

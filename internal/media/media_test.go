@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/baoopn/baoopn-2026/internal/testdb"
+	"github.com/baoopn/baoopn-2026/internal/testimg"
 )
 
 var (
@@ -161,7 +162,7 @@ func multipartBody(t *testing.T, name string, data []byte) (*bytes.Buffer, strin
 
 func TestUploadDedupeListDelete(t *testing.T) {
 	pool := testdb.New(t)
-	s, err := New(Deps{DB: pool, Log: slog.New(slog.DiscardHandler), Dir: t.TempDir(), MaxBytes: 1 << 10})
+	s, err := New(Deps{DB: pool, Log: slog.New(slog.DiscardHandler), Dir: t.TempDir(), MaxBytes: 1 << 10, UploadWait: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,16 +185,18 @@ func TestUploadDedupeListDelete(t *testing.T) {
 		return out.Data
 	}
 
-	rec := upload("pic.png", pngHead)
-	if rec.Code != http.StatusCreated {
+	pic := testimg.PNG(testimg.Halves(2, 2))
+	rec := upload("pic.png", pic)
+	if rec.Code != http.StatusAccepted {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body)
 	}
 	first := decode(rec)
 	if !fileRe.MatchString(first.Filename) || first.URL != "/media/"+first.Filename ||
-		first.ContentType != "image/png" || first.Original != "pic.png" {
+		first.ContentType != "image/webp" || first.Original != "pic.png" ||
+		first.Status != StatusProcessing || !strings.HasSuffix(first.Filename, ".webp") {
 		t.Fatalf("media %+v", first)
 	}
-	if rec := upload("again.png", pngHead); rec.Code != http.StatusCreated || decode(rec).ID != first.ID {
+	if rec := upload("again.png", pic); rec.Code != http.StatusAccepted || decode(rec).ID != first.ID {
 		t.Fatalf("dedupe: %d %s", rec.Code, rec.Body)
 	}
 	if rec := upload("x.html", []byte("<html><body>hi</body></html>")); rec.Code != http.StatusUnsupportedMediaType {
@@ -233,8 +236,8 @@ func TestUploadDedupeListDelete(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d", rec.Code)
 	}
-	if _, err := os.Stat(filepath.Join(s.dir, first.Filename)); !os.IsNotExist(err) {
-		t.Fatalf("file still there: %v", err)
+	if _, err := os.Stat(s.originalPath(stemOf(first.Filename))); !os.IsNotExist(err) {
+		t.Fatalf("original still there: %v", err)
 	}
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/media/"+itoa(first.ID), nil))

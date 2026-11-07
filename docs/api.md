@@ -48,7 +48,9 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | DELETE | `/posts/{id}` | – | `204` |
 | POST | `/posts/preview` | `{ markdown }` | `PreviewResult` |
 | GET | `/media` | `page`, `limit` | `Media[]` + `meta` |
-| POST | `/media` | multipart `file` (image/*, pdf; ≤ MAX_UPLOAD_MB) | `Media` |
+| POST | `/media` | multipart `file` (≤ MAX_UPLOAD_MB) plus optional `crop_x`, `crop_y`, `crop_w`, `crop_h` — see *Media uploads* | `201 Media` (ready) or `202 Media` (`processing`, or `failed`) |
+| GET | `/media/{id}` | – | `Media` (poll a `processing` upload; 404 `not_found`) |
+| POST | `/media/{id}/retry` | – | `202 Media` (`processing`); 409 `conflict` unless `failed`; 410 `gone` once the original was cleaned up (upload again) |
 | DELETE | `/media/{id}` | – | `204` |
 | GET | `/threads` | `status` (default `open`), `q` | `ThreadSummary[]` |
 | GET | `/threads/unread-count` | – | `{ count }` |
@@ -62,6 +64,49 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/settings` | – | `SiteSettings` |
 | PUT | `/settings` | `SiteSettings` | `SiteSettings` |
 | POST | `/settings/test-email` | – | `{ sent_to }` |
+
+### Media uploads
+
+- **Accepted:** JPEG, PNG, GIF, WebP, HEIC/HEIF, BMP, TIFF, AVIF, SVG, PDF (sniffed from the
+  bytes, not the name). Anything else: 415 `unsupported_type`; a raster image whose header
+  cannot be read: 415 `unsupported_type`. Over `MAX_UPLOAD_MB`, or more than
+  `MEDIA_MAX_PIXELS` pixels (checked from the header before decoding): 413 `too_large`.
+  Private originals store not writable: 503 `storage_unavailable`.
+- **Stored as is:** SVG, PDF, AVIF and animated GIF/WebP (`status: ready`, `converted: false`).
+- **Converted:** every other raster image is converted to WebP by the media worker
+  (`cmd/mediaworker`) through a queue:
+  - EXIF orientation applied, metadata stripped, longest side ≤ `MEDIA_MAX_DIMENSION`
+    (never upscaled), lossy WebP at `MEDIA_WEBP_QUALITY`.
+  - The new `Media` has its final `url` (`<random>.webp`) and `status: processing`. The
+    upload waits up to `MEDIA_UPLOAD_WAIT` (10 s) for the conversion: `201` when it is
+    `ready`, otherwise `202`. Then poll `GET /media/{id}`.
+  - The original is kept privately on the API's volume until the job finishes (never in the
+    public bucket).
+- **Crop:** optional form fields `crop_x`, `crop_y`, `crop_w`, `crop_h`.
+  - Integers in original image pixels, after EXIF orientation; all four or none, in any order
+    relative to `file`.
+  - The image is cropped before it is resized.
+  - Out-of-range values: 400 `bad_request`. For HEIC, whose header may not give the oriented
+    size, the bounds are checked by the worker, and a bad crop fails the conversion.
+  - Ignored for files stored as is.
+- **Fallbacks** (`Media.error` explains, `converted: false`):
+  - The worker cannot convert the file (permanent error, or `MEDIA_JOB_MAX_ATTEMPTS` retries
+    with backoff used up), or no worker took the job within `MEDIA_FALLBACK_AFTER`:
+    - JPEG, PNG, GIF and WebP originals are published with their metadata stripped (GPS,
+      EXIF other than the orientation, XMP, IPTC, text chunks). `status: ready`, e.g.
+      `error: "WebP conversion failed: …; saved the original"`. The URL then ends in the
+      original's extension; stored references to the `.webp` URL are updated.
+    - HEIC, HEIF, TIFF and BMP originals give `status: failed` (`"converter unavailable"`,
+      or `"WebP conversion failed: …"`).
+  - Storage (R2) refuses the file: the job is retried with backoff (`status` stays
+    `processing`); after the last attempt it is `failed` with `"storage unavailable"`.
+  - A failed upload keeps its original for `MEDIA_FAILED_RETENTION` (24 h) so
+    `POST /media/{id}/retry` can queue it again; after that the retry answers 410 `gone`.
+- **Dedupe:** the same uncropped original uploaded again returns the existing `Media`;
+  `sha256` is computed on the stored bytes.
+- **URLs:** with `MEDIA_PUBLIC_URL` set, media URLs are `MEDIA_PUBLIC_URL/<file>`. On startup,
+  stored `/media/<file>` links (post parts, covers, project bodies, the profile) are rewritten
+  to it once. `/media/<file>` still 301-redirects for old external links.
 
 ## Hooks — `/api/hooks`
 

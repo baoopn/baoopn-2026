@@ -77,10 +77,67 @@ type Config struct {
 	// the API streams objects at /media/<file>.
 	MediaPublicURL string `env:"MEDIA_PUBLIC_URL"`
 
+	// Raster uploads are converted to WebP by the media worker through a
+	// queue the API serves over gRPC (GRPC_ADDR, private network only;
+	// needs INTERNAL_API_TOKEN).
+	GRPCAddr string `env:"GRPC_ADDR" envDefault:":9100"`
+	// MediaMaxPixels rejects images with more pixels (decompression bombs).
+	MediaMaxPixels int64 `env:"MEDIA_MAX_PIXELS" envDefault:"50000000"`
+	// MediaUploadWait is how long an upload waits for its conversion
+	// (201 when done, else 202 processing).
+	MediaUploadWait time.Duration `env:"MEDIA_UPLOAD_WAIT" envDefault:"10s"`
+	// MediaJobLease is how long a worker owns a job; keep it above the
+	// worker's MEDIAWORKER_JOB_TIMEOUT.
+	MediaJobLease       time.Duration `env:"MEDIA_JOB_LEASE" envDefault:"5m"`
+	MediaJobMaxAttempts int           `env:"MEDIA_JOB_MAX_ATTEMPTS" envDefault:"5"`
+	// MediaFallbackAfter: a job no worker leased for this long is published
+	// as its metadata-stripped original (JPEG/PNG/GIF/WebP) or failed.
+	MediaFallbackAfter time.Duration `env:"MEDIA_FALLBACK_AFTER" envDefault:"2m"`
+	// MediaFailedRetention keeps a failed upload's original for a retry.
+	MediaFailedRetention time.Duration `env:"MEDIA_FAILED_RETENTION" envDefault:"24h"`
+
 	// SpotifyAPIURL is the spotify-tracker public API (embedded widgets).
 	SpotifyAPIURL string `env:"SPOTIFY_API_URL"`
 
 	RateLimitPerMinute int `env:"RATE_LIMIT_PER_MINUTE" envDefault:"240"`
+}
+
+// Worker is the media worker's configuration (cmd/mediaworker).
+type Worker struct {
+	LogLevel  string `env:"LOG_LEVEL" envDefault:"info"`
+	LogFormat string `env:"LOG_FORMAT" envDefault:"text"`
+	// APIGRPCAddr is the API's GRPC_ADDR as seen from the worker.
+	APIGRPCAddr   string        `env:"API_GRPC_ADDR" envDefault:"localhost:9100"`
+	InternalToken string        `env:"INTERNAL_API_TOKEN,unset"`
+	Concurrency   int           `env:"MEDIAWORKER_CONCURRENCY" envDefault:"2"`
+	PollInterval  time.Duration `env:"MEDIAWORKER_POLL_INTERVAL" envDefault:"2s"`
+	JobTimeout    time.Duration `env:"MEDIAWORKER_JOB_TIMEOUT" envDefault:"4m"`
+	// HealthAddr serves /healthz for `mediaworker healthcheck`.
+	HealthAddr   string `env:"MEDIAWORKER_HEALTH_ADDR" envDefault:"127.0.0.1:8081"`
+	MaxDimension int    `env:"MEDIA_MAX_DIMENSION" envDefault:"2400"`
+	WebPQuality  int    `env:"MEDIA_WEBP_QUALITY" envDefault:"82"`
+	MaxPixels    int64  `env:"MEDIA_MAX_PIXELS" envDefault:"50000000"`
+}
+
+// LoadWorker parses the media worker's environment.
+func LoadWorker() (Worker, error) {
+	var c Worker
+	if err := env.Parse(&c); err != nil {
+		return c, fmt.Errorf("config: %w", err)
+	}
+	switch {
+	case c.InternalToken == "":
+		return c, fmt.Errorf("config: INTERNAL_API_TOKEN is required")
+	case c.Concurrency < 1 || c.Concurrency > 64:
+		return c, fmt.Errorf("config: MEDIAWORKER_CONCURRENCY must be between 1 and 64")
+	case c.MaxDimension < 16 || c.MaxDimension > 16384:
+		return c, fmt.Errorf("config: MEDIA_MAX_DIMENSION must be between 16 and 16384")
+	case c.WebPQuality < 1 || c.WebPQuality > 100:
+		return c, fmt.Errorf("config: MEDIA_WEBP_QUALITY must be between 1 and 100")
+	case c.MaxPixels < 1:
+		return c, fmt.Errorf("config: MEDIA_MAX_PIXELS must be positive")
+	}
+	return c, nil
 }
 
 // IsProduction reports whether APP_ENV is production.

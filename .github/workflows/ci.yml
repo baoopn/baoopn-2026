@@ -41,10 +41,25 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Verify generated gRPC code is up to date
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@v1.75.0
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          buf lint
+          buf generate
+          git diff --exit-code -- gen/
+
       - name: go mod tidy check
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+
+      - name: Pure Go (CGO_ENABLED=0) build
+        run: |
+          CGO_ENABLED=0 go build -tags nodynamic ./...
+          CGO_ENABLED=0 GOOS=linux go build -tags nodynamic -o /tmp/mediaworker ./cmd/mediaworker
+          file /tmp/mediaworker | grep -q "statically linked"
 
       - name: gofmt
         run: |

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
 	"github.com/baoopn/baoopn-2026/internal/logging"
@@ -27,6 +28,8 @@ func (s *Store) Hooks(chi.Router) {}
 func (s *Store) Admin(r chi.Router) {
 	r.Get("/media", s.list)
 	r.Post("/media", s.upload)
+	r.Get("/media/{id}", s.get)
+	r.Post("/media/{id}/retry", s.retry)
 	r.Delete("/media/{id}", s.remove)
 }
 
@@ -49,6 +52,11 @@ func (s *Store) list(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSONMeta(w, http.StatusOK, items, httpapi.PageMeta{Total: total, Page: page, Limit: limit})
 }
 
+var cropFields = [4]string{"crop_x", "crop_y", "crop_w", "crop_h"}
+
+// upload handles POST /media: multipart "file" plus optional crop_x,
+// crop_y, crop_w, crop_h (all four or none), in any order. The file is
+// staged first, so crop fields may follow it.
 func (s *Store) upload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxBytes+1<<20)
 	mr, err := r.MultipartReader()
@@ -56,34 +64,139 @@ func (s *Store) upload(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "expected a multipart/form-data body")
 		return
 	}
+	var staged *os.File
+	var name string
+	defer func() {
+		if staged != nil {
+			_ = staged.Close()
+			_ = os.Remove(staged.Name())
+		}
+	}()
+	vals := map[string]string{}
 	for {
 		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 		if err != nil {
 			if tooLarge(err) {
 				httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "file is too large")
 				return
 			}
-			httpapi.Error(w, http.StatusBadRequest, "bad_request", "missing multipart field \"file\"")
+			httpapi.Error(w, http.StatusBadRequest, "bad_request", "malformed multipart body")
 			return
 		}
-		if part.FormName() != "file" {
+		field := part.FormName()
+		switch {
+		case field == "file" && staged == nil:
+			f, err := os.CreateTemp(s.dir, ".rq-*")
+			if err != nil {
+				_ = part.Close()
+				s.internal(w, r, "media: temp file", err)
+				return
+			}
+			staged, name = f, part.FileName()
+			n, err := io.Copy(f, io.LimitReader(part, s.maxBytes+1))
 			_ = part.Close()
+			if tooLarge(err) || n > s.maxBytes {
+				httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "file is too large")
+				return
+			}
+			if err != nil {
+				httpapi.Error(w, http.StatusBadRequest, "bad_request", "could not read the file")
+				return
+			}
+		case strings.HasPrefix(field, "crop_"):
+			b, err := io.ReadAll(io.LimitReader(part, 32))
+			_ = part.Close()
+			if err != nil {
+				httpapi.Error(w, http.StatusBadRequest, "bad_request", "malformed multipart body")
+				return
+			}
+			vals[field] = strings.TrimSpace(string(b))
+		default:
+			_ = part.Close()
+		}
+	}
+	if staged == nil {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "missing multipart field \"file\"")
+		return
+	}
+	crop, msg := parseCrop(vals)
+	if msg != "" {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", msg)
+		return
+	}
+	if _, err := staged.Seek(0, io.SeekStart); err != nil {
+		s.internal(w, r, "media: rewind", err)
+		return
+	}
+	m, err := s.SaveCrop(r.Context(), name, staged, crop)
+	if err != nil {
+		s.saveError(w, r, err)
+		return
+	}
+	if m.Status == StatusProcessing && s.uploadWait > 0 {
+		if m, err = s.WaitDone(r.Context(), m.ID, s.uploadWait); err != nil {
+			s.internal(w, r, "media: wait", err)
+			return
+		}
+	}
+	if m.Status == StatusReady {
+		httpapi.JSON(w, http.StatusCreated, m)
+		return
+	}
+	httpapi.JSON(w, http.StatusAccepted, m)
+}
+
+// parseCrop reads the four crop fields; all or none must be present.
+func parseCrop(v map[string]string) (*Crop, string) {
+	present := 0
+	var n [4]int
+	for i, k := range cropFields {
+		s, ok := v[k]
+		if !ok || s == "" {
 			continue
 		}
-		m, err := s.Save(r.Context(), part.FileName(), part)
-		_ = part.Close()
-		switch {
-		case err == nil:
-			httpapi.JSON(w, http.StatusCreated, m)
-		case errors.Is(err, ErrTooLarge) || tooLarge(err):
-			httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "file is too large")
-		case errors.Is(err, ErrUnsupported):
-			httpapi.Error(w, http.StatusUnsupportedMediaType, "unsupported_type",
-				"only PNG, JPEG, GIF, WebP, AVIF, SVG and PDF files are allowed")
-		default:
-			s.internal(w, r, "media: save", err)
+		present++
+		x, err := strconv.Atoi(s)
+		if err != nil || x < 0 || x > 1_000_000 {
+			return nil, k + " must be a non-negative integer"
 		}
-		return
+		n[i] = x
+	}
+	switch present {
+	case 0:
+		return nil, ""
+	case 4:
+		if n[2] == 0 || n[3] == 0 {
+			return nil, "crop_w and crop_h must be at least 1"
+		}
+		return &Crop{X: n[0], Y: n[1], W: n[2], H: n[3]}, ""
+	}
+	return nil, "crop needs all of crop_x, crop_y, crop_w and crop_h"
+}
+
+func (s *Store) saveError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrTooLarge) || tooLarge(err):
+		httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "file is too large")
+	case errors.Is(err, ErrTooManyPixels):
+		httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large",
+			"the image has too many pixels (limit "+strconv.FormatInt(s.maxPixels, 10)+")")
+	case errors.Is(err, ErrUnsupported):
+		httpapi.Error(w, http.StatusUnsupportedMediaType, "unsupported_type",
+			"only JPEG, PNG, GIF, WebP, HEIC, BMP, TIFF, AVIF, SVG and PDF files are allowed")
+	case errors.Is(err, ErrUndecodable):
+		httpapi.Error(w, http.StatusUnsupportedMediaType, "unsupported_type",
+			"the image could not be decoded (corrupt or unsupported variant)")
+	case errors.Is(err, ErrBadCrop):
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "the crop rectangle is outside the image")
+	case errors.Is(err, ErrOriginalsUnavailable):
+		s.log.ErrorContext(r.Context(), "media: originals store", logging.Err(err))
+		httpapi.Error(w, http.StatusServiceUnavailable, "storage_unavailable", "media storage is unavailable, try again later")
+	default:
+		s.internal(w, r, "media: save", err)
 	}
 }
 
@@ -92,9 +205,53 @@ func tooLarge(err error) bool {
 	return errors.As(err, &mbe)
 }
 
-func (s *Store) remove(w http.ResponseWriter, r *http.Request) {
+func pathID(r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id <= 0 {
+	return id, err == nil && id > 0
+}
+
+func (s *Store) get(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+	m, err := s.Get(r.Context(), id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpapi.Error(w, http.StatusNotFound, "not_found", "media not found")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, "media: get", err)
+		return
+	}
+	httpapi.JSON(w, http.StatusOK, m)
+}
+
+func (s *Store) retry(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+	m, err := s.Retry(r.Context(), id)
+	switch {
+	case err == nil:
+		httpapi.JSON(w, http.StatusAccepted, m)
+	case errors.Is(err, pgx.ErrNoRows):
+		httpapi.Error(w, http.StatusNotFound, "not_found", "media not found")
+	case errors.Is(err, ErrNotFailed):
+		httpapi.Error(w, http.StatusConflict, "conflict", "only failed media can be retried")
+	case errors.Is(err, ErrGone):
+		httpapi.Error(w, http.StatusGone, "gone", "the original is no longer kept; upload the file again")
+	default:
+		s.internal(w, r, "media: retry", err)
+	}
+}
+
+func (s *Store) remove(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "invalid id")
 		return
 	}
