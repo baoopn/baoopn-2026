@@ -14,6 +14,13 @@
 		{ id: 'year', label: 'Year' }
 	];
 	const SPOTIFY_ID = /^[A-Za-z0-9]+$/;
+	const SPOTIFY_OPEN = 'https://open.spotify.com/';
+
+	/** Only open.spotify.com links become hrefs (the API checks this too). */
+	const spotifyHref = (url: string | undefined) => {
+		const u = safeUrl(url);
+		return u?.startsWith(SPOTIFY_OPEN) ? u : undefined;
+	};
 
 	const available = $derived(PERIODS.filter((p) => (data?.periods?.[p.id]?.length ?? 0) > 0));
 
@@ -23,7 +30,7 @@
 	const newest = $derived(entries[0]);
 	const older = $derived(entries.slice(1));
 
-	const newestUrl = $derived(safeUrl(newest?.spotify_url));
+	const newestUrl = $derived(spotifyHref(newest?.spotify_url));
 	const embedSrc = $derived.by(() => {
 		if (!newest || !SPOTIFY_ID.test(newest.spotify_id)) return undefined;
 		const dark = theme.resolved === 'dark' ? '&theme=0' : '';
@@ -95,6 +102,7 @@
 								width="100%"
 								height="352"
 								loading="lazy"
+								referrerpolicy="strict-origin-when-cross-origin"
 								style="border:0"
 								allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
 							></iframe>
@@ -107,8 +115,8 @@
 				<div class="min-w-0">
 					<h4 class="label mb-3 text-ink-soft">Earlier</h4>
 					<ul class="border-t border-rule-strong">
-						{#each older as entry (entry.spotify_id + entry.period_start)}
-							{@const href = safeUrl(entry.spotify_url)}
+						{#each older as entry (entry.spotify_id)}
+							{@const href = spotifyHref(entry.spotify_url)}
 							<li class="row">
 								<span class="min-w-0 flex-1 truncate font-semibold">
 									{#if href}

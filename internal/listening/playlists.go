@@ -1,6 +1,7 @@
 package listening
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -66,23 +67,46 @@ func cleanTimeZone(tz string) string {
 	return tz
 }
 
-// cleanPlaylists keeps the valid entries listed under period, in upstream order.
-func cleanPlaylists(period string, in []TopPlaylist) []TopPlaylist {
+// rawPlaylists is the upstream envelope, decoded entry by entry so one
+// malformed entry is dropped instead of failing the whole response.
+type rawPlaylists struct {
+	TimeZone string `json:"time_zone"`
+	Periods  struct {
+		Week  []json.RawMessage `json:"week"`
+		Month []json.RawMessage `json:"month"`
+		Year  []json.RawMessage `json:"year"`
+	} `json:"periods"`
+}
+
+// cleanPlaylists keeps the valid entries listed under period, in upstream
+// order. Entries that fail to decode, have a bad id, URL or period bounds, sit
+// under the wrong period, or repeat an earlier spotify_id are dropped.
+func cleanPlaylists(period string, in []json.RawMessage) []TopPlaylist {
 	out := []TopPlaylist{}
-	for _, p := range in {
-		if p.Period != period || !spotifyIDRe.MatchString(p.SpotifyID) || !strings.HasPrefix(p.SpotifyURL, spotifyOpenPrefix) {
+	seen := map[string]bool{}
+	for _, raw := range in {
+		var p TopPlaylist
+		if err := json.Unmarshal(raw, &p); err != nil {
 			continue
 		}
+		if p.Period != period || !spotifyIDRe.MatchString(p.SpotifyID) || !strings.HasPrefix(p.SpotifyURL, spotifyOpenPrefix) ||
+			p.PeriodStart.IsZero() || !p.PeriodEnd.After(p.PeriodStart) || seen[p.SpotifyID] {
+			continue
+		}
+		seen[p.SpotifyID] = true
 		p.PeriodStart = p.PeriodStart.UTC()
 		p.PeriodEnd = p.PeriodEnd.UTC()
 		p.PublishedAt = p.PublishedAt.UTC()
 		p.TimeZone = cleanTimeZone(p.TimeZone)
-		if p.Tracks == nil {
-			p.Tracks = []PlaylistTrack{}
+		tracks := make([]PlaylistTrack, 0, len(p.Tracks))
+		for _, t := range p.Tracks {
+			if t.Track.ID == "" {
+				continue
+			}
+			t.Track.normalize()
+			tracks = append(tracks, t)
 		}
-		for i := range p.Tracks {
-			p.Tracks[i].Track.normalize()
-		}
+		p.Tracks = tracks
 		out = append(out, p)
 	}
 	return out
@@ -95,16 +119,17 @@ func (m *Module) topPlaylists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.serve(w, r, "/api/v1/playlists/top?limit="+strconv.Itoa(limit), ttlTop, func(raw []byte) (any, error) {
-		var v TopPlaylists
-		if err := decodeData(raw, &v); err != nil {
+		var in *rawPlaylists
+		if err := decodeData(raw, &in); err != nil {
 			return nil, err
 		}
-		v.TimeZone = cleanTimeZone(v.TimeZone)
-		v.Periods = PlaylistPeriods{
-			Week:  cleanPlaylists("week", v.Periods.Week),
-			Month: cleanPlaylists("month", v.Periods.Month),
-			Year:  cleanPlaylists("year", v.Periods.Year),
+		if in == nil {
+			in = &rawPlaylists{}
 		}
-		return v, nil
+		return TopPlaylists{TimeZone: cleanTimeZone(in.TimeZone), Periods: PlaylistPeriods{
+			Week:  cleanPlaylists("week", in.Periods.Week),
+			Month: cleanPlaylists("month", in.Periods.Month),
+			Year:  cleanPlaylists("year", in.Periods.Year),
+		}}, nil
 	})
 }

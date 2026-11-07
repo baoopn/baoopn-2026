@@ -61,7 +61,7 @@ const playlistsUpstream = `{"data":{"time_zone":"Bad Zone!","generated_by":"x","
 		 "spotify_url":"https://open.spotify.com/playlist/pl1","track_count":1,"total_plays":9,
 		 "published_at":"2026-11-03T01:00:00+07:00","snapshot_id":"snap","owner":"me",
 		 "tracks":[{"position":1,"plays":9,"added_at":"x","track":{"id":"t1","name":"Song","uri":"spotify:track:t1",
-		  "duration_ms":1,"explicit":false,"artists":null}}]},
+		  "duration_ms":1,"explicit":false,"artists":null}},null,{"position":2,"plays":1,"track":null}]},
 		{"period":"week","period_start":"2026-10-26T00:00:00Z","period_end":"2026-11-02T00:00:00Z","time_zone":"Not a zone",
 		 "label":"Week of Oct 26, 2026","name":"Old","spotify_id":"pl2","spotify_url":"https://open.spotify.com/playlist/pl2",
 		 "track_count":50,"total_plays":100,"published_at":"2026-10-27T00:00:00Z"},
@@ -73,7 +73,21 @@ const playlistsUpstream = `{"data":{"time_zone":"Bad Zone!","generated_by":"x","
 		 "track_count":1,"total_plays":1,"published_at":"2026-10-13T00:00:00Z","tracks":[]},
 		{"period":"week","period_start":"2026-10-05T00:00:00Z","period_end":"2026-10-12T00:00:00Z","time_zone":"UTC",
 		 "label":"Bad url","name":"Bad url","spotify_id":"pl5","spotify_url":"https://evil.example/playlist/pl5",
-		 "track_count":1,"total_plays":1,"published_at":"2026-10-06T00:00:00Z","tracks":[]}
+		 "track_count":1,"total_plays":1,"published_at":"2026-10-06T00:00:00Z","tracks":[]},
+		{"period":"week","period_start":"2026-09-28T00:00:00Z","period_end":"2026-10-05T00:00:00Z","time_zone":"UTC",
+		 "label":"Empty id","name":"Empty id","spotify_id":"","spotify_url":"https://open.spotify.com/playlist/",
+		 "track_count":1,"total_plays":1,"published_at":"2026-09-29T00:00:00Z","tracks":[]},
+		{"period":"week","period_start":"2026-09-21","period_end":"2026-09-28T00:00:00Z","time_zone":"UTC",
+		 "label":"Bad time","name":"Bad time","spotify_id":"pl7","spotify_url":"https://open.spotify.com/playlist/pl7",
+		 "track_count":1,"total_plays":1,"published_at":"2026-09-22T00:00:00Z","tracks":[]},
+		{"period":"week","label":"No bounds","name":"No bounds","spotify_id":"pl8","spotify_url":"https://open.spotify.com/playlist/pl8",
+		 "track_count":1,"total_plays":1,"tracks":[]},
+		{"period":"week","period_start":"2026-09-14T00:00:00Z","period_end":"2026-09-14T00:00:00Z","time_zone":"UTC",
+		 "label":"Empty range","name":"Empty range","spotify_id":"pl9","spotify_url":"https://open.spotify.com/playlist/pl9",
+		 "track_count":1,"total_plays":1,"published_at":"2026-09-15T00:00:00Z","tracks":[]},
+		{"period":"week","period_start":"2026-10-26T00:00:00Z","period_end":"2026-11-02T00:00:00Z","time_zone":"UTC",
+		 "label":"Duplicate","name":"Duplicate","spotify_id":"pl2","spotify_url":"https://open.spotify.com/playlist/pl2",
+		 "track_count":1,"total_plays":1,"published_at":"2026-10-27T00:00:00Z","tracks":[]}
 	],
 	"month":[
 		{"period":"week","period_start":"2026-11-01T00:00:00Z","period_end":"2026-12-01T00:00:00Z","time_zone":"UTC",
@@ -164,7 +178,8 @@ func TestTopPlaylists(t *testing.T) {
 		t.Errorf("entries: %+v / %+v", newest, old)
 	}
 	body := rec.Body.String()
-	for _, gone := range []string{"generated_by", "snapshot_id", "owner", "added_at", "uri", "decade", "ab-c", "x/y", "evil.example", "Mismatch"} {
+	for _, gone := range []string{"generated_by", "snapshot_id", "owner", "added_at", "uri", "decade", "ab-c", "x/y", "evil.example", "Mismatch",
+		"Empty id", "Bad time", "No bounds", "Empty range", "Duplicate", `"position":2`} {
 		if strings.Contains(body, gone) {
 			t.Errorf("%s not trimmed: %s", gone, body)
 		}
@@ -183,6 +198,53 @@ func TestTopPlaylists(t *testing.T) {
 			t.Errorf("default limit forwarded as %q", u.lastLimit)
 		}
 	})
+}
+
+func TestTopPlaylistsEdges(t *testing.T) {
+	for _, l := range []string{"1", "24"} {
+		u, r, _ := setup(t)
+		if rec := get(r, "/listening/top-playlists?limit="+l); rec.Code != 200 {
+			t.Errorf("limit=%s: %d", l, rec.Code)
+		}
+		u.set(func(u *upstream) {
+			if u.lastLimit != l {
+				t.Errorf("limit=%s forwarded as %q", l, u.lastLimit)
+			}
+		})
+	}
+	// Empty or null data still yields three arrays.
+	for _, body := range []string{`{"data":{}}`, `{"data":null}`, `{"data":{"periods":null}}`} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
+		t.Cleanup(srv.Close)
+		m := New(Deps{BaseURL: srv.URL + "/", Log: slog.New(slog.DiscardHandler)})
+		r := chi.NewRouter()
+		m.Public(r)
+		rec := get(r, "/listening/top-playlists")
+		if want := `{"data":{"time_zone":"UTC","periods":{"week":[],"month":[],"year":[]}}}`; rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
+			t.Errorf("%s -> %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	for tz, want := range map[string]string{"UTC": "UTC", "Etc/GMT+5": "Etc/GMT+5", strings.Repeat("A", 65): "UTC", "": "UTC", "../x": "UTC"} {
+		if got := cleanTimeZone(tz); got != want {
+			t.Errorf("cleanTimeZone(%q) = %q", tz, got)
+		}
+	}
+}
+
+func TestTopPlaylistsStale(t *testing.T) {
+	u, r, now := setup(t)
+	if rec := get(r, "/listening/top-playlists"); rec.Code != 200 {
+		t.Fatalf("warm %d", rec.Code)
+	}
+	u.set(func(u *upstream) { u.fail = true })
+	*now = now.Add(ttlTop + time.Second)
+	if rec := get(r, "/listening/top-playlists"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"pl1"`) {
+		t.Fatalf("stale %d %s", rec.Code, rec.Body)
+	}
+	*now = now.Add(10 * ttlTop)
+	if rec := get(r, "/listening/top-playlists"); rec.Code != http.StatusBadGateway {
+		t.Fatalf("expired %d", rec.Code)
+	}
 }
 
 func TestValidation(t *testing.T) {
