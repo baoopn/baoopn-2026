@@ -1,6 +1,7 @@
 package listening
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,8 @@ type upstream struct {
 	fail  bool
 	calls map[string]int
 	np    string
+
+	lastLimit string
 }
 
 func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -41,10 +44,44 @@ func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"artists":[{"id":"ar1","name":"Artist","uri":"spotify:artist:ar1"}]}}],"next_cursor":"abc"}`))
 	case "/api/v1/stats/top-artists":
 		_, _ = w.Write([]byte(`{"data":[{"artist":{"id":"ar1","name":"Artist","uri":"u","image_url":"https://i/a.jpg"},"plays":42,"last_played":"2026-11-01T00:00:00Z"}]}`))
+	case "/api/v1/playlists/top":
+		u.lastLimit = r.URL.Query().Get("limit")
+		_, _ = w.Write([]byte(playlistsUpstream))
 	default:
 		w.WriteHeader(404)
 	}
 }
+
+// playlistsUpstream has extra fields to trim, a +07:00 timestamp, a bad top-level
+// time_zone and entries that must be dropped.
+const playlistsUpstream = `{"data":{"time_zone":"Bad Zone!","generated_by":"x","periods":{
+	"week":[
+		{"period":"week","period_start":"2026-11-02T00:00:00+07:00","period_end":"2026-11-09T00:00:00+07:00",
+		 "time_zone":"UTC","label":"Week of Nov 2, 2026","name":"Top 50 · Week of Nov 2, 2026","spotify_id":"pl1",
+		 "spotify_url":"https://open.spotify.com/playlist/pl1","track_count":1,"total_plays":9,
+		 "published_at":"2026-11-03T01:00:00+07:00","snapshot_id":"snap","owner":"me",
+		 "tracks":[{"position":1,"plays":9,"added_at":"x","track":{"id":"t1","name":"Song","uri":"spotify:track:t1",
+		  "duration_ms":1,"explicit":false,"artists":null}}]},
+		{"period":"week","period_start":"2026-10-26T00:00:00Z","period_end":"2026-11-02T00:00:00Z","time_zone":"Not a zone",
+		 "label":"Week of Oct 26, 2026","name":"Old","spotify_id":"pl2","spotify_url":"https://open.spotify.com/playlist/pl2",
+		 "track_count":50,"total_plays":100,"published_at":"2026-10-27T00:00:00Z"},
+		{"period":"week","period_start":"2026-10-19T00:00:00Z","period_end":"2026-10-26T00:00:00Z","time_zone":"UTC",
+		 "label":"Bad id","name":"Bad id","spotify_id":"ab-c","spotify_url":"https://open.spotify.com/playlist/abc",
+		 "track_count":1,"total_plays":1,"published_at":"2026-10-20T00:00:00Z","tracks":[]},
+		{"period":"week","period_start":"2026-10-12T00:00:00Z","period_end":"2026-10-19T00:00:00Z","time_zone":"UTC",
+		 "label":"Slash id","name":"Slash id","spotify_id":"x/y","spotify_url":"https://open.spotify.com/playlist/xy",
+		 "track_count":1,"total_plays":1,"published_at":"2026-10-13T00:00:00Z","tracks":[]},
+		{"period":"week","period_start":"2026-10-05T00:00:00Z","period_end":"2026-10-12T00:00:00Z","time_zone":"UTC",
+		 "label":"Bad url","name":"Bad url","spotify_id":"pl5","spotify_url":"https://evil.example/playlist/pl5",
+		 "track_count":1,"total_plays":1,"published_at":"2026-10-06T00:00:00Z","tracks":[]}
+	],
+	"month":[
+		{"period":"week","period_start":"2026-11-01T00:00:00Z","period_end":"2026-12-01T00:00:00Z","time_zone":"UTC",
+		 "label":"Mismatch","name":"Mismatch","spotify_id":"pl6","spotify_url":"https://open.spotify.com/playlist/pl6",
+		 "track_count":1,"total_plays":1,"published_at":"2026-11-02T00:00:00Z","tracks":[]}
+	],
+	"decade":[]
+}}}`
 
 func (u *upstream) set(fn func(*upstream)) {
 	u.mu.Lock()
@@ -103,10 +140,56 @@ func TestTrimming(t *testing.T) {
 	}
 }
 
+func TestTopPlaylists(t *testing.T) {
+	u, r, _ := setup(t)
+	rec := get(r, "/listening/top-playlists?limit=4")
+	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "public, max-age=300" {
+		t.Fatalf("top-playlists %d %v", rec.Code, rec.Header())
+	}
+	u.set(func(u *upstream) {
+		if u.lastLimit != "4" {
+			t.Errorf("limit forwarded as %q", u.lastLimit)
+		}
+	})
+	var env struct{ Data TopPlaylists }
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	v := env.Data
+	if v.TimeZone != "UTC" || len(v.Periods.Week) != 2 || len(v.Periods.Month) != 0 || v.Periods.Year == nil {
+		t.Fatalf("periods: %s", rec.Body)
+	}
+	newest, old := v.Periods.Week[0], v.Periods.Week[1]
+	if newest.SpotifyID != "pl1" || old.SpotifyID != "pl2" || old.TimeZone != "UTC" || old.Tracks == nil || len(old.Tracks) != 0 {
+		t.Errorf("entries: %+v / %+v", newest, old)
+	}
+	body := rec.Body.String()
+	for _, gone := range []string{"generated_by", "snapshot_id", "owner", "added_at", "uri", "decade", "ab-c", "x/y", "evil.example", "Mismatch"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("%s not trimmed: %s", gone, body)
+		}
+	}
+	for _, kept := range []string{`"period_start":"2026-11-01T17:00:00Z"`, `"published_at":"2026-11-02T18:00:00Z"`,
+		`"tracks":[{"position":1,"plays":9,"track":{`, `"artists":[]`, `"month":[]`, `"year":[]`} {
+		if !strings.Contains(body, kept) {
+			t.Errorf("missing %s: %s", kept, body)
+		}
+	}
+	if rec := get(r, "/listening/top-playlists"); rec.Code != 200 {
+		t.Errorf("default limit: %d", rec.Code)
+	}
+	u.set(func(u *upstream) {
+		if u.lastLimit != "6" {
+			t.Errorf("default limit forwarded as %q", u.lastLimit)
+		}
+	})
+}
+
 func TestValidation(t *testing.T) {
 	_, r, _ := setup(t)
 	for _, p := range []string{"/listening/recent?limit=0", "/listening/recent?limit=21", "/listening/recent?limit=x",
-		"/listening/top-artists?range=1y", "/listening/top-artists?limit=50"} {
+		"/listening/top-artists?range=1y", "/listening/top-artists?limit=50",
+		"/listening/top-playlists?limit=0", "/listening/top-playlists?limit=25", "/listening/top-playlists?limit=x"} {
 		if rec := get(r, p); rec.Code != 400 || !strings.Contains(rec.Body.String(), "bad_request") {
 			t.Errorf("%s: %d", p, rec.Code)
 		}
@@ -152,9 +235,10 @@ func TestNoBaseURL(t *testing.T) {
 	m.Public(r)
 	// Unconfigured (SPOTIFY_API_URL empty): empty results, not errors.
 	for path, want := range map[string]string{
-		"/listening/now-playing": `{"data":null}`,
-		"/listening/recent":      `{"data":[]}`,
-		"/listening/top-artists": `{"data":[]}`,
+		"/listening/now-playing":   `{"data":null}`,
+		"/listening/recent":        `{"data":[]}`,
+		"/listening/top-artists":   `{"data":[]}`,
+		"/listening/top-playlists": `{"data":{"time_zone":"UTC","periods":{"week":[],"month":[],"year":[]}}}`,
 	} {
 		rec := get(r, path)
 		if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != want {

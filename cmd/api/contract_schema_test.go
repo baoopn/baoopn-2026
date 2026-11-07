@@ -261,6 +261,15 @@ var (
 	recentPlay = obj(fields{"id": str, "played_at": ts, "track": spotifyTrack})
 	topArtist  = obj(fields{"artist": spotifyArtist, "plays": num, "last_played": ts})
 
+	playlistTrack = obj(fields{"position": num, "plays": num, "track": spotifyTrack})
+	topPlaylist   = obj(fields{
+		"period": enum("week", "month", "year"), "period_start": ts, "period_end": ts, "time_zone": str,
+		"label": str, "name": str, "spotify_id": str, "spotify_url": str, "track_count": num,
+		"total_plays": num, "published_at": ts, "tracks": arr(playlistTrack),
+	})
+	topPlaylists = obj(fields{"time_zone": str,
+		"periods": obj(fields{"week": arr(topPlaylist), "month": arr(topPlaylist), "year": arr(topPlaylist)})})
+
 	okShape     = obj(fields{"ok": boolean})
 	countShape  = obj(fields{"count": num})
 	sentToShape = obj(fields{"sent_to": str})

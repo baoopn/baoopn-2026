@@ -21,6 +21,7 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/now-playing` | – | `NowPlaying \| null` (cached 5 s) |
 | GET | `/listening/recent` | `limit` (1–20, default 6) | `RecentPlay[]` (cached 60 s) |
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
+| GET | `/listening/top-playlists` | `limit` (1�24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
 
 ## Admin — `/api/admin` (Bearer Clerk session token)
 
