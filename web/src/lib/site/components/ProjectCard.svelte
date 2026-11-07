@@ -115,15 +115,15 @@
 			<div class="flex flex-wrap items-center gap-2 border-t border-rule pt-3 text-sm">
 				{#if demo}
 					<a href={demo} target="_blank" rel="noopener noreferrer" class="action">
-						<ArrowUpRight class="size-4" aria-hidden="true" />Live site<span class="sr-only">
-							for {project.title} (opens in a new tab)</span
+						<ArrowUpRight class="size-4" aria-hidden="true" />Live site<span class="sr-only"
+							>{' '}for {project.title} (opens in a new tab)</span
 						>
 					</a>
 				{/if}
 				{#if repo}
 					<a href={repo} target="_blank" rel="noopener noreferrer" class="action">
-						<SocialIcon icon="github" class="size-4" />Code<span class="sr-only">
-							for {project.title} (opens in a new tab)</span
+						<SocialIcon icon="github" class="size-4" />Code<span class="sr-only"
+							>{' '}for {project.title} (opens in a new tab)</span
 						>
 					</a>
 				{/if}
