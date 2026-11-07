@@ -54,7 +54,7 @@ func TestFormCreatesThreadAndNotifies(t *testing.T) {
 		t.Fatalf("notification: %+v", note)
 	}
 	if ack.To != "priya@example.com" || ack.ReplyTo != replyAddr(tok) || ack.AutoSubmitted != "auto-replied" ||
-		ack.Subject != "Re: Message from Priya Shah" || !strings.HasPrefix(ack.Text, "Hi Priya Shah,") ||
+		ack.Subject != "Re: your message to Bao Nguyen" || strings.Contains(ack.Text, "Message from Priya") || !strings.HasPrefix(ack.Text, "Hi Priya Shah,") ||
 		strings.Contains(ack.Text, "I would like to talk about a project") ||
 		!strings.Contains(ack.Text, "\n\n-- \nBao Nguyen\nhttps://baoopn.com\n\nYou got this email") ||
 		!strings.Contains(ack.HTML, "Your message") || !strings.Contains(note.HTML, "Open in inbox") {
@@ -318,16 +318,48 @@ func TestAcknowledgementNeedsTurnstileAndIsCapped(t *testing.T) {
 		t.Fatalf("without Turnstile only the owner is notified: %+v", sent)
 	}
 
-	now := time.Now()
+	ctx := context.Background()
+	tid, _ := e.thread("visitor@example.com")
 	for i := range ackPerHour {
-		if !e.m.allowAck(now) {
+		if !e.m.reserveAck(ctx, tid, "visitor"+strconv.Itoa(i)+"@example.com") {
 			t.Fatalf("ack %d refused under the cap", i)
 		}
 	}
-	if e.m.allowAck(now) {
+	if e.m.reserveAck(ctx, tid, "one-more@example.com") {
 		t.Fatal("ack over the hourly cap allowed")
 	}
-	if !e.m.allowAck(now.Add(61 * time.Minute)) {
+	if _, err := e.db.Exec(ctx, `UPDATE contact_acks SET sent_at = now() - interval '61 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	if !e.m.reserveAck(ctx, tid, "one-more@example.com") {
 		t.Fatal("cap did not reset after an hour")
+	}
+}
+
+func TestAcknowledgementPerAddressCap(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	ctx := context.Background()
+	tid, _ := e.thread("visitor@example.com")
+	// One Gmail mailbox under three spellings.
+	for i, addr := range []string{"a.b@gmail.com", "AB+x@googlemail.com", "a.b+y@Gmail.com"} {
+		if !e.m.reserveAck(ctx, tid, addr) {
+			t.Fatalf("ack %d (%s) refused under the cap", i, addr)
+		}
+	}
+	if e.m.reserveAck(ctx, tid, "ab@gmail.com") {
+		t.Fatal("fourth ack to one mailbox allowed")
+	}
+	if !e.m.reserveAck(ctx, tid, "ab@example.com") {
+		t.Fatal("another address refused")
+	}
+	if n := e.count(`SELECT count(*) FROM contact_acks WHERE address_key = 'ab@gmail.com'`); n != ackPerAddress {
+		t.Fatalf("rows: %d", n)
+	}
+	// Older than 24 hours no longer counts.
+	if _, err := e.db.Exec(ctx, `UPDATE contact_acks SET sent_at = now() - interval '25 hours'`); err != nil {
+		t.Fatal(err)
+	}
+	if !e.m.reserveAck(ctx, tid, "ab@gmail.com") {
+		t.Fatal("cap did not reset after a day")
 	}
 }

@@ -58,22 +58,19 @@ func TestTokenExtraction(t *testing.T) {
 	const domain = "reply.baoopn.com"
 	for name, tc := range map[string]struct {
 		env  string
-		hdrs []string
 		want string
 	}{
-		"envelope":             {"reply+" + tok + "@reply.baoopn.com", nil, tok},
-		"envelope upper case":  {"REPLY+" + strings.ToUpper(tok) + "@Reply.Baoopn.com", nil, tok},
-		"envelope in brackets": {"<reply+" + tok + "@reply.baoopn.com>", nil, tok},
-		"from headers":         {"", []string{"bao@baoopn.com", "reply+" + tok + "@reply.baoopn.com"}, tok},
-		"envelope wins":        {"reply+" + tok + "@reply.baoopn.com", []string{"reply+ffffffffffffffffffffffffffffffff@reply.baoopn.com"}, tok},
-		"bad envelope, header": {"someone@reply.baoopn.com", []string{"reply+" + tok + "@reply.baoopn.com"}, tok},
-		"wrong domain":         {"reply+" + tok + "@evil.example", []string{"reply+" + tok + "@baoopn.com"}, ""},
-		"subdomain of ours":    {"reply+" + tok + "@x.reply.baoopn.com", nil, ""},
-		"short token":          {"reply+0123@reply.baoopn.com", nil, ""},
-		"not hex":              {"reply+" + strings.Repeat("g", 32) + "@reply.baoopn.com", nil, ""},
-		"nothing":              {"", nil, ""},
+		"envelope":             {"reply+" + tok + "@reply.baoopn.com", tok},
+		"envelope upper case":  {"REPLY+" + strings.ToUpper(tok) + "@Reply.Baoopn.com", tok},
+		"envelope in brackets": {"<reply+" + tok + "@reply.baoopn.com>", tok},
+		"wrong domain":         {"reply+" + tok + "@evil.example", ""},
+		"subdomain of ours":    {"reply+" + tok + "@x.reply.baoopn.com", ""},
+		"short token":          {"reply+0123@reply.baoopn.com", ""},
+		"not hex":              {"reply+" + strings.Repeat("g", 32) + "@reply.baoopn.com", ""},
+		"not a reply address":  {"someone@reply.baoopn.com", ""},
+		"nothing":              {"", ""},
 	} {
-		if got := findToken(tc.env, tc.hdrs, domain); got != tc.want {
+		if got := tokenOf(tc.env, domain); got != tc.want {
 			t.Errorf("%s: token %q", name, got)
 		}
 	}

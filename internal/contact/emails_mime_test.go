@@ -187,7 +187,7 @@ func TestFourEmailsAsMIME(t *testing.T) {
 	}
 
 	ack := byKind["ack"]
-	if ack.GetHeader("To") != "<visitor@example.test>" || ack.GetHeader("Subject") != "Re: your message" ||
+	if ack.GetHeader("To") != "<visitor@example.test>" || ack.GetHeader("Subject") != "Re: your message to Bao Nguyen" ||
 		ack.GetHeader("Reply-To") != "<"+replyAddr(tok)+">" {
 		t.Fatalf("ack headers: to %q subject %q reply-to %q", ack.GetHeader("To"), ack.GetHeader("Subject"), ack.GetHeader("Reply-To"))
 	}
@@ -302,7 +302,7 @@ func TestHostileDocsParityAndText(t *testing.T) {
 		message: hostileMessage(), at: goldenAt}
 	th := thread{ThreadSummary: ThreadSummary{ID: 9, Name: sub.name, Email: sub.email, Subject: sub.subject}}
 	s := goldenSettings()
-	ack, _ := ackDoc(goldenBrand, 9, sub, s.AutoReplyText, s.Signature)
+	ack, _ := ackDoc(goldenBrand, goldenOwner, 9, sub, s.AutoReplyText, s.Signature)
 	docs := map[string]bmail.Doc{
 		"new-thread": newThreadDoc(goldenBrand, goldenLink, 9, sub),
 		"inbound":    inboundDoc(goldenBrand, goldenLink, th, sub.message),

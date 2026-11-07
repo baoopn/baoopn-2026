@@ -65,20 +65,6 @@ func tokenOf(addr, domain string) string {
 	return ""
 }
 
-// findToken takes the token from the envelope recipient, or failing that
-// from the first header recipient that carries one.
-func findToken(envelopeTo string, recipients []string, domain string) string {
-	if t := tokenOf(envelopeTo, domain); t != "" {
-		return t
-	}
-	for _, r := range recipients {
-		if t := tokenOf(r, domain); t != "" {
-			return t
-		}
-	}
-	return ""
-}
-
 // redact hides the token in a reply address: reply+…@domain.
 func redact(addr string) string {
 	addr = strings.ToLower(strings.TrimSpace(addr))
