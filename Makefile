@@ -16,8 +16,8 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: deps
-deps: ## Start local Postgres
-	docker compose up -d postgres
+deps: ## Start local Postgres and RustFS (dev media bucket)
+	docker compose up -d postgres rustfs rustfs-init
 
 .PHONY: run-api
 run-api: ## Run the Go API on :8080

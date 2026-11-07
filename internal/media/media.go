@@ -1,5 +1,8 @@
-// Package media stores uploaded files in MEDIA_DIR, records them in the media
-// table (deduplicated by content hash) and serves them at /media/<filename>.
+// Package media stores uploaded files in MEDIA_DIR, or in an S3-compatible
+// bucket (Cloudflare R2, RustFS in development) when one is configured,
+// records them in the media table (deduplicated by content hash) and serves
+// them at /media/<filename> (from disk, streamed from the bucket, or as a
+// redirect to the bucket's public domain).
 package media
 
 import (
@@ -31,6 +34,9 @@ type Deps struct {
 	Log      *slog.Logger
 	Dir      string
 	MaxBytes int64
+	// S3 moves storage to a bucket when S3.Enabled(); Dir then only holds
+	// upload temp files and the files still to migrate.
+	S3 S3Config
 }
 
 // Store saves, lists, deletes and serves media files.
@@ -39,6 +45,9 @@ type Store struct {
 	log      *slog.Logger
 	dir      string
 	maxBytes int64
+	files    backend
+	s3       *s3Backend // the bucket when files is one; nil: local disk
+	public   string     // bucket's public origin; "" = served by the API
 }
 
 // Media is one stored file (types.ts Media).
@@ -75,7 +84,25 @@ func New(d Deps) (*Store, error) {
 	if d.MaxBytes <= 0 {
 		d.MaxBytes = defaultMaxBytes
 	}
-	return &Store{db: d.DB, log: d.Log, dir: d.Dir, maxBytes: d.MaxBytes}, nil
+	s := &Store{db: d.DB, log: d.Log, dir: d.Dir, maxBytes: d.MaxBytes, files: localDisk{d.Dir}}
+	if d.S3.Enabled() {
+		s.s3 = newS3Backend(d.S3)
+		s.files = s.s3
+		s.public = strings.TrimRight(d.S3.PublicURL, "/")
+	}
+	return s, nil
+}
+
+// UsesBucket reports whether files are stored in the S3 bucket.
+func (s *Store) UsesBucket() bool { return s.s3 != nil }
+
+// URL is the address of a stored file: the bucket's public domain when it
+// has one, otherwise /media/<filename> on the site.
+func (s *Store) URL(filename string) string {
+	if s.s3 != nil && s.public != "" {
+		return s.public + "/" + filename
+	}
+	return "/media/" + filename
 }
 
 // extByType maps the allowed content types to file extensions.
@@ -203,12 +230,12 @@ func (s *Store) Save(ctx context.Context, original string, r io.Reader) (Media, 
 	rnd := make([]byte, 12)
 	_, _ = rand.Read(rnd)
 	filename := hex.EncodeToString(rnd) + ext
-	final := filepath.Join(s.dir, filename)
-	if err := os.Rename(tmpName, final); err != nil {
-		return Media{}, fmt.Errorf("media: rename: %w", err)
+	if err := s.files.put(ctx, filename, ctype, tmpName, n); err != nil {
+		return Media{}, err
 	}
-	keep = true
-	_ = os.Chmod(final, 0o644)
+	if s.s3 == nil {
+		keep = true // renamed into place
+	}
 
 	m := Media{Filename: filename, Original: original, ContentType: ctype, SizeBytes: n}
 	err = s.db.QueryRow(ctx, `
@@ -216,10 +243,10 @@ func (s *Store) Save(ctx context.Context, original string, r io.Reader) (Media, 
 		VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
 		filename, original, ctype, n, sum).Scan(&m.ID, &m.CreatedAt)
 	if err != nil {
-		_ = os.Remove(final)
+		s.removeFile(ctx, filename)
 		return Media{}, fmt.Errorf("media: insert: %w", err)
 	}
-	return finish(m), nil
+	return s.finish(m), nil
 }
 
 func (s *Store) bySHA(ctx context.Context, sum string) (Media, error) {
@@ -231,11 +258,11 @@ func (s *Store) bySHA(ctx context.Context, sum string) (Media, error) {
 	if err != nil {
 		return Media{}, err
 	}
-	return finish(m), nil
+	return s.finish(m), nil
 }
 
-func finish(m Media) Media {
-	m.URL = "/media/" + m.Filename
+func (s *Store) finish(m Media) Media {
+	m.URL = s.URL(m.Filename)
 	m.CreatedAt = m.CreatedAt.UTC()
 	return m
 }
@@ -257,7 +284,7 @@ func (s *Store) List(ctx context.Context, page, limit int) ([]Media, int64, erro
 		if err := rows.Scan(&m.ID, &m.Filename, &m.Original, &m.ContentType, &m.SizeBytes, &m.CreatedAt, &total); err != nil {
 			return nil, 0, err
 		}
-		out = append(out, finish(m))
+		out = append(out, s.finish(m))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
@@ -281,8 +308,46 @@ func (s *Store) Delete(ctx context.Context, id int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := os.Remove(filepath.Join(s.dir, filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		s.log.Warn("media: remove file", slog.String("filename", filename), logging.Err(err))
-	}
+	s.removeFile(ctx, filename)
 	return true, nil
+}
+
+// backend is where stored files live: localDisk (MEDIA_DIR) or the S3 bucket.
+type backend interface {
+	// put stores the finished temp file at tmpName as filename. localDisk
+	// renames it; the bucket uploads it (the caller removes the temp file).
+	put(ctx context.Context, filename, ctype, tmpName string, size int64) error
+	remove(ctx context.Context, filename string) error
+}
+
+// localDisk keeps files in MEDIA_DIR.
+type localDisk struct{ dir string }
+
+func (l localDisk) put(_ context.Context, filename, _, tmpName string, _ int64) error {
+	final := filepath.Join(l.dir, filename)
+	if err := os.Rename(tmpName, final); err != nil {
+		return fmt.Errorf("media: rename: %w", err)
+	}
+	_ = os.Chmod(final, 0o644)
+	return nil
+}
+
+func (l localDisk) remove(_ context.Context, filename string) error {
+	if err := os.Remove(filepath.Join(l.dir, filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// removeFile deletes a stored file from the backend and, with a bucket, also
+// the local copy a migration leaves behind. Failures are logged.
+func (s *Store) removeFile(ctx context.Context, filename string) {
+	if err := s.files.remove(ctx, filename); err != nil {
+		s.log.Warn("media: remove stored file", slog.String("filename", filename), logging.Err(err))
+	}
+	if s.s3 != nil {
+		if err := (localDisk{s.dir}).remove(ctx, filename); err != nil {
+			s.log.Warn("media: remove local copy", slog.String("filename", filename), logging.Err(err))
+		}
+	}
 }

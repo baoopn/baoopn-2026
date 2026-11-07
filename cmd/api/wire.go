@@ -47,9 +47,18 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	}
 	site := sitesettings.New(sitesettings.Deps{DB: pool, Log: log, DefaultNotify: cfg.NotifyEmail, Mailer: mailer})
 
-	mediaStore, err := media.New(media.Deps{DB: pool, Log: log, Dir: cfg.MediaDir, MaxBytes: cfg.MaxUploadMB << 20})
+	mediaStore, err := media.New(media.Deps{DB: pool, Log: log, Dir: cfg.MediaDir, MaxBytes: cfg.MaxUploadMB << 20,
+		S3: mediaS3(cfg)})
 	if err != nil {
 		return nil, err
+	}
+	if cfg.S3Partial() {
+		log.Warn("media bucket partly configured (need S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY); using MEDIA_DIR")
+	}
+	if mediaStore.UsesBucket() {
+		log.Info("media stored in bucket", slog.String("bucket", cfg.S3Bucket),
+			slog.String("public_url", cfg.MediaPublicURL))
+		go migrateMedia(mediaStore, log)
 	}
 
 	profileMod := profile.New(profile.Deps{DB: pool, Log: log, GitHubUser: cfg.GitHubUser,
@@ -85,6 +94,27 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		syncer:  syncer,
 		contact: contactMod,
 	}, nil
+}
+
+func mediaS3(cfg config.Config) media.S3Config {
+	return media.S3Config{Endpoint: cfg.S3Endpoint, Region: cfg.S3Region, Bucket: cfg.S3Bucket,
+		AccessKeyID: cfg.S3AccessKeyID, SecretAccessKey: cfg.S3SecretAccessKey,
+		PathStyle: cfg.S3ForcePathStyle, PublicURL: cfg.MediaPublicURL}
+}
+
+// migrateMedia copies files still only in MEDIA_DIR to the bucket. It runs
+// in the background with a timeout and only logs: it never fails the boot.
+func migrateMedia(s *media.Store, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	st, err := s.MigrateToBucket(ctx)
+	attrs := []any{slog.Int("uploaded", st.Uploaded), slog.Int("already_present", st.Present),
+		slog.Int("not_on_disk", st.NoLocal), slog.Int("failed", st.Failed)}
+	if err != nil {
+		log.Warn("media migration stopped", append(attrs, logging.Err(err))...)
+		return
+	}
+	log.Info("media migration done", attrs...)
 }
 
 // adminConfig is AdminConfig in types.ts.
