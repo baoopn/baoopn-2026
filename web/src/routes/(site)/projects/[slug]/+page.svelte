@@ -108,7 +108,7 @@
 	{:else if logo && logo !== logoFailed}
 		<div
 			class="print relative mt-10 aspect-[8/5] w-full overflow-hidden rounded-brand sm:aspect-[16/7] [--print:var(--spot-now)]"
-			style:background={p.logo_bg === 'ink' ? 'var(--on-spot)' : spotFor(p.slug)}
+			style:background={p.logo_bg === 'ink' ? 'var(--logo-plate-dark)' : spotFor(p.slug)}
 		>
 			<img
 				src={logo}
