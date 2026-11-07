@@ -75,7 +75,7 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/projects` | – | `AdminProject[]` (all, incl. hidden) |
 | POST | `/projects` | `{ title, slug? }` (manual project) | `AdminProject` |
 | GET | `/projects/{id}` | – | `AdminProject` |
-| PATCH | `/projects/{id}` | `ProjectPatch` | `AdminProject` |
+| PATCH | `/projects/{id}` | `ProjectPatch` (`logo_url` follows the `cover_url` rule: http(s) URL or /path, `""` clears it. `logo_bg` is `tile` or `ink`; other values 422) | `AdminProject` |
 | DELETE | `/projects/{id}` | – | `204` (a synced repo comes back hidden on next sync unless archived) |
 | POST | `/projects/sync` | – | `SyncResult` (pull repos of `GITHUB_USER`; new ones are hidden) |
 | POST | `/projects/reorder` | `{ ids: number[] }` | `204` (sort_order = index) |

@@ -200,6 +200,11 @@ func rewriteProjects(ctx context.Context, db *pgxpool.Pool, fn func(string) stri
 	if err != nil {
 		return 0, err
 	}
+	m, err := rewriteColumn(ctx, db, "projects", "logo_url", fn)
+	if err != nil {
+		return n, err
+	}
+	n += m
 	bodies, err := collect(ctx, db, `SELECT id, body_md FROM projects WHERE body_md <> '' ORDER BY id`)
 	if err != nil {
 		return n, err

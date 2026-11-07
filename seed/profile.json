@@ -7,7 +7,7 @@
 	"cover_url": "https://cdn.baoopn.com/data/img/Bao_cover.jpg",
 	"resume_url": "",
 	"available_for_work": false,
-	"bio_md": "I build web and desktop apps from end to end: the API, the database, the screens people use, and the servers they run on.\n\nI build software for TL Portraitz, a wedding photo and video studio. Most of my time goes into NarraFlo, the studio's video project tool. Clients and the team use it to share footage, review videos, pay invoices and chat. I work on its Hono backend, its SvelteKit admin and client portals, and its Flutter desktop app for Windows, macOS and Linux. I also wrote its transcoder in Go: a set of workers that turn raw footage into streams up to 4K, with watermarks when needed.\n\nI also build Vow Portal, a directory of verified wedding vendors for TL Portraitz couples. It runs on a Go API and a SvelteKit site. Vendors get profile pages, inquiries that become email threads, referrals and analytics. An MCP server lets an AI assistant act for a signed-in vendor.\n\nOn my own projects, I write Go. I rebuilt this site as a Go API and a SvelteKit app, with its own admin, blog editor, email threads and analytics. I built [spotify-tracker](https://listening.baoopn.com), a set of Go services that log every song I play and show it live. I also built sites for AT Creations, a handmade gift and ceramics store, and MUBEN, a fashion brand. I host most of it myself on Coolify, behind Cloudflare.\n\nNot all of my work happens at a desk. I shoot weddings as a videographer and photographer, so I know what a studio needs from its software. A wedding gives you one chance at each moment. It teaches you to plan ahead and stay calm.\n\nI also work as a restaurant server. The job keeps me quick on my feet, and it reminds me that good service starts with paying attention to people. On the tech side, I set up the online booking system for Saigon Taste, a restaurant in Edmonton, and wrote a small service that sends an alert for each new reservation.\n\nIf you have a project in mind, send me a message.",
+	"bio_md": "I build web and desktop apps from end to end: the API, the database, the screens people use, and the servers they run on.\n\nI build software for TL Portraitz, a wedding photo and video studio. Most of my time goes into NarraFlo, the studio's video project tool. Clients and the team use it to share footage, review videos, pay invoices and chat. I work on its Hono backend, its SvelteKit admin and client portals, and its Flutter desktop app for Windows, macOS and Linux. I also wrote its transcoder in Go: a set of workers that turn raw footage into streams up to 4K, with watermarks when needed.\n\nI also build Vow Portal, a directory of verified wedding vendors for TL Portraitz couples. It runs on a Go API and a SvelteKit site. Vendors get profile pages, inquiries that become email threads, referrals and analytics. An MCP server lets an AI assistant act for a signed-in vendor.\n\nOn my own projects, I write Go. I rebuilt this site as a Go API and a SvelteKit app, with its own admin, blog editor, email threads and analytics. I built [spotify-tracker](https://listening.baoopn.com), a set of Go services that log every song I play and show it live. I also built sites for AT Creations, a handmade gift and ceramics store, and MUBEN, a fashion brand. I host most of it myself on Coolify, behind Cloudflare.\n\nNot all of my work happens at a desk. I shoot weddings as a videographer and photographer, so I know what a studio needs from its software. A wedding gives you one chance at each moment. It teaches you to plan ahead and stay calm.\n\nI also work as a restaurant server. The job keeps me quick on my feet, and it reminds me that good service starts with paying attention to people.\n\nIf you have a project in mind, send me a message.",
 	"socials": [
 		{
 			"label": "GitHub",
@@ -42,8 +42,7 @@
 				"TypeScript",
 				"JavaScript",
 				"Dart",
-				"SQL",
-				"PHP"
+				"SQL"
 			]
 		},
 		{
@@ -63,7 +62,6 @@
 				"Fiber",
 				"Hono",
 				"Node.js",
-				"Deno",
 				"gRPC",
 				"REST",
 				"SSE",
@@ -119,6 +117,6 @@
 	"seo": {
 		"title": "Bao Nguyen | Full-stack Web Developer",
 		"description": "Bao Nguyen builds web and desktop apps with Go, SvelteKit, Flutter and TypeScript, and shoots weddings as a videographer and photographer.",
-		"og_image": "https://media.baoopn.com/profile-cover-076cc40c.jpg"
+		"og_image": "https://media.baoopn.com/6960f0236c5ae9fa9dd061ad.png"
 	}
 }

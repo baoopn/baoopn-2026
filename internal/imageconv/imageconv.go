@@ -98,6 +98,14 @@ func Convert(data []byte, ctype string, o Options) (Result, error) {
 		img = subImage(img, image.Rect(b.Min.X+c.X, b.Min.Y+c.Y, b.Min.X+c.X+c.W, b.Min.Y+c.Y+c.H))
 	}
 	img = Fit(img, o.MaxDimension)
+	// The encoder hands *image.RGBA pixels to libwebp as straight alpha, but
+	// they are premultiplied: semi-transparent edges would darken (a grey
+	// halo on white logos). Un-premultiply first.
+	if r, ok := img.(*image.RGBA); ok {
+		n := image.NewNRGBA(r.Bounds())
+		draw.Draw(n, n.Bounds(), r, r.Bounds().Min, draw.Src)
+		img = n
+	}
 
 	var buf bytes.Buffer
 	if err := webp.Encode(&buf, img, webp.Options{Quality: o.Quality, Method: webp.DefaultMethod}); err != nil {

@@ -67,8 +67,9 @@ func ptr[T any](v T) *T { return &v }
 func TestPatchApply(t *testing.T) {
 	p := project{Title: "Old", BodyMD: "same"}
 	changed, err := Patch{Title: ptr(" New "), BodyMD: ptr("same"), Tech: ptr([]string{" Go ", "", "SQL"}),
-		SortOrder: ptr(5), Visible: ptr(true)}.apply(&p)
-	if err != nil || changed || p.Title != "New" || strings.Join(p.Tech, ",") != "Go,SQL" || p.SortOrder != 5 || !p.Visible {
+		SortOrder: ptr(5), Visible: ptr(true), LogoURL: ptr(" /media/x.svg "), LogoBG: ptr(" ink ")}.apply(&p)
+	if err != nil || changed || p.Title != "New" || strings.Join(p.Tech, ",") != "Go,SQL" || p.SortOrder != 5 || !p.Visible ||
+		p.LogoURL != "/media/x.svg" || p.LogoBG != "ink" {
 		t.Fatalf("apply %v %v %+v", changed, err, p)
 	}
 	if changed, _ := (Patch{BodyMD: ptr("different")}).apply(&p); !changed {
@@ -86,6 +87,10 @@ func TestPatchApply(t *testing.T) {
 		{PostSlug: ptr("No")},
 		{SortOrder: ptr(-1)},
 		{SortOrder: ptr(100_001)},
+		{LogoURL: ptr("javascript:x")},
+		{LogoURL: ptr("//evil")},
+		{LogoBG: ptr("paper")},
+		{LogoBG: ptr("")},
 	}
 	for i, b := range bad {
 		_, err := b.apply(&project{})

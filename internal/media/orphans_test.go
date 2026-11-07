@@ -358,3 +358,27 @@ func TestOrphanThreadMessageReference(t *testing.T) {
 		t.Fatalf("row linked from a sent reply is a candidate: %+v", c)
 	}
 }
+
+// A file named only by a project's logo_url (every other column empty) is
+// kept by the plan and by a cleanup that names it; clearing the logo makes
+// it a candidate again.
+func TestOrphanProjectLogoReference(t *testing.T) {
+	s := orphanStore(t, nil)
+	ctx := context.Background()
+	id := addRow(t, s, 1, rowOpt{ext: ".svg", age: 30 * day})
+	exec(t, s, `INSERT INTO projects (slug, title, logo_url, logo_bg) VALUES ('l', 'L', $1, 'ink')`,
+		"/media/"+stemN(1)+".svg")
+	if c := candidate(mustPlan(t, s), rowKey(id)); c != nil {
+		t.Fatalf("row named by logo_url is a candidate: %+v", c)
+	}
+	if res, err := s.CleanOrphans(ctx, TriggerManual, []string{rowKey(id)}); err != nil || res.Deleted.Rows != 0 {
+		t.Fatalf("clean = %+v, %v", res, err)
+	}
+	if _, err := s.Get(ctx, id); err != nil {
+		t.Fatalf("logo row gone: %v", err)
+	}
+	exec(t, s, `UPDATE projects SET logo_url = ''`)
+	if c := candidate(mustPlan(t, s), rowKey(id)); c == nil || !c.Eligible {
+		t.Fatalf("unreferenced logo row = %+v", c)
+	}
+}

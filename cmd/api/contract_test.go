@@ -58,7 +58,14 @@ func TestContractProfileAndProjects(t *testing.T) {
 		t.Errorf("manual project = %v", manual)
 	}
 	c.ok("GET", "/api/admin/projects/"+idOf(manual), nil, 200, adminProject, false)
-	c.ok("PATCH", "/api/admin/projects/"+idOf(manual), map[string]any{"visible": true}, 200, adminProject, false)
+	logo := "/media/0123456789abcdef01234567.svg"
+	pm := c.ok("PATCH", "/api/admin/projects/"+idOf(manual), map[string]any{"visible": true, "logo_url": logo,
+		"logo_bg": "ink"}, 200, adminProject, false)
+	if field(pm, "logo_url") != logo || field(pm, "logo_bg") != "ink" {
+		t.Errorf("patched logo = %v %v", field(pm, "logo_url"), field(pm, "logo_bg"))
+	}
+	c.fail("PATCH", "/api/admin/projects/"+idOf(manual), map[string]any{"logo_bg": "paper"}, 422, "validation")
+	c.fail("PATCH", "/api/admin/projects/"+idOf(manual), map[string]any{"logo_url": "//evil.example/x.svg"}, 422, "validation")
 	c.empty("POST", "/api/admin/projects/reorder", map[string]any{"ids": []any{field(manual, "id"), field(tracker, "id")}}, 204)
 	c.fail("PATCH", "/api/admin/projects/"+idOf(manual), map[string]any{"slug": "spotify-tracker"}, 409, "slug_taken")
 	c.fail("GET", "/api/admin/projects/999999", nil, 404, "not_found")
@@ -75,6 +82,10 @@ func TestContractProfileAndProjects(t *testing.T) {
 	d := c.ok("GET", "/api/v1/projects/spotify-tracker", nil, 200, projectDetail, false)
 	if field(d, "body_source") != "case_study" {
 		t.Errorf("body_source = %v, want case_study", field(d, "body_source"))
+	}
+	hm := c.ok("GET", "/api/v1/projects/hand-made", nil, 200, projectDetail, false)
+	if field(hm, "logo_url") != logo || field(hm, "logo_bg") != "ink" {
+		t.Errorf("public logo = %v %v", field(hm, "logo_url"), field(hm, "logo_bg"))
 	}
 	c.fail("GET", "/api/v1/projects/old-site", nil, 404, "not_found")
 	c.fail("GET", "/api/v1/projects?featured=maybe", nil, 400, "bad_request")

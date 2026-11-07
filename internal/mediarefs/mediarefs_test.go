@@ -124,3 +124,19 @@ func TestScanAndTouch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The whole-row scan sees projects.logo_url with every other media column empty.
+func TestScanCoversProjectLogo(t *testing.T) {
+	db := testdb.New(t)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `INSERT INTO projects (slug, title, logo_url) VALUES ('l', 'L', '/media/`+stem+`.svg')`); err != nil {
+		t.Fatal(err)
+	}
+	where, err := ScanWhere(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where[stem] != "projects" {
+		t.Fatalf("ScanWhere = %v", where)
+	}
+}

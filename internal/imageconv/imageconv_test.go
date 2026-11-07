@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/color"
 	"os"
 	"testing"
 
@@ -178,5 +179,57 @@ func TestUndecodable(t *testing.T) {
 	}
 	if _, err := Convert([]byte("<svg/>"), "image/svg+xml", Options{}); !errors.Is(err, ErrDecode) {
 		t.Fatalf("svg: %v", err)
+	}
+}
+
+// Semi-transparent pixels keep straight (non-premultiplied) color: a white
+// logo edge at half alpha stays white, not grey. The downscale goes through
+// Fit, which yields *image.RGBA (premultiplied), the path that used to halo.
+func TestConvertKeepsStraightAlpha(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 64, 64))
+	for y := range 64 {
+		for x := 32; x < 64; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 128})
+		}
+	}
+	res, err := Convert(testimg.PNG(src), imagemeta.PNG, Options{MaxDimension: 32})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := decodeWebP(t, res)
+	if _, _, _, a := img.At(4, 16).RGBA(); a != 0 {
+		t.Fatalf("transparent pixel has alpha %d", a>>8)
+	}
+	half := color.NRGBAModel.Convert(img.At(26, 16)).(color.NRGBA)
+	if half.A < 116 || half.A > 140 || half.R < 235 || half.G < 235 || half.B < 235 {
+		t.Fatalf("half-alpha white pixel is %+v", half)
+	}
+}
+
+// A transparent PNG logo that needs no downscale (the NRGBA path) keeps its
+// alpha: the clear background stays clear and the opaque mark stays opaque.
+func TestConvertTransparentPNG(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 40, 40))
+	for y := 10; y < 30; y++ {
+		for x := 10; x < 30; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 20, G: 120, B: 220, A: 255})
+		}
+	}
+	res, err := Convert(testimg.PNG(src), imagemeta.PNG, Options{MaxDimension: 2400})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := decodeWebP(t, res)
+	if b := img.Bounds(); b.Dx() != 40 || b.Dy() != 40 {
+		t.Fatalf("size %v", b)
+	}
+	for _, p := range []image.Point{{0, 0}, {39, 39}, {5, 20}} {
+		if _, _, _, a := img.At(p.X, p.Y).RGBA(); a != 0 {
+			t.Fatalf("background %v has alpha %d", p, a>>8)
+		}
+	}
+	mark := color.NRGBAModel.Convert(img.At(20, 20)).(color.NRGBA)
+	if mark.A != 255 || mark.B < 200 || mark.R > 50 {
+		t.Fatalf("mark pixel is %+v", mark)
 	}
 }
