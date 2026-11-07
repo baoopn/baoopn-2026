@@ -11,3 +11,7 @@ compatibility_date = "2026-10-01"
 #   INBOUND_WEBHOOK_SECRET (secret)    must equal the API's INBOUND_WEBHOOK_SECRET
 #     npx wrangler secret put INBOUND_WEBHOOK_SECRET
 keep_vars = true
+
+# Email-only Worker: no public workers.dev address and no preview URLs.
+workers_dev = false
+preview_urls = false
