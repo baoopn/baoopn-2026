@@ -77,6 +77,10 @@ func RateLimitWindow(n int, window time.Duration) func(http.Handler) http.Handle
 		}))
 }
 
+// ClientBucket is the per-client key used by the rate limits: the client IP,
+// with IPv6 addresses bucketed by /64.
+func ClientBucket(r *http.Request) string { return ipBucket(ClientIP(r)) }
+
 func ipBucket(ip string) string {
 	p := net.ParseIP(ip)
 	if p == nil || p.To4() != nil {
