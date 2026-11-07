@@ -423,3 +423,41 @@ export interface TopArtist {
 	plays: number;
 	last_played: string;
 }
+
+export type PlaylistPeriod = 'week' | 'month' | 'year';
+
+export interface PlaylistTrack {
+	position: number;
+	plays: number;
+	track: SpotifyTrack;
+}
+
+export interface TopPlaylist {
+	period: PlaylistPeriod;
+	/** RFC 3339 UTC, inclusive. */
+	period_start: string;
+	/** RFC 3339 UTC, exclusive. */
+	period_end: string;
+	/** IANA zone the period was cut in. */
+	time_zone: string;
+	/** "Week of Nov 2, 2026" */
+	label: string;
+	/** "Top 50 · Week of Nov 2, 2026" */
+	name: string;
+	/** ^[A-Za-z0-9]+$ */
+	spotify_id: string;
+	/** Starts with https://open.spotify.com/ */
+	spotify_url: string;
+	track_count: number;
+	total_plays: number;
+	/** RFC 3339 UTC. */
+	published_at: string;
+	/** Newest entry of each period only; [] otherwise. */
+	tracks: PlaylistTrack[];
+}
+
+export interface TopPlaylists {
+	time_zone: string;
+	/** Newest first, always arrays. */
+	periods: { week: TopPlaylist[]; month: TopPlaylist[]; year: TopPlaylist[] };
+}
