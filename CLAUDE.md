@@ -20,8 +20,8 @@ the API on the internal network (`web/src/hooks.server.ts`). The admin dashboard
   green before merging (squash or rebase). Merging deploys: GitHub Actions CI → Coolify API deploy
   (`.github/workflows/release.yml`, which refuses commits that did not come from a merged PR).
   Direct pushes are blocked locally by `.githooks/pre-push` (enable once per clone:
-  `git config core.hooksPath .githooks`). The GitHub ruleset in `.github/rulesets/main.json` can only
-  be applied once the repo is public or on GitHub Pro. See `docs/deployment.md`.
+  `git config core.hooksPath .githooks`) and on GitHub by the ruleset saved in
+  `.github/rulesets/main.json` (no force push or deletion, PR and green CI required). See `docs/deployment.md`.
 - No AI attribution in commits or PRs.
 - Parallel agents get worktrees under `.worktrees/<name>` (gitignored), never outside the repo;
   merge their branch into `main` and `git worktree remove` it when done.
