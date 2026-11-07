@@ -15,7 +15,7 @@ export const DEFAULT_PROFILE: Profile = {
 	socials: [
 		{ label: 'GitHub', url: 'https://github.com/baoopn', icon: 'github', handle: '@baoopn' },
 		{ label: 'LinkedIn', url: 'https://www.linkedin.com/in/baoopn', icon: 'linkedin' },
-		{ label: 'Instagram', url: 'https://www.instagram.com/baoongisoo', icon: 'instagram' }
+		{ label: 'Instagram', url: 'https://www.instagram.com/baoopn.me', icon: 'instagram' }
 	],
 	skills: [],
 	experience: [],
