@@ -34,7 +34,7 @@
 	);
 </script>
 
-<article class="card group">
+<article class="card group flex h-full flex-col">
 	<a
 		href="/projects/{project.slug}"
 		class="sleeve relative isolate block rounded-brand"
@@ -110,37 +110,40 @@
 	{/if}
 
 	{#if hasActions || hasMeta}
-		<div class="mt-4 flex flex-wrap items-center gap-2 border-t border-rule pt-3 text-sm">
-			{#if demo}
-				<a href={demo} target="_blank" rel="noopener noreferrer" class="action">
-					<ArrowUpRight class="size-4" aria-hidden="true" />Live site<span class="sr-only">
-						for {project.title} (opens in a new tab)</span
-					>
-				</a>
-			{/if}
-			{#if repo}
-				<a href={repo} target="_blank" rel="noopener noreferrer" class="action">
-					<SocialIcon icon="github" class="size-4" />Code<span class="sr-only">
-						for {project.title} (opens in a new tab)</span
-					>
-				</a>
-			{/if}
-			{#if hasMeta}
-				<span class="ml-auto flex items-center gap-x-3">
-					{#if project.stars > 0}
-						<span class="inline-flex items-center gap-1 font-mono tabular-nums text-ink-soft">
-							<Star class="size-3.5" aria-hidden="true" />
-							{count(project.stars)}<span class="sr-only"> stars</span>
-						</span>
-					{/if}
-					{#if project.language && showCover}
-						<span class="font-mono text-ink-soft">{project.language}</span>
-					{/if}
-					{#if project.archived}
-						<span class="chip label px-2! py-0! [--chip:var(--spot-butter)]">Archived</span>
-					{/if}
-				</span>
-			{/if}
+		<!-- mt-auto pins the footer to the card bottom so rows line up across the grid. -->
+		<div class="mt-auto pt-4">
+			<div class="flex flex-wrap items-center gap-2 border-t border-rule pt-3 text-sm">
+				{#if demo}
+					<a href={demo} target="_blank" rel="noopener noreferrer" class="action">
+						<ArrowUpRight class="size-4" aria-hidden="true" />Live site<span class="sr-only">
+							for {project.title} (opens in a new tab)</span
+						>
+					</a>
+				{/if}
+				{#if repo}
+					<a href={repo} target="_blank" rel="noopener noreferrer" class="action">
+						<SocialIcon icon="github" class="size-4" />Code<span class="sr-only">
+							for {project.title} (opens in a new tab)</span
+						>
+					</a>
+				{/if}
+				{#if hasMeta}
+					<span class="ml-auto flex items-center gap-x-3">
+						{#if project.stars > 0}
+							<span class="inline-flex items-center gap-1 font-mono tabular-nums text-ink-soft">
+								<Star class="size-3.5" aria-hidden="true" />
+								{count(project.stars)}<span class="sr-only"> stars</span>
+							</span>
+						{/if}
+						{#if project.language && showCover}
+							<span class="font-mono text-ink-soft">{project.language}</span>
+						{/if}
+						{#if project.archived}
+							<span class="chip label px-2! py-0! [--chip:var(--spot-butter)]">Archived</span>
+						{/if}
+					</span>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </article>
@@ -204,7 +207,7 @@
 	.action::after {
 		content: '';
 		position: absolute;
-		inset: -4px;
+		inset: -5px;
 	}
 	.action:hover {
 		background: var(--paper-2);

@@ -35,15 +35,22 @@
 	--code-hl-bg: #3d384c;
 }
 
-/* Sticky site header (Header.svelte). 44px brand row + 2*12px padding + 1px rule. */
+/* Sticky site header (Header.svelte): 2*12px padding + 1px rule around the tallest
+   item. Below md that is the 44px brand row (69px); at md+ the 50px ThemeToggle
+   fieldset sets it (75px). */
 :root {
 	--header-h: 4.3125rem;
+}
+@media (min-width: 48rem) {
+	:root {
+		--header-h: 4.6875rem;
+	}
 }
 html {
 	scroll-padding-top: calc(var(--header-h) + 1rem);
 }
 @media print {
-	header {
+	.site-header {
 		position: static;
 	}
 }
