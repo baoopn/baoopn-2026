@@ -89,6 +89,8 @@ func TestCleanPath(t *testing.T) {
 	for p, ex := range map[string]bool{"/admin": true, "/admin/inbox": true, "/api/v1": true,
 		"/media/x.png": true, "/administrator": true, "/blog": false, "/": false, "/about": false,
 		"/blog/my-post-1": false, "/projects/spotify-tracker": false, "/blog/a/b": true, "/wp-login.php": true,
+		"/blog/my-post/1": false, "/blog/my-post/20": false, "/blog/my-post/21": true, "/blog/my-post/0": true,
+		"/blog/my-post/01": true, "/blog/my-post/2/x": true, "/blog/My_post/2": true, "/projects/x/2": true,
 		"/blog/" + strings.Repeat("x", 120): true} {
 		if excludedPath(p) != ex {
 			t.Errorf("excludedPath(%q) = %v", p, !ex)

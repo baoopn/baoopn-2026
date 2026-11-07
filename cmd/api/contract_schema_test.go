@@ -192,20 +192,19 @@ var (
 	tocItem           = obj(fields{"id": str, "text": str, "level": num})
 	postSummaryFields = fields{
 		"slug": str, "title": str, "excerpt": str, "cover_url": str, "tags": arr(str),
-		"series": str, "series_title": str, "series_order": num, "published_at": ts,
-		"updated_at": ts, "reading_minutes": num, "views": num,
+		"part_count": num, "published_at": ts, "updated_at": ts, "reading_minutes": num, "views": num,
 	}
 	postSummary = obj(postSummaryFields)
-	postLink    = obj(fields{"slug": str, "title": str, "series_order": num})
+	partRef     = obj(fields{"no": num, "title": str})
+	postPart    = obj(fields{"no": num, "title": str, "content_html": str, "toc": arr(tocItem), "reading_minutes": num})
 	postDetail  = obj(extend(postSummaryFields, fields{
-		"content_html": str, "toc": arr(tocItem), "series_posts": arr(postLink),
-		"prev": null(postLink), "next": null(postLink),
+		"parts": arr(partRef), "part": postPart, "prev": null(partRef), "next": null(partRef),
 	}))
-	adminPost = obj(fields{
-		"id": num, "slug": str, "title": str, "excerpt": str, "content_md": str, "cover_url": str,
-		"tags": arr(str), "series": str, "series_title": str, "series_order": num,
+	adminPostPart = obj(fields{"no": num, "title": str, "content_md": str, "reading_minutes": num})
+	adminPost     = obj(fields{
+		"id": num, "slug": str, "title": str, "excerpt": str, "cover_url": str, "tags": arr(str),
 		"status": enum("draft", "published"), "state": enum("draft", "scheduled", "published"),
-		"published_at": null(ts), "reading_minutes": num, "views": num, "legacy_path": null(str),
+		"published_at": null(ts), "reading_minutes": num, "views": num, "parts": arr(adminPostPart),
 		"created_at": ts, "updated_at": ts,
 	})
 	previewResult = obj(fields{"html": str, "toc": arr(tocItem), "reading_minutes": num})
@@ -263,7 +262,6 @@ var (
 	topArtist  = obj(fields{"artist": spotifyArtist, "plays": num, "last_played": ts})
 
 	okShape     = obj(fields{"ok": boolean})
-	slugShape   = obj(fields{"slug": str})
 	countShape  = obj(fields{"count": num})
 	sentToShape = obj(fields{"sent_to": str})
 )

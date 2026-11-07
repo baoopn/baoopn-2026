@@ -12,10 +12,9 @@ import (
 	"github.com/baoopn/baoopn-2026/internal/logging"
 )
 
-// Public mounts /posts, /posts/legacy, /posts/{slug} and /tags.
+// Public mounts /posts, /posts/{slug} and /tags.
 func (m *Module) Public(r chi.Router) {
 	r.Get("/posts", m.publicList)
-	r.Get("/posts/legacy", m.publicLegacy)
 	r.Get("/posts/{slug}", m.publicDetail)
 	r.Get("/tags", m.publicTags)
 }
@@ -36,12 +35,11 @@ func (m *Module) publicList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := publicFilter{
-		Tag:    strings.ToLower(strings.TrimSpace(q.Get("tag"))),
-		Series: strings.TrimSpace(q.Get("series")),
-		Q:      strings.TrimSpace(q.Get("q")),
-		Page:   page, Limit: limit,
+		Tag:  strings.ToLower(strings.TrimSpace(q.Get("tag"))),
+		Q:    strings.TrimSpace(q.Get("q")),
+		Page: page, Limit: limit,
 	}
-	if len(f.Tag) > 30 || len(f.Series) > 80 || runes(f.Q) > 200 {
+	if len(f.Tag) > 30 || runes(f.Q) > 200 {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "filter value too long")
 		return
 	}
@@ -59,9 +57,14 @@ func (m *Module) publicDetail(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "post not found")
 		return
 	}
-	d, err := m.detail(r.Context(), slug)
+	no, ok := intParam(r.URL.Query().Get("part"), 1, 1, MaxParts)
+	if !ok {
+		httpapi.Error(w, http.StatusNotFound, "not_found", "part not found")
+		return
+	}
+	d, err := m.detail(r.Context(), slug, no)
 	if errors.Is(err, ErrNotFound) {
-		httpapi.Error(w, http.StatusNotFound, "not_found", "post not found")
+		httpapi.Error(w, http.StatusNotFound, "not_found", "post or part not found")
 		return
 	}
 	if err != nil {
@@ -69,33 +72,6 @@ func (m *Module) publicDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, http.StatusOK, d)
-}
-
-// normalizeLegacy lowercases a v3 path and strips a trailing slash.
-func normalizeLegacy(p string) string {
-	p = strings.ToLower(strings.TrimSpace(p))
-	if len(p) > 1 {
-		p = strings.TrimRight(p, "/")
-	}
-	return p
-}
-
-func (m *Module) publicLegacy(w http.ResponseWriter, r *http.Request) {
-	p := normalizeLegacy(r.URL.Query().Get("path"))
-	if p == "" || len(p) > 200 || !strings.HasPrefix(p, "/") {
-		httpapi.Error(w, http.StatusBadRequest, "bad_request", "path must be an absolute path")
-		return
-	}
-	slug, err := m.legacySlug(r.Context(), p)
-	if errors.Is(err, ErrNotFound) {
-		httpapi.Error(w, http.StatusNotFound, "not_found", "no post for that path")
-		return
-	}
-	if err != nil {
-		m.internal(w, r, "blog: legacy", err)
-		return
-	}
-	httpapi.JSON(w, http.StatusOK, map[string]string{"slug": slug})
 }
 
 func (m *Module) publicTags(w http.ResponseWriter, r *http.Request) {

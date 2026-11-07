@@ -48,7 +48,8 @@
 		preview?: boolean;
 		/** CSS height of the editing area. */
 		height?: string;
-		onpreview?: (r: PreviewResult) => void;
+		/** Called with each rendered preview and the Markdown it was rendered from. */
+		onpreview?: (r: PreviewResult, markdown: string) => void;
 	} = $props();
 
 	const uid = $props.id();
@@ -177,7 +178,7 @@
 			if (seq !== previewSeq) return;
 			html = r.html;
 			previewError = null;
-			onpreview?.(r);
+			onpreview?.(r, md);
 		} catch (err) {
 			if (seq === previewSeq) previewError = errorMessage(err);
 		} finally {

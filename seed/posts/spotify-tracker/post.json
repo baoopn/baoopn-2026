@@ -1,0 +1,59 @@
+{
+  "slug": "spotify-tracker",
+  "title": "Building spotify-tracker: a record of everything I play",
+  "excerpt": "How I rebuilt my Spotify listening tracker in Go: a poller, a Soundcharts enricher, a live public page and a Clerk-protected admin, all from one image.",
+  "tags": [
+    "go",
+    "grpc",
+    "postgresql",
+    "redis",
+    "sveltekit",
+    "spotify"
+  ],
+  "parts": [
+    {
+      "title": "What it is and how it fits together",
+      "file": "part-1.md"
+    },
+    {
+      "title": "Polling Spotify and counting plays",
+      "file": "part-2.md"
+    },
+    {
+      "title": "Enriching tracks with Soundcharts",
+      "file": "part-3.md"
+    },
+    {
+      "title": "The public page and the admin dashboard",
+      "file": "part-4.md"
+    },
+    {
+      "title": "Running it in production",
+      "file": "part-5.md"
+    },
+    {
+      "title": "Lessons learned",
+      "file": "part-6.md"
+    }
+  ],
+  "screenshots": [
+    {
+      "id": "public-home",
+      "url": "https://listening.baoopn.com",
+      "what": "Top of the public page with the now-playing hero (album art left, title, artists and progress line right). Desktop viewport about 1440x900, light mode, scrolled to top. Best taken while a track is playing.",
+      "caption": "The public page: what I am playing right now."
+    },
+    {
+      "id": "public-song-stats",
+      "url": "https://listening.baoopn.com",
+      "what": "The song stats panel below the hero (radar chart, tempo gauge, key wheel, loudness meter, genre bar). Desktop viewport, light mode, scrolled so the whole panel is in view. Needs an enriched track on show.",
+      "caption": "Audio features and genres from Soundcharts, shown for the current track."
+    },
+    {
+      "id": "public-recent",
+      "url": "https://listening.baoopn.com",
+      "what": "The 'Recently played' numbered tracklist and the recent playlists row of square sleeves. Desktop viewport, dark mode, scrolled down to that section.",
+      "caption": "Recently played, set as a numbered tracklist."
+    }
+  ]
+}

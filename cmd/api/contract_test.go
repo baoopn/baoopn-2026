@@ -88,9 +88,12 @@ func TestContractPosts(t *testing.T) {
 	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
 	future := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
 	input := func(title, status string, at any) map[string]any {
-		return map[string]any{"title": title, "excerpt": "", "content_md": "## Intro\n\nHello **world**.\n\n### Detail\n\nMore.",
-			"cover_url": "/media/cover.png", "tags": []string{"Go", "Testing"}, "series": "", "series_title": "",
-			"series_order": 0, "status": status, "published_at": at}
+		return map[string]any{"title": title, "excerpt": "", "cover_url": "/media/cover.png",
+			"tags": []string{"Go", "Testing"}, "status": status, "published_at": at,
+			"parts": []map[string]string{
+				{"title": "Intro", "content_md": "## Intro\n\nHello **world**.\n\n### Detail\n\nMore."},
+				{"title": "", "content_md": "## Second\n\nPart two."},
+			}}
 	}
 
 	pub := c.ok("POST", "/api/admin/posts", input("Contract Testing in Go", "published", past), 201, adminPost, false)
@@ -104,9 +107,15 @@ func TestContractPosts(t *testing.T) {
 		t.Error("published with null published_at must default to now")
 	}
 	c.fail("POST", "/api/admin/posts", map[string]any{"title": "x", "slug": "contract-testing-in-go", "status": "draft",
-		"excerpt": "", "content_md": "", "cover_url": "", "tags": []string{}, "series": "", "series_title": "",
-		"series_order": 0, "published_at": nil}, 409, "slug_taken")
+		"excerpt": "", "cover_url": "", "tags": []string{}, "published_at": nil,
+		"parts": []map[string]string{{"title": "", "content_md": ""}}}, 409, "slug_taken")
 	c.fail("POST", "/api/admin/posts", input("", "draft", nil), 422, "validation")
+	noParts := input("No Parts", "draft", nil)
+	noParts["parts"] = []map[string]string{}
+	c.fail("POST", "/api/admin/posts", noParts, 422, "validation")
+	if parts := list(field(pub, "parts")); len(parts) != 2 || field(parts[1], "no") != float64(2) {
+		t.Errorf("admin parts = %v", parts)
+	}
 
 	c.ok("GET", "/api/admin/posts", nil, 200, arr(adminPost), false)
 	if s := list(c.ok("GET", "/api/admin/posts?state=scheduled", nil, 200, arr(adminPost), false)); len(s) != 1 {
@@ -117,7 +126,7 @@ func TestContractPosts(t *testing.T) {
 	c.ok("PUT", "/api/admin/posts/"+idOf(draft), input("Half Written", "draft", nil), 200, adminPost, false)
 	c.ok("POST", "/api/admin/posts/preview", map[string]string{"markdown": "## A\n\ntext"}, 200, previewResult, false)
 
-	// Public: the v3 seed series plus our published posts.
+	// Public: our published posts, one entry per post.
 	posts := list(c.ok("GET", "/api/v1/posts?limit=50", nil, 200, arr(postSummary), true))
 	for _, p := range posts {
 		if s := field(p, "slug"); s == field(sched, "slug") || s == field(draft, "slug") {
@@ -126,9 +135,19 @@ func TestContractPosts(t *testing.T) {
 	}
 	c.ok("GET", "/api/v1/posts?tag=go&page=1&limit=1", nil, 200, arr(postSummary), true)
 	c.ok("GET", "/api/v1/posts?q=hello", nil, 200, arr(postSummary), true)
-	c.ok("GET", "/api/v1/posts?series=portfolio-app", nil, 200, arr(postSummary), true)
 	c.fail("GET", "/api/v1/posts?limit=51", nil, 400, "bad_request")
-	c.ok("GET", "/api/v1/posts/"+field(pub, "slug").(string), nil, 200, postDetail, false)
+	pubSlug := field(pub, "slug").(string)
+	d1 := c.ok("GET", "/api/v1/posts/"+pubSlug, nil, 200, postDetail, false)
+	if field(d1, "part_count") != float64(2) || field(d1, "prev") != nil || field(field(d1, "next"), "no") != float64(2) ||
+		field(field(d1, "part"), "title") != "Intro" {
+		t.Errorf("part 1 detail = %v", d1)
+	}
+	d2 := c.ok("GET", "/api/v1/posts/"+pubSlug+"?part=2", nil, 200, postDetail, false)
+	if field(field(d2, "prev"), "no") != float64(1) || field(d2, "next") != nil || len(list(field(d2, "parts"))) != 2 {
+		t.Errorf("part 2 detail = %v", d2)
+	}
+	c.fail("GET", "/api/v1/posts/"+pubSlug+"?part=3", nil, 404, "not_found")
+	c.fail("GET", "/api/v1/posts/"+pubSlug+"?part=x", nil, 404, "not_found")
 	c.fail("GET", "/api/v1/posts/"+field(sched, "slug").(string), nil, 404, "not_found")
 	c.fail("GET", "/api/v1/posts/"+field(draft, "slug").(string), nil, 404, "not_found")
 	tags := list(c.ok("GET", "/api/v1/tags", nil, 200, arr(tagCount), false))
@@ -137,16 +156,6 @@ func TestContractPosts(t *testing.T) {
 			t.Errorf("tag go count = %v, want 2 (scheduled and draft excluded)", field(tg, "count"))
 		}
 	}
-
-	// A seeded series post: series_posts and prev/next are populated.
-	leg := c.ok("GET", "/api/v1/posts/legacy?path=/blog/portfolio-app/2", nil, 200, slugShape, false)
-	if s, _ := field(leg, "slug").(string); s != "" {
-		sp := c.ok("GET", "/api/v1/posts/"+s, nil, 200, postDetail, false)
-		if len(list(field(sp, "series_posts"))) < 2 || field(sp, "prev") == nil {
-			t.Errorf("series detail = %v", sp)
-		}
-	}
-	c.fail("GET", "/api/v1/posts/legacy?path=/blog/nope/1", nil, 404, "not_found")
 
 	// The scheduled post appears once its time has come.
 	if _, err := c.db.Exec(t.Context(), `UPDATE posts SET published_at = now() - interval '1 minute' WHERE id = $1`,

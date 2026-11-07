@@ -78,6 +78,7 @@
 				<tr>
 					<th scope="col">Title</th>
 					<th scope="col">State</th>
+					<th scope="col" class="num">Parts</th>
 					<th scope="col" class="num">Views</th>
 					<th scope="col">Updated</th>
 					<th scope="col"><span class="sr-only">Actions</span></th>
@@ -101,6 +102,7 @@
 								<p class="mt-1 font-mono text-xs text-ink-soft">{dateTime(p.published_at)}</p>
 							{/if}
 						</td>
+						<td class="num font-mono tabular-nums">{num(p.parts?.length || 1)}</td>
 						<td class="num font-mono tabular-nums">{num(p.views)}</td>
 						<td class="font-mono text-sm text-ink-soft"><RelTime value={p.updated_at} /></td>
 						<td>

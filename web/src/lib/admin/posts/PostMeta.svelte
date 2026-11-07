@@ -100,7 +100,7 @@
 			bind:value={form.excerpt}
 			aria-describedby="{id}-excerpt-hint"></textarea>
 		<p id="{id}-excerpt-hint" class="hint">
-			Shown in lists and link previews · {form.excerpt.length}/300
+			Shown in lists and link previews; empty uses the start of part 1 · {form.excerpt.length}/300
 		</p>
 	</div>
 
@@ -116,35 +116,4 @@
 	</div>
 
 	<MediaField id="{id}-cover" label="Cover image" bind:value={form.cover_url} />
-
-	<fieldset class="flex flex-col gap-3 border-t border-rule pt-4">
-		<legend class="eyebrow">Series</legend>
-		<div>
-			<label class="field-label" for="{id}-series">Series key</label>
-			<input
-				id="{id}-series"
-				class="input font-mono text-sm"
-				bind:value={form.series}
-				placeholder="e.g. homelab"
-				autocomplete="off"
-			/>
-		</div>
-		<div class="grid grid-cols-[1fr_6rem] gap-3">
-			<div>
-				<label class="field-label" for="{id}-series-title">Series title</label>
-				<input id="{id}-series-title" class="input" bind:value={form.series_title} />
-			</div>
-			<div>
-				<label class="field-label" for="{id}-series-order">Order</label>
-				<input
-					id="{id}-series-order"
-					class="input"
-					type="number"
-					min="0"
-					step="1"
-					bind:value={form.series_order}
-				/>
-			</div>
-		</div>
-	</fieldset>
 </div>

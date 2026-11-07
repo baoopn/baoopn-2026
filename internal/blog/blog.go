@@ -1,5 +1,5 @@
-// Package blog serves blog posts: Markdown rendered on save, drafts,
-// scheduled publishing, series navigation, tags and legacy v3 redirects.
+// Package blog serves blog posts of 1–20 ordered parts: Markdown rendered
+// on save, drafts, scheduled publishing, part navigation and tags.
 package blog
 
 import (
@@ -39,32 +39,23 @@ func New(d Deps) *Module {
 	return &Module{db: d.DB, log: d.Log, now: time.Now}
 }
 
-// PostInput is the POST/PUT body (types.ts PostInput).
+// PartInput is one part of a PostInput.
+type PartInput struct {
+	Title     string `json:"title"`
+	ContentMD string `json:"content_md"`
+}
+
+// PostInput is the POST/PUT body (types.ts PostInput). Parts are saved in
+// array order as parts 1..n.
 type PostInput struct {
-	Slug        string     `json:"slug"`
-	Title       string     `json:"title"`
-	Excerpt     string     `json:"excerpt"`
-	ContentMD   string     `json:"content_md"`
-	CoverURL    string     `json:"cover_url"`
-	Tags        []string   `json:"tags"`
-	Series      string     `json:"series"`
-	SeriesTitle string     `json:"series_title"`
-	SeriesOrder int        `json:"series_order"`
-	Status      string     `json:"status"`
-	PublishedAt *time.Time `json:"published_at"`
-}
-
-// ImportPost is a post imported with its old v3 URL.
-type ImportPost struct {
-	PostInput
-	LegacyPath string
-}
-
-// PostLink is a navigation link (types.ts PostLink).
-type PostLink struct {
-	Slug        string `json:"slug"`
-	Title       string `json:"title"`
-	SeriesOrder int    `json:"series_order"`
+	Slug        string      `json:"slug"`
+	Title       string      `json:"title"`
+	Excerpt     string      `json:"excerpt"`
+	CoverURL    string      `json:"cover_url"`
+	Tags        []string    `json:"tags"`
+	Status      string      `json:"status"`
+	PublishedAt *time.Time  `json:"published_at"`
+	Parts       []PartInput `json:"parts"`
 }
 
 // PostSummary is a public list item (types.ts PostSummary).
@@ -74,46 +65,60 @@ type PostSummary struct {
 	Excerpt        string    `json:"excerpt"`
 	CoverURL       string    `json:"cover_url"`
 	Tags           []string  `json:"tags"`
-	Series         string    `json:"series"`
-	SeriesTitle    string    `json:"series_title"`
-	SeriesOrder    int       `json:"series_order"`
+	PartCount      int       `json:"part_count"`
 	PublishedAt    time.Time `json:"published_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	ReadingMinutes int       `json:"reading_minutes"`
 	Views          int64     `json:"views"`
 }
 
-// PostDetail is a full public post (types.ts PostDetail).
+// PartRef is a part reference for navigation (types.ts PostPartRef).
+type PartRef struct {
+	No    int    `json:"no"`
+	Title string `json:"title"`
+}
+
+// PostPart is the requested part of a public post (types.ts PostPart).
+type PostPart struct {
+	PartRef
+	ContentHTML    string          `json:"content_html"`
+	TOC            json.RawMessage `json:"toc"`
+	ReadingMinutes int             `json:"reading_minutes"`
+}
+
+// PostDetail is a public post with one part (types.ts PostDetail).
 type PostDetail struct {
 	PostSummary
-	ContentHTML string          `json:"content_html"`
-	TOC         json.RawMessage `json:"toc"`
-	SeriesPosts []PostLink      `json:"series_posts"`
-	Prev        *PostLink       `json:"prev"`
-	Next        *PostLink       `json:"next"`
-	id          int64
+	Parts []PartRef `json:"parts"`
+	Part  PostPart  `json:"part"`
+	Prev  *PartRef  `json:"prev"`
+	Next  *PartRef  `json:"next"`
+}
+
+// AdminPostPart is one part in the editor (types.ts AdminPostPart).
+type AdminPostPart struct {
+	No             int    `json:"no"`
+	Title          string `json:"title"`
+	ContentMD      string `json:"content_md"`
+	ReadingMinutes int    `json:"reading_minutes"`
 }
 
 // AdminPost is the admin view of a post (types.ts AdminPost).
 type AdminPost struct {
-	ID             int64      `json:"id"`
-	Slug           string     `json:"slug"`
-	Title          string     `json:"title"`
-	Excerpt        string     `json:"excerpt"`
-	ContentMD      string     `json:"content_md"`
-	CoverURL       string     `json:"cover_url"`
-	Tags           []string   `json:"tags"`
-	Series         string     `json:"series"`
-	SeriesTitle    string     `json:"series_title"`
-	SeriesOrder    int        `json:"series_order"`
-	Status         string     `json:"status"`
-	State          string     `json:"state"`
-	PublishedAt    *time.Time `json:"published_at"`
-	ReadingMinutes int        `json:"reading_minutes"`
-	Views          int64      `json:"views"`
-	LegacyPath     *string    `json:"legacy_path"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             int64           `json:"id"`
+	Slug           string          `json:"slug"`
+	Title          string          `json:"title"`
+	Excerpt        string          `json:"excerpt"`
+	CoverURL       string          `json:"cover_url"`
+	Tags           []string        `json:"tags"`
+	Status         string          `json:"status"`
+	State          string          `json:"state"`
+	PublishedAt    *time.Time      `json:"published_at"`
+	ReadingMinutes int             `json:"reading_minutes"`
+	Views          int64           `json:"views"`
+	Parts          []AdminPostPart `json:"parts"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 // TagCount is one tag with its number of visible posts.
@@ -121,6 +126,9 @@ type TagCount struct {
 	Tag   string `json:"tag"`
 	Count int64  `json:"count"`
 }
+
+// MaxParts is the most parts a post may have.
+const MaxParts = 20
 
 var (
 	// ErrSlugTaken is returned when an explicit slug is already in use.
@@ -207,11 +215,21 @@ func validate(in *PostInput, now time.Time) (generated bool, err error) {
 	if runes(in.Excerpt) > 500 {
 		return false, invalid("excerpt must be at most 500 characters")
 	}
-	if runes(in.ContentMD) > 200_000 {
-		return false, invalid("content_md must be at most 200000 characters")
+	if n := len(in.Parts); n < 1 || n > MaxParts {
+		return false, invalid("a post must have 1–20 parts")
+	}
+	for i := range in.Parts {
+		pt := &in.Parts[i]
+		pt.Title = strings.TrimSpace(pt.Title)
+		if runes(pt.Title) > 200 {
+			return false, invalid("part " + strconv.Itoa(i+1) + " title must be at most 200 characters")
+		}
+		if runes(pt.ContentMD) > 200_000 {
+			return false, invalid("part " + strconv.Itoa(i+1) + " content_md must be at most 200000 characters")
+		}
 	}
 	if in.Excerpt == "" {
-		in.Excerpt = markdown.Excerpt(in.ContentMD, 200)
+		in.Excerpt = markdown.Excerpt(in.Parts[0].ContentMD, 200)
 	}
 	in.CoverURL = strings.TrimSpace(in.CoverURL)
 	if !validURL(in.CoverURL) {
@@ -219,17 +237,6 @@ func validate(in *PostInput, now time.Time) (generated bool, err error) {
 	}
 	if in.Tags, err = normalizeTags(in.Tags); err != nil {
 		return false, err
-	}
-	in.Series = strings.TrimSpace(in.Series)
-	if in.Series != "" && (len(in.Series) > 80 || !slugRe.MatchString(in.Series)) {
-		return false, invalid("series must be empty or a slug")
-	}
-	in.SeriesTitle = strings.TrimSpace(in.SeriesTitle)
-	if runes(in.SeriesTitle) > 200 {
-		return false, invalid("series_title must be at most 200 characters")
-	}
-	if in.SeriesOrder < 0 || in.SeriesOrder > 1000 {
-		return false, invalid("series_order must be 0–1000")
 	}
 	switch in.Status {
 	case "draft":
