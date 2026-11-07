@@ -108,6 +108,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: docker compose config
         run: |
+          export S3_SECRET_ACCESS_KEY=ci-only-placeholder
           docker compose -f docker-compose.yml config -q
           docker compose -f docker-compose.yml --profile full config -q
           SERVICE_USER_POSTGRES=u SERVICE_PASSWORD_POSTGRES=p SERVICE_PASSWORD_64_INTERNAL=i \
