@@ -191,7 +191,7 @@ var (
 
 	tocItem           = obj(fields{"id": str, "text": str, "level": num})
 	postSummaryFields = fields{
-		"slug": str, "title": str, "excerpt": str, "cover_url": str, "tags": arr(str),
+		"slug": str, "title": str, "excerpt": str, "cover_url": str, "category": enum("tech", "life"), "tags": arr(str),
 		"part_count": num, "published_at": ts, "updated_at": ts, "reading_minutes": num, "views": num,
 	}
 	postSummary = obj(postSummaryFields)
@@ -202,8 +202,8 @@ var (
 	}))
 	adminPostPart = obj(fields{"no": num, "title": str, "content_md": str, "reading_minutes": num})
 	adminPost     = obj(fields{
-		"id": num, "slug": str, "title": str, "excerpt": str, "cover_url": str, "tags": arr(str),
-		"status": enum("draft", "published"), "state": enum("draft", "scheduled", "published"),
+		"id": num, "slug": str, "title": str, "excerpt": str, "cover_url": str, "category": enum("tech", "life"),
+		"tags": arr(str), "status": enum("draft", "published"), "state": enum("draft", "scheduled", "published"),
 		"published_at": null(ts), "reading_minutes": num, "views": num, "parts": arr(adminPostPart),
 		"created_at": ts, "updated_at": ts,
 	})

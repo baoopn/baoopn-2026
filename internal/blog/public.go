@@ -34,10 +34,16 @@ func (m *Module) publicList(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "limit must be between 1 and 50")
 		return
 	}
+	category, ok := categoryParam(q.Get("category"))
+	if !ok {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "category must be tech or life")
+		return
+	}
 	f := publicFilter{
-		Tag:  strings.ToLower(strings.TrimSpace(q.Get("tag"))),
-		Q:    strings.TrimSpace(q.Get("q")),
-		Page: page, Limit: limit,
+		Tag:      strings.ToLower(strings.TrimSpace(q.Get("tag"))),
+		Q:        strings.TrimSpace(q.Get("q")),
+		Category: category,
+		Page:     page, Limit: limit,
 	}
 	if len(f.Tag) > 30 || runes(f.Q) > 200 {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "filter value too long")
@@ -75,7 +81,12 @@ func (m *Module) publicDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) publicTags(w http.ResponseWriter, r *http.Request) {
-	tags, err := m.tags(r.Context())
+	category, ok := categoryParam(r.URL.Query().Get("category"))
+	if !ok {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "category must be tech or life")
+		return
+	}
+	tags, err := m.tags(r.Context(), category)
 	if err != nil {
 		m.internal(w, r, "blog: tags", err)
 		return
@@ -86,6 +97,11 @@ func (m *Module) publicTags(w http.ResponseWriter, r *http.Request) {
 func (m *Module) internal(w http.ResponseWriter, r *http.Request, msg string, err error) {
 	m.log.ErrorContext(r.Context(), msg, logging.Err(err))
 	httpapi.Error(w, http.StatusInternalServerError, "internal", "internal error")
+}
+
+// categoryParam accepts an empty value (all categories), tech or life.
+func categoryParam(v string) (string, bool) {
+	return v, v == "" || ValidCategory(v)
 }
 
 func intParam(v string, def, lo, hi int) (int, bool) {

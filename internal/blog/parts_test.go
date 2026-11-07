@@ -168,6 +168,79 @@ func TestPublicListFiltersPagingViews(t *testing.T) {
 	}
 }
 
+func TestCategories(t *testing.T) {
+	h := newHarness(t)
+	tech := h.create(PostInput{Title: "Tech One", Parts: one("x"), Status: "published", Tags: []string{"go"},
+		PublishedAt: at(-2 * time.Hour)})
+	life := h.create(PostInput{Title: "Life One", Category: "life", Parts: one("x"), Status: "published",
+		Tags: []string{"travel", "go"}, PublishedAt: at(-time.Hour)})
+	h.create(PostInput{Title: "Life Draft", Category: "life", Parts: one("x"), Status: "draft", Tags: []string{"food"}})
+	if tech.Category != "tech" || life.Category != "life" {
+		t.Fatalf("categories %q %q", tech.Category, life.Category)
+	}
+	if code := h.do(h.admin, "POST", "/posts", PostInput{Title: "x", Category: "food", Status: "draft", Parts: one("")},
+		nil); code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad category %d", code)
+	}
+
+	var l struct{ Data []PostSummary }
+	h.do(h.public, "GET", "/posts", nil, &l)
+	if len(l.Data) != 2 || l.Data[0].Category != "life" || l.Data[1].Category != "tech" {
+		t.Fatalf("all %+v", l.Data)
+	}
+	for cat, want := range map[string]string{"tech": "tech-one", "life": "life-one"} {
+		h.do(h.public, "GET", "/posts?category="+cat, nil, &l)
+		if len(l.Data) != 1 || l.Data[0].Slug != want {
+			t.Fatalf("category=%s %+v", cat, l.Data)
+		}
+	}
+	h.do(h.public, "GET", "/posts?category=life&tag=go", nil, &l)
+	if len(l.Data) != 1 || l.Data[0].Slug != "life-one" {
+		t.Fatalf("life+go %+v", l.Data)
+	}
+	for _, p := range []string{"/posts?category=Life", "/posts?category=all", "/tags?category=x"} {
+		if code := h.do(h.public, "GET", p, nil, nil); code != http.StatusBadRequest {
+			t.Errorf("%s: %d", p, code)
+		}
+	}
+	var d struct{ Data PostDetail }
+	h.do(h.public, "GET", "/posts/life-one", nil, &d)
+	if d.Data.Category != "life" {
+		t.Fatalf("detail category %q", d.Data.Category)
+	}
+
+	var tags struct{ Data []TagCount }
+	h.do(h.public, "GET", "/tags?category=life", nil, &tags)
+	if len(tags.Data) != 2 || tags.Data[0] != (TagCount{"go", 1}) || tags.Data[1] != (TagCount{"travel", 1}) {
+		t.Fatalf("life tags %+v", tags.Data)
+	}
+	h.do(h.public, "GET", "/tags", nil, &tags)
+	if len(tags.Data) != 2 || tags.Data[0] != (TagCount{"go", 2}) {
+		t.Fatalf("all tags %+v", tags.Data)
+	}
+
+	var adm struct{ Data []AdminPost }
+	h.do(h.admin, "GET", "/posts?category=life", nil, &adm)
+	if len(adm.Data) != 2 {
+		t.Fatalf("admin life %+v", adm.Data)
+	}
+	h.do(h.admin, "GET", "/posts?category=life&state=draft&q=draft", nil, &adm)
+	if len(adm.Data) != 1 || adm.Data[0].Title != "Life Draft" {
+		t.Fatalf("admin life drafts %+v", adm.Data)
+	}
+	if code := h.do(h.admin, "GET", "/posts?category=bogus", nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("admin bad category %d", code)
+	}
+
+	// PUT can move a post between categories; an empty category means tech.
+	var upd struct{ Data AdminPost }
+	path := "/posts/" + strconv.FormatInt(life.ID, 10)
+	h.do(h.admin, "PUT", path, PostInput{Title: "Life One", Status: "published", Parts: one("x")}, &upd)
+	if upd.Data.Category != "tech" {
+		t.Fatalf("put default category %q", upd.Data.Category)
+	}
+}
+
 func TestPartNavigationAndImport(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

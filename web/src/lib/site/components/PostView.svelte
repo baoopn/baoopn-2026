@@ -5,7 +5,7 @@
 	import Seo from '#lib/site/components/Seo.svelte';
 	import Toc from '#lib/site/components/Toc.svelte';
 	import { absolute, count, dateLong, pad2, safeImage } from '#lib/site/format.js';
-	import { partHref, partLabel } from '#lib/site/post.js';
+	import { categoryChip, categoryHref, categoryLabel, partHref, partLabel } from '#lib/site/post.js';
 	import type { PostDetail } from '#lib/api/types.js';
 
 	let { post, author }: { post: PostDetail; author: string } = $props();
@@ -85,9 +85,18 @@
 
 <article class="mx-auto max-w-6xl px-4 sm:px-6">
 	<header class="mx-auto max-w-3xl pt-10 sm:pt-14">
-		<a href="/blog" class="link label inline-flex min-h-11 items-center gap-1.5 text-ink-soft">
-			<ArrowLeft class="size-4" aria-hidden="true" /> All posts
-		</a>
+		<div class="flex flex-wrap items-center gap-x-4">
+			<a href="/blog" class="link label inline-flex min-h-11 items-center gap-1.5 text-ink-soft">
+				<ArrowLeft class="size-4" aria-hidden="true" /> All posts
+			</a>
+			<a
+				href={categoryHref(post.category)}
+				class="inline-flex min-h-11 items-center"
+				aria-label="More {categoryLabel(post.category).toLowerCase()} posts"
+			>
+				<span class="chip label" style:--chip={categoryChip(post.category)}>{categoryLabel(post.category)}</span>
+			</a>
+		</div>
 		<h1 class="mt-4 font-display text-4xl leading-[1.05] font-semibold tracking-[-0.03em] text-balance break-words sm:text-5xl lg:text-6xl">
 			{post.title}
 		</h1>

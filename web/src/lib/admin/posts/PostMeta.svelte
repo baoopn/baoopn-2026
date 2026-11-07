@@ -63,6 +63,15 @@
 	</fieldset>
 
 	<div>
+		<label class="field-label" for="{id}-category">Category</label>
+		<select id="{id}-category" class="input" bind:value={form.category} aria-describedby="{id}-category-hint">
+			<option value="tech">Tech</option>
+			<option value="life">Life</option>
+		</select>
+		<p id="{id}-category-hint" class="hint">Tech and life posts get their own tabs on /blog.</p>
+	</div>
+
+	<div>
 		<label class="field-label" for="{id}-slug">Slug</label>
 		<div class="flex items-center gap-1">
 			<span class="font-mono text-sm text-ink-soft">/blog/</span>

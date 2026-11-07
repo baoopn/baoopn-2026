@@ -78,10 +78,10 @@ func replaceParts(ctx context.Context, tx pgx.Tx, postID int64, rp renderedParts
 func insertPost(ctx context.Context, tx pgx.Tx, slug string, in PostInput, rp renderedParts) (int64, bool, error) {
 	var id int64
 	err := tx.QueryRow(ctx, `
-		INSERT INTO posts (slug, title, excerpt, cover_url, tags, status, published_at, reading_minutes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO posts (slug, title, excerpt, cover_url, tags, status, published_at, reading_minutes, category)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (slug) DO NOTHING RETURNING id`,
-		slug, in.Title, in.Excerpt, in.CoverURL, in.Tags, in.Status, in.PublishedAt, rp.minutes).Scan(&id)
+		slug, in.Title, in.Excerpt, in.CoverURL, in.Tags, in.Status, in.PublishedAt, rp.minutes, in.Category).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -149,9 +149,9 @@ func (m *Module) update(ctx context.Context, id int64, in PostInput) (AdminPost,
 	err = pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE posts SET slug = $2, title = $3, excerpt = $4, cover_url = $5, tags = $6, status = $7,
-				published_at = $8, reading_minutes = $9, updated_at = now()
+				published_at = $8, reading_minutes = $9, category = $10, updated_at = now()
 			WHERE id = $1`,
-			id, in.Slug, in.Title, in.Excerpt, in.CoverURL, in.Tags, in.Status, in.PublishedAt, rp.minutes)
+			id, in.Slug, in.Title, in.Excerpt, in.CoverURL, in.Tags, in.Status, in.PublishedAt, rp.minutes, in.Category)
 		if isUnique(err, "posts_slug_key") {
 			return ErrSlugTaken
 		}

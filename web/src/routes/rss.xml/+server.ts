@@ -3,6 +3,7 @@ import type { PostSummary, Profile } from '#lib/api/types.js';
 import { safe } from '#lib/site/data.js';
 import { withDefaults } from '#lib/site/defaults.js';
 import { escapeXml } from '#lib/site/format.js';
+import { categoryLabel } from '#lib/site/post.js';
 
 export const GET: RequestHandler = async ({ fetch, url }) => {
 	const [posts, rawProfile] = await Promise.all([
@@ -25,7 +26,8 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 			<link>${link}</link>
 			<guid isPermaLink="true">${link}</guid>
 			<pubDate>${rfc822(p.published_at)}</pubDate>
-			<description>${escapeXml(p.excerpt ?? '')}</description>${(p.tags ?? [])
+			<description>${escapeXml(p.excerpt ?? '')}</description>
+			<category>${escapeXml(categoryLabel(p.category))}</category>${(p.tags ?? [])
 				.map((t) => `\n\t\t\t<category>${escapeXml(t)}</category>`)
 				.join('')}
 		</item>`;

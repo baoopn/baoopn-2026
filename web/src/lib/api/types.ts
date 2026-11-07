@@ -150,7 +150,10 @@ export interface SyncResult {
 
 // ── Blog ────────────────────────────────────────────────────────────────────
 // A post is one entry in the blog list and has 1–20 ordered parts. Readers
-// move through parts at /blog/<slug> (part 1) and /blog/<slug>/<n>.
+// move through parts at /blog/<slug> (part 1) and /blog/<slug>/<n>. Every post
+// is either a tech post or a life post (/blog?category=tech|life).
+
+export type PostCategory = 'tech' | 'life';
 
 export interface TocItem {
 	id: string;
@@ -163,6 +166,7 @@ export interface PostSummary {
 	title: string;
 	excerpt: string;
 	cover_url: string;
+	category: PostCategory;
 	tags: string[];
 	part_count: number;
 	published_at: string;
@@ -206,6 +210,7 @@ export interface AdminPost {
 	title: string;
 	excerpt: string;
 	cover_url: string;
+	category: PostCategory;
 	tags: string[];
 	status: 'draft' | 'published';
 	state: PostState; // derived: published + future published_at = scheduled
@@ -223,6 +228,7 @@ export interface PostInput {
 	title: string;
 	excerpt: string; // empty = generated from part 1
 	cover_url: string;
+	category: PostCategory; // the API treats a missing or empty value as 'tech'
 	tags: string[];
 	status: 'draft' | 'published';
 	published_at: string | null; // null + published = now
