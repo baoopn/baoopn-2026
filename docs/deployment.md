@@ -131,6 +131,10 @@ set logs a warning and keeps the volume. With it on:
   `/media/<file>` links (post parts, post and project covers, project bodies, the profile)
   to `https://media.baoopn.com/<file>` and re-renders their HTML. It is idempotent and
   logs `media link rewrite done` with counts; the `/media` 301 stays for external links.
+  It runs only after a complete copy: if the copy stops early or any file fails, the api
+  logs `media migration incomplete; media link rewrite skipped` and tries again on the
+  next start. Unsetting `MEDIA_PUBLIC_URL` later does not undo a rewrite, so take a
+  `pg_dump` before the first deploy with `MEDIA_PUBLIC_URL` set.
 
 No bucket CORS rule is needed: images are loaded with plain `<img>` tags and
 uploads go through the api. Add one (GET from `https://baoopn.com`) only if the
@@ -167,8 +171,12 @@ Raster uploads (JPEG, PNG, static GIF, WebP, HEIC/HEIF, BMP, TIFF) are stored as
 | `MEDIAWORKER_POLL_INTERVAL` / `MEDIAWORKER_HEALTH_ADDR` | mediaworker | `2s` / `127.0.0.1:8081` |
 
 `mediaworker healthcheck` reports healthy while the worker has reached the api recently.
-Scale by raising `MEDIAWORKER_CONCURRENCY`; each conversion can use a few hundred MB for
-very large photos.
+Each conversion can use a few hundred MB for very large photos, so the Coolify compose
+caps the worker at `MEDIAWORKER_MEM_LIMIT` (default `1g`, with `GOMEMLIMIT` at `768MiB`)
+and keeps it from taking memory from postgres and the api. A conversion that runs past
+`MEDIAWORKER_JOB_TIMEOUT` fails the job as permanent, and the worker exits so Docker
+restarts it (`restart: unless-stopped`). Scale by raising `MEDIAWORKER_CONCURRENCY` and
+the memory limit together.
 
 ## DNS (Cloudflare, your zone)
 

@@ -115,15 +115,28 @@ func mediaS3(cfg config.Config) media.S3Config {
 func migrateMedia(s *media.Store, pool *pgxpool.Pool, publicURL string, log *slog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	st, err := s.MigrateToBucket(ctx)
+	migrateThenRewrite(ctx, s.MigrateToBucket, func(ctx context.Context) {
+		mediaurls.RunLegacyRewrite(ctx, pool, publicURL, log)
+	}, log)
+}
+
+// migrateThenRewrite runs the link rewrite only after a complete bucket
+// migration. Rewriting links to files that never reached the bucket breaks
+// them, and unsetting MEDIA_PUBLIC_URL afterwards does not undo it.
+func migrateThenRewrite(ctx context.Context, migrate func(context.Context) (media.MigrateStats, error),
+	rewrite func(context.Context), log *slog.Logger) {
+	st, err := migrate(ctx)
 	attrs := []any{slog.Int("uploaded", st.Uploaded), slog.Int("already_present", st.Present),
 		slog.Int("not_on_disk", st.NoLocal), slog.Int("failed", st.Failed)}
-	if err != nil {
-		log.Warn("media migration stopped", append(attrs, logging.Err(err))...)
-	} else {
-		log.Info("media migration done", attrs...)
+	if err != nil || st.Failed > 0 {
+		if err != nil {
+			attrs = append(attrs, logging.Err(err))
+		}
+		log.Warn("media migration incomplete; media link rewrite skipped", attrs...)
+		return
 	}
-	mediaurls.RunLegacyRewrite(ctx, pool, publicURL, log)
+	log.Info("media migration done", attrs...)
+	rewrite(ctx)
 }
 
 // followRename points stored references at a file the media fallback

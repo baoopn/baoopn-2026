@@ -10,6 +10,7 @@ package mediaurls
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/baoopn/baoopn-2026/internal/markdown"
 	"github.com/baoopn/baoopn-2026/internal/profile"
-	"github.com/baoopn/baoopn-2026/internal/settings"
 )
 
 // legacyRef is a site-relative link to a stored file, exactly as the media
@@ -107,6 +107,10 @@ type Stats struct {
 
 // Rewrite applies fn to every stored field that may reference media and
 // writes back (re-rendered) only the rows that changed.
+//
+// Each write is a compare-and-swap on the text it read: a row an admin saved
+// in the meantime is skipped rather than overwritten with the old text. It
+// still holds its old links, which the next run (or the /media 301) covers.
 func Rewrite(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (Stats, error) {
 	var st Stats
 	var err error
@@ -160,11 +164,12 @@ func rewriteParts(ctx context.Context, db *pgxpool.Pool, fn func(string) string)
 		if err != nil {
 			return n, err
 		}
-		if _, err := db.Exec(ctx, `UPDATE post_parts SET content_md = $2, content_html = $3, toc = $4::jsonb
-			WHERE id = $1`, p.id, md, res.HTML, string(toc)); err != nil {
+		tag, err := db.Exec(ctx, `UPDATE post_parts SET content_md = $2, content_html = $3, toc = $4::jsonb
+			WHERE id = $1 AND content_md = $5`, p.id, md, res.HTML, string(toc), p.text)
+		if err != nil {
 			return n, err
 		}
-		n++
+		n += int(tag.RowsAffected())
 	}
 	return n, nil
 }
@@ -178,10 +183,12 @@ func rewriteColumn(ctx context.Context, db *pgxpool.Pool, table, col string, fn 
 	n := 0
 	for _, r := range rows {
 		if v := fn(r.text); v != r.text {
-			if _, err := db.Exec(ctx, `UPDATE `+table+` SET `+col+` = $2 WHERE id = $1`, r.id, v); err != nil {
+			tag, err := db.Exec(ctx, `UPDATE `+table+` SET `+col+` = $2 WHERE id = $1 AND `+col+` = $3`,
+				r.id, v, r.text)
+			if err != nil {
 				return n, err
 			}
-			n++
+			n += int(tag.RowsAffected())
 		}
 	}
 	return n, nil
@@ -206,19 +213,29 @@ func rewriteProjects(ctx context.Context, db *pgxpool.Pool, fn func(string) stri
 		if err != nil {
 			return n, err
 		}
-		if _, err := db.Exec(ctx, `UPDATE projects SET body_md = $2, body_html = $3 WHERE id = $1`,
-			b.id, md, res.HTML); err != nil {
+		tag, err := db.Exec(ctx, `UPDATE projects SET body_md = $2, body_html = $3 WHERE id = $1 AND body_md = $4`,
+			b.id, md, res.HTML, b.text)
+		if err != nil {
 			return n, err
 		}
-		changed[b.id] = true
+		if tag.RowsAffected() > 0 {
+			changed[b.id] = true
+		}
 	}
 	return n + len(changed), nil
 }
 
 func rewriteProfile(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (bool, error) {
+	var raw string
+	err := db.QueryRow(ctx, `SELECT value::text FROM settings WHERE key = $1`, profile.SettingsKey).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	var p profile.Profile
-	ok, err := settings.Get(ctx, db, profile.SettingsKey, &p)
-	if err != nil || !ok {
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		return false, err
 	}
 	changed := false
@@ -241,7 +258,17 @@ func rewriteProfile(ctx context.Context, db *pgxpool.Pool, fn func(string) strin
 	if err := profile.RenderHTML(&p); err != nil {
 		return false, err
 	}
-	return true, settings.Put(ctx, db, profile.SettingsKey, p)
+	next, err := json.Marshal(p)
+	if err != nil {
+		return false, err
+	}
+	// Only if the profile is still the one read above.
+	tag, err := db.Exec(ctx, `UPDATE settings SET value = $2::jsonb, updated_at = now()
+		WHERE key = $1 AND value = $3::jsonb`, profile.SettingsKey, string(next), raw)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // RunLegacyRewrite is the startup job: with a public media domain, every

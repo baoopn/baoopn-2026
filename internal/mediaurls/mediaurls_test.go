@@ -110,3 +110,63 @@ func TestRewriteDB(t *testing.T) {
 		t.Fatalf("second run %+v %v", st, err)
 	}
 }
+
+// An admin save that lands between the rewrite's read and its write wins:
+// the rewrite skips that row instead of writing back the old text.
+func TestRewriteSkipsConcurrentSave(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	ref := "/media/" + file
+	q := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q(`INSERT INTO posts (id, slug, title, cover_url) VALUES (1, 'p', 'P', $1)`, ref)
+	q(`INSERT INTO post_parts (post_id, part_no, content_md, content_html) VALUES (1, 1, $1, 'old')`, "![a]("+ref+")")
+	q(`INSERT INTO projects (slug, title, cover_url, body_md, body_html) VALUES ('x', 'X', '', $1, 'old')`,
+		"![b]("+ref+")")
+	if err := settings.Put(ctx, pool, profile.SettingsKey, profile.Profile{Name: "Bao", BioMD: "bio ![p](" + ref + ")"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The "admin" saves each row the first time the rewrite looks at it.
+	saved := map[string]bool{}
+	saves := map[string]func(){
+		"![a](" + ref + ")": func() { q(`UPDATE post_parts SET content_md = 'admin part'`) },
+		ref:                 func() { q(`UPDATE posts SET cover_url = 'https://x.test/admin.png'`) },
+		"![b](" + ref + ")": func() { q(`UPDATE projects SET body_md = 'admin body'`) },
+		"bio ![p](" + ref + ")": func() {
+			if err := settings.Put(ctx, pool, profile.SettingsKey, profile.Profile{Name: "Admin", BioMD: "admin bio"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	fn := func(s string) string {
+		if save, ok := saves[s]; ok && !saved[s] {
+			saved[s] = true
+			save()
+		}
+		return LegacyToPublic(pub)(s)
+	}
+	st, err := Rewrite(ctx, pool, fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != (Stats{}) {
+		t.Fatalf("stats %+v, want nothing written", st)
+	}
+	var part, cover, body string
+	_ = pool.QueryRow(ctx, `SELECT content_md FROM post_parts`).Scan(&part)
+	_ = pool.QueryRow(ctx, `SELECT cover_url FROM posts`).Scan(&cover)
+	_ = pool.QueryRow(ctx, `SELECT body_md FROM projects`).Scan(&body)
+	if part != "admin part" || cover != "https://x.test/admin.png" || body != "admin body" {
+		t.Fatalf("admin saves lost: %q %q %q", part, cover, body)
+	}
+	var got profile.Profile
+	_, _ = settings.Get(ctx, pool, profile.SettingsKey, &got)
+	if got.Name != "Admin" || got.BioMD != "admin bio" {
+		t.Fatalf("profile save lost: %+v", got)
+	}
+}
