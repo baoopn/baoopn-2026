@@ -28,6 +28,8 @@ type ContactInput struct {
 // submission is a validated form.
 type submission struct {
 	name, email, subject, message string
+	// at is when the form was received.
+	at time.Time
 }
 
 const minFillTime = 3 * time.Second
@@ -98,7 +100,9 @@ func (m *Module) handleContact(w http.ResponseWriter, r *http.Request) {
 		httpapi.JSON(w, http.StatusCreated, map[string]bool{"ok": true})
 		return
 	}
-	sub, problem := validate(in, m.d.Now())
+	now := m.d.Now()
+	sub, problem := validate(in, now)
+	sub.at = now
 	if problem != "" {
 		httpapi.Error(w, http.StatusUnprocessableEntity, "validation", problem)
 		return

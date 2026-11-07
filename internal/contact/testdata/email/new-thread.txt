@@ -1,0 +1,15 @@
+Name: Priya Shah
+Email: priya@example.test
+Subject: A new portfolio site
+Received: 7 Nov 2026, 14:05 UTC
+Reference: #123
+
+Hi! I saw your work and would like to talk about a project.
+
+Could we have a call next week?
+Thanks,
+Priya
+
+Open in inbox: https://example.test/admin/inbox/123
+
+Sent by the example.test contact form.

@@ -1,0 +1,184 @@
+package mail
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+)
+
+var testBrand = BrandOf("https://example.test/")
+
+func render(t *testing.T, d Doc) (string, string) {
+	t.Helper()
+	text, html, err := d.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return text, html
+}
+
+var (
+	tagRe   = regexp.MustCompile(`<\s*/?\s*([a-zA-Z][a-zA-Z0-9]*)`)
+	hrefRe  = regexp.MustCompile(`href="([^"]*)"`)
+	inTagRe = regexp.MustCompile(`<[a-zA-Z][^>]*>`)
+)
+
+var allowedTags = map[string]bool{"html": true, "head": true, "meta": true, "title": true, "style": true,
+	"body": true, "div": true, "table": true, "tr": true, "td": true, "span": true, "a": true, "br": true, "strong": true}
+
+// checkSafe asserts html has only allowed tags, no script or handlers, and
+// links only to the brand.
+func checkSafe(t *testing.T, b Brand, html string) {
+	t.Helper()
+	body := html
+	// The MSO conditionals are constant chrome, not data.
+	body = strings.ReplaceAll(body, msoOpen, "")
+	body = strings.ReplaceAll(body, msoClose, "")
+	for _, m := range tagRe.FindAllStringSubmatch(body, -1) {
+		if !allowedTags[strings.ToLower(m[1])] {
+			t.Errorf("tag <%s> not allowed", m[1])
+		}
+	}
+	for _, bad := range []string{"<script", "<img"} {
+		if strings.Contains(strings.ToLower(body), bad) {
+			t.Errorf("html contains %q", bad)
+		}
+	}
+	// Escaped text may spell them out; no real tag may carry them.
+	for _, tag := range inTagRe.FindAllString(body, -1) {
+		if l := strings.ToLower(tag); strings.Contains(l, "onerror") || strings.Contains(l, "javascript:") {
+			t.Errorf("tag carries a handler or script url: %s", tag)
+		}
+	}
+	for _, m := range hrefRe.FindAllStringSubmatch(html, -1) {
+		if !strings.HasPrefix(m[1], b.URL) {
+			t.Errorf("href %q is not on %s", m[1], b.URL)
+		}
+	}
+}
+
+func TestBrandOf(t *testing.T) {
+	if b := BrandOf("https://www.example.test/"); b.Name != "example.test" || b.URL != "https://www.example.test" {
+		t.Fatalf("%+v", b)
+	}
+	if b := BrandOf("http://localhost:5173"); b.Name != "localhost" || b.URL != "http://localhost:5173" {
+		t.Fatalf("%+v", b)
+	}
+}
+
+func TestLayoutSanity(t *testing.T) {
+	_, html := render(t, Doc{Brand: testBrand, Subject: "Hi", Preheader: "pre", Kicker: "New", Title: "T",
+		Blocks: []Block{{Kind: Para, Text: "hello"}}})
+	for _, want := range []string{`<meta name="color-scheme" content="light dark">`, "prefers-color-scheme: dark",
+		`role="presentation"`, "<!--[if mso]>", "<![endif]-->", "[data-ogsc]", `width="600"`, "max-width:600px",
+		"&#847;&zwnj;&nbsp;", "<title>Hi</title>", "#0b0537", ">example.test<"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if i, j := strings.Index(html, "<body"), strings.Index(html, ">pre"); i < 0 || j < i || strings.Contains(html[i:j], "<table") {
+		t.Error("the preheader is not the first thing in the body")
+	}
+}
+
+func TestLayoutEscapes(t *testing.T) {
+	evil := `<img src=x onerror=alert(1)></td></table>{{.}} javascript:alert(1) "><script>x</script>`
+	d := Doc{Brand: testBrand, Subject: evil, Preheader: evil, Kicker: evil, Title: evil,
+		Blocks: []Block{
+			{Kind: Para, Text: evil}, {Kind: Quote, Text: "> " + evil}, {Kind: Excerpt, Text: evil},
+			{Kind: Fields, Label: evil, Fields: []Field{{Label: evil, Value: evil, Mono: true}}},
+			{Kind: Button, Label: evil, URL: "https://example.test/admin/inbox/1"},
+		},
+		Signature: evil, Footer: evil}
+	_, html := render(t, d)
+	checkSafe(t, testBrand, html)
+	if !strings.Contains(html, "&lt;img src=x onerror=alert(1)&gt;") {
+		t.Error("the text is not shown escaped")
+	}
+}
+
+func TestButtonOnlyLinksToTheSite(t *testing.T) {
+	for _, u := range []string{"javascript:alert(1)", "https://evil.test/admin", "https://example.test.evil.test/x",
+		"https://example.test", "//evil.test/x", "https://user@example.test/x", "data:text/html,x"} {
+		text, html := render(t, Doc{Brand: testBrand, Blocks: []Block{{Kind: Button, Label: "Open", URL: u}}})
+		if strings.Contains(html, ">Open</a>") || strings.Contains(text, u) {
+			t.Errorf("%q: the button was kept", u)
+		}
+		checkSafe(t, testBrand, html)
+	}
+	text, html := render(t, Doc{Brand: testBrand, Blocks: []Block{{Kind: Button, Label: "Open", URL: "https://example.test/admin/inbox/7"}}})
+	if !strings.Contains(html, `href="https://example.test/admin/inbox/7"`) || text != "Open: https://example.test/admin/inbox/7" {
+		t.Fatalf("good button dropped: %q", text)
+	}
+	// A brand that is not an http(s) site gets no links at all.
+	_, html = render(t, Doc{Brand: BrandOf("javascript:alert(1)//"), Blocks: []Block{{Kind: Button, Label: "Open", URL: "javascript:alert(1)/x"}}})
+	if strings.Contains(html, "href=") {
+		t.Fatal("link on a non-http brand")
+	}
+}
+
+func TestTextPart(t *testing.T) {
+	text, _ := render(t, Doc{Brand: testBrand, Kicker: "K", Title: "T",
+		Blocks: []Block{
+			{Kind: Para, Text: "Hello\nthere"},
+			{Kind: Quote, Text: "> kept\nadded"},
+			{Kind: Fields, Label: "Your message", Fields: []Field{{Label: "A", Value: "1"}, {Label: "B", Value: "2"}}},
+			{Kind: Excerpt, Text: "excerpt"},
+			{Kind: Button, Label: "Open", URL: "https://example.test/x"},
+		},
+		Signature: "Sig", Footer: "Foot"})
+	want := "Hello\nthere\n\n> kept\n> added\n\nYour message\nA: 1\nB: 2\n\nexcerpt\n\nOpen: https://example.test/x" +
+		SigSep + "Sig\n\nFoot"
+	if text != want {
+		t.Fatalf("text:\n%q\nwant\n%q", text, want)
+	}
+}
+
+func TestPersonalDoc(t *testing.T) {
+	d := Doc{Brand: testBrand, Personal: true, Footer: "not shown",
+		Blocks:    []Block{{Kind: Para, Text: "Thanks!\n"}, {Kind: Quote, Text: "> old\n>> older"}, {Kind: Para, Text: "More."}},
+		Signature: "Name\nhttps://example.test"}
+	text, html := render(t, d)
+	if text != "Thanks!\n\n> old\n>> older\nMore."+SigSep+"Name\nhttps://example.test" {
+		t.Fatalf("text %q", text)
+	}
+	if !strings.Contains(html, "border-left:3px solid #e3d7fb") || !strings.Contains(html, ">old<br>> older<") && !strings.Contains(html, ">old<br>&gt; older<") {
+		t.Fatalf("no quote cell: %s", html)
+	}
+	if strings.Contains(html, "not shown") {
+		t.Fatal("a personal letter has no footer text")
+	}
+	checkSafe(t, testBrand, html)
+}
+
+func TestLayoutSize(t *testing.T) {
+	long := strings.Repeat("A long reply line with words. ", 340)[:10000]
+	_, html := render(t, Doc{Brand: testBrand, Personal: true, Blocks: []Block{{Kind: Para, Text: long}}, Signature: "S"})
+	if len(html) > 100*1024 {
+		t.Fatalf("reply html is %d bytes", len(html))
+	}
+	_, html = render(t, Doc{Brand: testBrand, Blocks: []Block{{Kind: Excerpt, Text: strings.ReplaceAll(long[:5000], ". ", ".\n")}}})
+	if len(html) > 100*1024 {
+		t.Fatalf("notification html is %d bytes", len(html))
+	}
+}
+
+func TestRenderedDocBuildsBothParts(t *testing.T) {
+	text, html := render(t, Doc{Brand: testBrand, Subject: "Hi", Blocks: []Block{{Kind: Para, Text: "Hello"}}})
+	s := NewSMTP(Config{From: "Site <site@example.test>"})
+	l, err := s.letterOf(Message{To: "a@example.test", Subject: "Re: hi\r\nBcc: evil@example.test", Text: text, HTML: html})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := build(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := headersOf(t, string(raw))
+	if h.Get("Bcc") != "" || h.Get("From") != `"Site" <site@example.test>` || !strings.HasPrefix(h.Get("Message-ID"), "<") {
+		t.Fatalf("headers: %v", h)
+	}
+	if s := string(raw); !strings.Contains(s, "text/plain; charset=utf-8") || !strings.Contains(s, "text/html; charset=utf-8") {
+		t.Fatal("both parts must be present")
+	}
+}
