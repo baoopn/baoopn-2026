@@ -45,7 +45,7 @@
 		{:else}
 			<div
 				class="cover relative grid aspect-[8/5] w-full place-items-center overflow-hidden rounded-brand border border-ink text-on-spot"
-				style:background={ink ? 'var(--on-spot)' : spotFor(project.slug)}
+				style:background={ink ? 'var(--logo-plate-dark)' : spotFor(project.slug)}
 			>
 				{#if showLogo}
 					<img

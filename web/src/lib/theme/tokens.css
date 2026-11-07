@@ -11,6 +11,7 @@
  *   --spot-now / --spot-select / --spot-chart  which spot leads (set per palette;
  *                 palettes also tint --paper-2).
  *   --baoopn-* / --brand*  logo, favicon and the small brand badge ONLY.
+ *   --logo-plate-dark  the navy plate behind light project logos (logo_bg='ink').
  *
  * Usage: <html data-palette="baoopn|lavender|mint|peach|sky|rose" data-theme="light|dark">
  * (data-theme = resolved mode; "system" is resolved in JS). Any element may carry
@@ -36,6 +37,7 @@
 	--baoopn-font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
 	--baoopn-font-mono: 'JetBrains Mono', ui-monospace, monospace;
 	--baoopn-radius: 14px;
+	--logo-plate-dark: var(--baoopn-navy); /* plate for light logos (logo_bg='ink'), both themes */
 }
 
 /* ---------- pastel day ---------- */
