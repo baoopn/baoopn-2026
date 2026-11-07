@@ -362,7 +362,8 @@ func TestAlertsHaveNoLiveLinks(t *testing.T) {
 			}
 		}
 		links := regexp.MustCompile(`<a [^>]*href="([^"]*)"`).FindAllStringSubmatch(html, -1)
-		if len(links) != 2 || links[0][1] != goldenLink || links[1][1] != goldenBrand.URL {
+		// The brand badge, the inbox button and the footer site link: ours only.
+		if len(links) != 3 || links[0][1] != goldenBrand.URL || links[1][1] != goldenLink || links[2][1] != goldenBrand.URL {
 			t.Errorf("%s: links %v", name, links)
 		}
 	}

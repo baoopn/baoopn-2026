@@ -236,3 +236,45 @@ func TestDefang(t *testing.T) {
 		}
 	}
 }
+
+// TestBrandNameIsOurLink: mail apps turn a bare domain into their own blue
+// link, so wherever the brand name shows in the HTML it is the text of a span
+// inside our own styled link to the site, never a bare text node.
+func TestBrandNameIsOurLink(t *testing.T) {
+	for _, personal := range []bool{false, true} {
+		text, html := render(t, Doc{Brand: testBrand, Personal: personal, Subject: "S", Footer: "F",
+			Blocks: []Block{{Kind: Para, Text: "Hello"}}})
+		badge := `<a class="brand-a" href="https://example.test" style="color:#fff5eb;text-decoration:none;">` +
+			`<span class="brand-a" style="color:#fff5eb;text-decoration:none;">example.test</span></a>`
+		if !strings.Contains(html, badge) {
+			t.Fatalf("personal=%v: no styled badge link in %s", personal, html)
+		}
+		footer := `<a class="soft" href="https://example.test" style="color:#6b6585;text-decoration:none;">` +
+			`<span class="soft" style="color:#6b6585;text-decoration:none;">example.test</span></a>`
+		if !strings.Contains(html, footer) {
+			t.Fatalf("personal=%v: no styled footer link", personal)
+		}
+		body := html[strings.Index(html, "<body"):]
+		for _, m := range textNodeRe.FindAllStringSubmatchIndex(body, -1) {
+			node := body[m[2]:m[3]]
+			if !strings.Contains(node, "example.test") {
+				continue
+			}
+			open := body[strings.LastIndex(body[:m[0]+1], "<") : m[0]+1]
+			if !strings.HasPrefix(open, `<span class="brand-a"`) && !strings.HasPrefix(open, `<span class="soft"`) {
+				t.Errorf("personal=%v: bare brand text after %s", personal, open)
+			}
+		}
+		if strings.Contains(text, "<a") {
+			t.Fatal("the text part has no links")
+		}
+	}
+	// A brand that is no http(s) site is split so it does not read as a domain.
+	_, html := render(t, Doc{Brand: Brand{Name: "evil.example"}, Blocks: []Block{{Kind: Para, Text: "x"}}})
+	if strings.Contains(html, ">evil.example<") || strings.Contains(html, "href=") {
+		t.Fatal("bare brand without a site")
+	}
+}
+
+// textNodeRe is a text node between two tags.
+var textNodeRe = regexp.MustCompile(`>([^<]+)<`)
