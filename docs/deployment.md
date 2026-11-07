@@ -135,3 +135,19 @@ temporary failure.
 - **Backups:** enable Coolify's scheduled backups for the `postgres` service and
   back up the `baoopn-media` volume (uploaded images).
 - **Rollback:** redeploy an older commit from Coolify's deployment list.
+
+## Branch protection
+
+`main` only changes through pull requests with green CI (squash or rebase merge).
+While the repository is private on a free plan GitHub cannot enforce rulesets, so
+the rule is enforced by `.githooks/pre-push` (run `git config core.hooksPath
+.githooks` once per clone) and by the deploy gate in `release.yml`, which never
+deploys a commit that did not come from a merged PR.
+
+When the repository becomes public (or the account has Pro), apply the saved ruleset:
+
+```sh
+gh api -X POST repos/<owner>/<repo>/rulesets --input .github/rulesets/main.json
+```
+
+Before making it public, run `sh scripts/check-public.sh` (CI runs it on every PR).
