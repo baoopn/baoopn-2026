@@ -2,6 +2,7 @@ package seedimport
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -185,9 +186,15 @@ func TestRunEmbeddedSeedAndProfile(t *testing.T) {
 	if !strings.HasPrefix(p.AvatarURL, "/media/") || p.CoverURL != "https://cdn.baoopn.com/data/img/Bao_cover.jpg" {
 		t.Fatalf("profile images %q %q", p.AvatarURL, p.CoverURL)
 	}
+	// One row for the avatar plus one per screenshot shipped in seed/posts,
+	// and running the import twice must not add more.
+	shots, err := fs.Glob(seed.FS, "posts/*/img/*")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var mediaRows int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM media`).Scan(&mediaRows)
-	if mediaRows != 1 {
-		t.Fatalf("media rows %d", mediaRows)
+	if want := 1 + len(shots); mediaRows != want {
+		t.Fatalf("media rows %d, want %d (avatar + %d screenshots)", mediaRows, want, len(shots))
 	}
 }
