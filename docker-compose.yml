@@ -1,5 +1,7 @@
-# Local development. By default only Postgres starts: run the API with
-# `make run-api` and the web app with `make web-dev`.
+# Local development. By default Postgres and RustFS (S3-compatible media
+# bucket) start: run the API with `make run-api` and the web app with
+# `make web-dev`. RustFS console: http://localhost:9001 (baoopn-dev /
+# dev-rustfs-secret-key; development only).
 # `docker compose --profile full up --build` also runs the api and web images
 # (site on http://localhost:3000), reading the rest of the config from .env.
 services:
@@ -19,6 +21,44 @@ services:
       timeout: 3s
       retries: 20
 
+  # S3-compatible object store standing in for Cloudflare R2 in development.
+  rustfs:
+    image: rustfs/rustfs:1.0.3
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: http://localhost:9001
+      RUSTFS_REGION: us-east-1
+      RUSTFS_ACCESS_KEY: baoopn-dev
+      RUSTFS_SECRET_KEY: dev-rustfs-secret-key
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - baoopn-rustfs:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      retries: 20
+
+  # One-shot: create the dev bucket (private; the API streams /media/*).
+  rustfs-init:
+    image: amazon/aws-cli:2.38.4
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket baoopn-dev ||
+        aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket baoopn-dev
+    environment:
+      AWS_ACCESS_KEY_ID: baoopn-dev
+      AWS_SECRET_ACCESS_KEY: dev-rustfs-secret-key
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    restart: "no"
+
   api:
     profiles: [full]
     build:
@@ -31,11 +71,15 @@ services:
       DATABASE_URL: postgres://baoopn:baoopn@postgres:5432/baoopn?sslmode=disable
       PUBLIC_URL: http://localhost:3000
       MEDIA_DIR: /data/media
+      # .env points at localhost:9000; inside the network RustFS is rustfs:9000.
+      S3_ENDPOINT: http://rustfs:9000
     volumes:
       - baoopn-media:/data/media
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
 
   web:
     profiles: [full]
@@ -57,3 +101,4 @@ services:
 volumes:
   baoopn-pg:
   baoopn-media:
+  baoopn-rustfs:
