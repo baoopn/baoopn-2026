@@ -321,3 +321,15 @@ func TestOrphanRowFilesRemoved(t *testing.T) {
 		t.Fatalf("jobs left = %d, %v", n, err)
 	}
 }
+
+// A percent-encoded URL (a share link, an image proxy) puts an uppercase hex
+// digit right before the stem. It still names the file.
+func TestOrphanPercentEncodedReference(t *testing.T) {
+	s := orphanStore(t, nil)
+	id := addRow(t, s, 1, rowOpt{age: 30 * day})
+	exec(t, s, `INSERT INTO posts (slug, title, excerpt) VALUES ('a', 'A', $1)`,
+		"https://x.example/share?u=https%3A%2F%2Fbaoopn.com%2Fmedia%2F"+stemN(1)+".webp")
+	if c := candidate(mustPlan(t, s), rowKey(id)); c != nil {
+		t.Fatalf("percent-encoded reference not seen: %+v", c)
+	}
+}

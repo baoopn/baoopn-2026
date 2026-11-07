@@ -44,6 +44,11 @@ func isAnyHex(c byte) bool { return isHex(c) || c >= 'A' && c <= 'F' }
 // the bytes before and after are not hex digits of either case (or are the
 // ends of s). A 32-hex token or a 64-hex sha256 never matches. Duplicates
 // are kept out.
+//
+// An escape right before the stem also bounds it, although it ends in hex
+// digits: a percent escape ("%2F", double-encoded "%252F" in share and proxy
+// URLs) or a JSON escape ("\f", "\b", "/"). Matching more only ever
+// keeps a file.
 func Stems(s string) []string {
 	var out []string
 	var seen map[string]bool
@@ -53,15 +58,12 @@ func Stems(s string) []string {
 			continue
 		}
 		j := i
-		lower := true
 		for j < len(s) && isAnyHex(s[j]) {
-			if !isHex(s[j]) {
-				lower = false
-			}
 			j++
 		}
-		if j-i == StemLen && lower {
-			st := s[i:j]
+		// The stem must end the run; it may start it, or follow an escape tail.
+		if k := j - StemLen; k >= i && (k == i || escapeTail(s, i, k)) && lowerHex(s[k:j]) {
+			st := s[k:j]
 			if !seen[st] {
 				if seen == nil {
 					seen = map[string]bool{}
@@ -73,6 +75,30 @@ func Stems(s string) []string {
 		i = j
 	}
 	return out
+}
+
+// escapeTail reports whether s[i:k], the hex digits that start a hex run and
+// come before a possible stem at k, are the end of an escape.
+func escapeTail(s string, i, k int) bool {
+	n := k - i
+	switch {
+	case i >= 1 && s[i-1] == '%': // %2F, %252F, %25252F
+		return n%2 == 0 && n <= 6
+	case i >= 1 && s[i-1] == '\\': // \f, \b
+		return n == 1
+	case i >= 2 && s[i-1] == 'u' && s[i-2] == '\\': // /
+		return n == 4
+	}
+	return false
+}
+
+func lowerHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isHex(s[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Querier is a pgx.Tx, a pool or a connection.
