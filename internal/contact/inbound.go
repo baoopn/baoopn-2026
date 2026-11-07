@@ -4,13 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
-	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
@@ -26,8 +23,15 @@ const (
 	maxAttachments = 999
 
 	// inboundReads is how many request bodies are read at once. Past it the
-	// hook answers 503 without reading, and the worker tries again.
-	inboundReads = 8
+	// hook answers 503 without reading, and the worker tries again. A slot is
+	// only taken by a request whose size and signature headers pass, and is
+	// held for at most inboundReadTimeout (then 408, which the worker retries).
+	inboundReads       = 8
+	inboundReadTimeout = 20 * time.Second
+	// badSignaturesPerMinute is how many failed signature checks one client
+	// may make; past it the hook answers 429 before any other check. Signed
+	// calls never count.
+	badSignaturesPerMinute = 30
 	// inboundPerMinute caps signed deliveries site-wide (not per IP: every
 	// call comes from Cloudflare). Past it the hook answers 503.
 	inboundPerMinute = 300
@@ -42,61 +46,48 @@ type reject struct {
 	reason, recipient, sender, subject string
 }
 
-// bucket is an in-memory token bucket: up to size takes, refilled at size
-// per window. It does not survive a restart, and need not.
-type bucket struct {
-	mu     sync.Mutex
-	size   float64
-	window time.Duration
-	tokens float64
-	last   time.Time
-}
-
-func newBucket(size int, window time.Duration) *bucket {
-	return &bucket{size: float64(size), window: window, tokens: float64(size)}
-}
-
-// take uses one token at now, or reports false when none is left.
-func (b *bucket) take(now time.Time) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if !b.last.IsZero() {
-		if d := now.Sub(b.last); d > 0 {
-			b.tokens = min(b.size, b.tokens+b.size*float64(d)/float64(b.window))
-		}
-	}
-	b.last = now
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
-}
-
 func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 	if m.d.InboundSecret == "" || m.d.InboundDomain == "" {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "no such route")
 		return
 	}
-	select {
-	case m.reads <- struct{}{}:
-		defer func() { <-m.reads }()
-	default:
-		httpapi.Error(w, http.StatusServiceUnavailable, "busy", "busy, try again later")
+	now := m.d.Now()
+	client := httpapi.ClientBucket(r)
+	if m.failures.blocked(client, now) {
+		httpapi.Error(w, http.StatusTooManyRequests, "rate_limited", "too many bad requests")
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxInboundBytes+1))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "message too large")
-			return
-		}
+	// Cheap checks before a read slot is taken or the body read: the size the
+	// client announces, and signature headers that could be valid now.
+	if r.ContentLength > maxInboundBytes {
+		httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "message too large")
+		return
+	}
+	ts, sig := r.Header.Get("X-Timestamp"), r.Header.Get("X-Signature")
+	if _, _, ok := signedHeaders(ts, sig, now); !ok {
+		m.failures.fail(client, now)
+		httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
+		return
+	}
+	raw, status := m.readInbound(w, r)
+	switch status {
+	case 0:
+	case http.StatusServiceUnavailable:
+		httpapi.Error(w, status, "busy", "busy, try again later")
+		return
+	case http.StatusRequestEntityTooLarge:
+		httpapi.Error(w, status, "too_large", "message too large")
+		return
+	case http.StatusRequestTimeout:
+		httpapi.Error(w, status, "timeout", "the body took too long")
+		return
+	default:
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "could not read the body")
 		return
 	}
 	envTo := r.Header.Get("X-Envelope-To")
-	if !verify(m.d.InboundSecret, r.Header.Get("X-Timestamp"), envTo, r.Header.Get("X-Signature"), raw, m.d.Now()) {
+	if !verify(m.d.InboundSecret, ts, envTo, sig, raw, m.d.Now()) {
+		m.failures.fail(client, now)
 		httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
 		return
 	}

@@ -54,9 +54,12 @@ type Module struct {
 	mu       sync.Mutex
 	notified map[int64]time.Time
 
-	// Inbound hook limits (see inbound.go): concurrent body reads, signed
+	// Inbound hook limits (see inbound.go and limits.go): concurrent body
+	// reads and how long one may take, failed signatures per client, signed
 	// deliveries per minute, and junk reject rows per minute.
 	reads       chan struct{}
+	readTimeout time.Duration
+	failures    *failLimiter
 	inboundRate *bucket
 	junkRate    *bucket
 	junkSkipped atomic.Int64
@@ -85,6 +88,8 @@ func New(d Deps) *Module {
 	return &Module{
 		d: d, turnstileURL: turnstileURL, notified: map[int64]time.Time{},
 		reads:       make(chan struct{}, inboundReads),
+		readTimeout: inboundReadTimeout,
+		failures:    newFailLimiter(badSignaturesPerMinute),
 		inboundRate: newBucket(inboundPerMinute, time.Minute),
 		junkRate:    newBucket(junkRejectsPerMinute, time.Minute),
 		parse:       bmail.ParseInbound,
