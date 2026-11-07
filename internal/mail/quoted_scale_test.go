@@ -17,6 +17,11 @@ func fill(unit string) string { return strings.Repeat(unit, fetchCap/len(unit)) 
 // cutter takes milliseconds here; before it was linear the first case took most of
 // an hour), so a slow or loaded machine does not make it flaky.
 func within(t *testing.T, limit time.Duration, run func()) {
+	if raceEnabled {
+		// The race detector slows this code 10-20x; a quadratic cutter would
+		// still take far longer than this.
+		limit *= 8
+	}
 	t.Helper()
 	start := time.Now()
 	done := make(chan struct{})

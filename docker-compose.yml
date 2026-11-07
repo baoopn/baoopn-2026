@@ -1,7 +1,8 @@
 # Local development. By default Postgres and RustFS (S3-compatible media
 # bucket) start: run the API with `make run-api` and the web app with
-# `make web-dev`. RustFS console: http://localhost:9001 (baoopn-dev /
-# dev-rustfs-secret-key; development only).
+# `make web-dev`. RustFS console: http://localhost:9001, signing in with
+# S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY from your local .env (pick any local
+# values; they only protect this throwaway dev container).
 # `docker compose --profile full up --build` also runs the api and web images
 # (site on http://localhost:3000), reading the rest of the config from .env.
 services:
@@ -30,8 +31,8 @@ services:
       RUSTFS_CONSOLE_ADDRESS: ":9001"
       RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: http://localhost:9001
       RUSTFS_REGION: us-east-1
-      RUSTFS_ACCESS_KEY: baoopn-dev
-      RUSTFS_SECRET_KEY: dev-rustfs-secret-key
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-baoopn-dev}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env (any local value)}
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
@@ -51,8 +52,8 @@ services:
         aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket baoopn-dev ||
         aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket baoopn-dev
     environment:
-      AWS_ACCESS_KEY_ID: baoopn-dev
-      AWS_SECRET_ACCESS_KEY: dev-rustfs-secret-key
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-baoopn-dev}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env (any local value)}
       AWS_DEFAULT_REGION: us-east-1
     depends_on:
       rustfs:
