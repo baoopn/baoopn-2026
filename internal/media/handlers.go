@@ -28,6 +28,10 @@ func (s *Store) Hooks(chi.Router) {}
 func (s *Store) Admin(r chi.Router) {
 	r.Get("/media", s.list)
 	r.Post("/media", s.upload)
+	// Before /media/{id}: chi would match "orphans" as an id otherwise.
+	r.Get("/media/orphans", s.orphansPlan)
+	r.Post("/media/orphans", s.orphansClean)
+	r.Put("/media/orphans/auto", s.orphansAuto)
 	r.Get("/media/{id}", s.get)
 	r.Post("/media/{id}/retry", s.retry)
 	r.Delete("/media/{id}", s.remove)

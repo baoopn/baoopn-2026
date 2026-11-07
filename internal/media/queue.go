@@ -326,13 +326,26 @@ func (s *Store) Retry(ctx context.Context, mediaID int64) (Media, error) {
 		return Media{}, ErrGone
 	}
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE media_jobs SET phase = 'convert', status = 'queued', attempts = 0,
-			next_attempt_at = now(), failed_at = NULL, last_error = '', lease_token = '', lease_until = NULL,
-			updated_at = now() WHERE id = $1`, *jobID); err != nil {
+		// Conditional and first: the orphan cleanup may have deleted the row
+		// (or be deleting it; this waits on its lock) since the check above.
+		tag, err := tx.Exec(ctx, `UPDATE media SET status = 'processing', error = '', touched_at = now()
+			WHERE id = $1 AND status = 'failed'`, mediaID)
+		if err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE media SET status = 'processing', error = '' WHERE id = $1`, mediaID)
-		return err
+		if tag.RowsAffected() == 0 {
+			return ErrGone
+		}
+		tag, err = tx.Exec(ctx, `UPDATE media_jobs SET phase = 'convert', status = 'queued', attempts = 0,
+			next_attempt_at = now(), failed_at = NULL, last_error = '', lease_token = '', lease_until = NULL,
+			updated_at = now() WHERE id = $1 AND status = 'failed' AND NOT original_deleted`, *jobID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrGone
+		}
+		return nil
 	})
 	if err != nil {
 		return Media{}, err

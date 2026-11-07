@@ -30,6 +30,7 @@
 #   MEDIA_MAX_DIMENSION, MEDIA_WEBP_QUALITY, MEDIA_MAX_PIXELS, MEDIAWORKER_CONCURRENCY,
 #   MEDIA_UPLOAD_WAIT, MEDIA_JOB_*, MEDIA_FALLBACK_AFTER, MEDIA_FAILED_RETENTION
 #                                                  image conversion (defaults are fine)
+#   MEDIA_ORPHAN_GRACE, MEDIA_ORPHAN_MAX_PER_PASS  unused-media cleanup (0 grace = off)
 #
 # Do not add custom networks or published ports: Coolify manages networking.
 
@@ -108,6 +109,9 @@ services:
       - MEDIA_JOB_MAX_ATTEMPTS=${MEDIA_JOB_MAX_ATTEMPTS:-5}
       - MEDIA_FALLBACK_AFTER=${MEDIA_FALLBACK_AFTER:-2m}
       - MEDIA_FAILED_RETENTION=${MEDIA_FAILED_RETENTION:-24h}
+      # Unused-media cleanup: grace before deletion (0 = off), files per run.
+      - MEDIA_ORPHAN_GRACE=${MEDIA_ORPHAN_GRACE:-168h}
+      - MEDIA_ORPHAN_MAX_PER_PASS=${MEDIA_ORPHAN_MAX_PER_PASS:-50}
       - SPOTIFY_API_URL=${SPOTIFY_API_URL:-}
     volumes:
       - baoopn-media:/data/media

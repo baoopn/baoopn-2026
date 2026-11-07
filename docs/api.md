@@ -90,6 +90,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/media/{id}` | – | `Media` (poll a `processing` upload; 404 `not_found`) |
 | POST | `/media/{id}/retry` | – | `202 Media` (`processing`); 409 `conflict` unless `failed`; 410 `gone` once the original was cleaned up (upload again) |
 | DELETE | `/media/{id}` | – | `204` |
+| GET | `/media/orphans` | – | `OrphanPlan` (dry run: what a cleanup would delete now, and why the rest is kept) |
+| POST | `/media/orphans` | `{ keys?: string[] }` (≤ 500 candidate keys; empty or absent = every eligible candidate except `local_copy`) | `OrphanResult`; 400 `bad_request` for a bad key; 409 `disabled` (`MEDIA_ORPHAN_GRACE=0`) or `busy` (a run is in progress) |
+| PUT | `/media/orphans/auto` | `{ enabled }` | `OrphanPlan` (daily cleanup on or off) |
 | GET | `/threads` | `status` (default `open`), `q` | `ThreadSummary[]` |
 | GET | `/threads/unread-count` | – | `{ count }` |
 | GET | `/threads/{id}` | – | `ThreadDetail` |
@@ -142,6 +145,27 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
     `POST /media/{id}/retry` can queue it again; after that the retry answers 410 `gone`.
 - **Dedupe:** the same uncropped original uploaded again returns the existing `Media`;
   `sha256` is computed on the stored bytes.
+- **Orphan cleanup** (Settings → Media storage):
+  - A file is in use when its 24-hex stem appears anywhere in `posts`, `post_parts`, `projects`
+    or `settings` (every column, every key; drafts included). Matching the stem, not the URL,
+    keeps files whose extension changed in a fallback and links in any form (`/media/<file>`,
+    `MEDIA_PUBLIC_URL/<file>`, absolute site URLs).
+  - Unused files are deleted only after `MEDIA_ORPHAN_GRACE` (7 days) unused. The clock is
+    `touched_at`: set on upload, and bumped when content naming the file is saved or deleted
+    (old and new text) and when an upload is deduplicated to it. `0` turns deletion off.
+  - Candidates (`key` = `<kind>:<name>`): `row` (a media row and its files), `object` (a
+    bucket file with no row), `local` (a `MEDIA_DIR` file with no row), `local_copy` (the
+    local copy of a bucket file; only deleted when its key is sent), `original` and `temp`
+    (upload leftovers older than 24 h). Processing uploads and failed ones whose original is
+    kept for a retry are never candidates. Other bucket keys and files are left alone and
+    counted as `foreign`; with more than 10,000 bucket keys no bucket file is deleted.
+  - Each run re-checks every candidate under a lock that content saves share, deletes at
+    most `MEDIA_ORPHAN_MAX_PER_PASS` (50) and logs each deletion. The last run's counts are
+    kept in the `media.orphans` setting.
+  - Local drafts live in the browser, so the server does not see them; the admin page leaves
+    out files its own drafts name.
+  - The daily run is off until turned on (`PUT /media/orphans/auto`). It refuses to run when
+    it would delete more than half the rows, or finds no references while files are in use.
 - **URLs:** with `MEDIA_PUBLIC_URL` set, media URLs are `MEDIA_PUBLIC_URL/<file>`. On startup,
   stored `/media/<file>` links (post parts, covers, project bodies, the profile) are rewritten
   to it once. `/media/<file>` still 301-redirects for old external links.

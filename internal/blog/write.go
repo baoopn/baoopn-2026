@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/baoopn/baoopn-2026/internal/markdown"
+	"github.com/baoopn/baoopn-2026/internal/mediarefs"
 )
 
 type rendered struct {
@@ -73,6 +74,24 @@ func replaceParts(ctx context.Context, tx pgx.Tx, postID int64, rp renderedParts
 	return err
 }
 
+// inputText is everything in a post input that may name media.
+func inputText(in PostInput) string {
+	b, _ := json.Marshal(in)
+	return string(b)
+}
+
+// lockPost locks post id and returns everything in it that may name media
+// (pgx.ErrNoRows when it does not exist).
+func lockPost(ctx context.Context, tx pgx.Tx, id int64) (string, error) {
+	var row, parts string
+	if err := tx.QueryRow(ctx, `SELECT row_to_json(p)::text FROM posts p WHERE id = $1 FOR UPDATE`, id).Scan(&row); err != nil {
+		return "", err
+	}
+	err := tx.QueryRow(ctx, `SELECT coalesce(string_agg(content_md, ' '), '') FROM post_parts WHERE post_id = $1`,
+		id).Scan(&parts)
+	return row + " " + parts, err
+}
+
 // insertPost inserts the post row and its parts in tx. It reports false when
 // the slug is taken.
 func insertPost(ctx context.Context, tx pgx.Tx, slug string, in PostInput, rp renderedParts) (int64, bool, error) {
@@ -104,6 +123,9 @@ func (m *Module) create(ctx context.Context, in PostInput) (AdminPost, error) {
 	}
 	var id int64
 	err = pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
+		if err := mediarefs.Touch(ctx, tx, inputText(in)); err != nil {
+			return err
+		}
 		for n := 1; n <= 100; n++ {
 			newID, ok, err := insertPost(ctx, tx, suffixed(in.Slug, n), in, rp)
 			if err != nil {
@@ -147,6 +169,17 @@ func (m *Module) update(ctx context.Context, id int64, in PostInput) (AdminPost,
 		return AdminPost{}, err
 	}
 	err = pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
+		old, err := lockPost(ctx, tx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		// Both: an image removed here may be pasted into another post next.
+		if err := mediarefs.Touch(ctx, tx, old, inputText(in)); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `
 			UPDATE posts SET slug = $2, title = $3, excerpt = $4, cover_url = $5, tags = $6, status = $7,
 				published_at = $8, reading_minutes = $9, category = $10, updated_at = now()
@@ -169,9 +202,25 @@ func (m *Module) update(ctx context.Context, id int64, in PostInput) (AdminPost,
 	return m.getAdmin(ctx, m.db, id)
 }
 
+// delete removes the post; its media get a full grace period from now.
 func (m *Module) delete(ctx context.Context, id int64) (bool, error) {
-	tag, err := m.db.Exec(ctx, `DELETE FROM posts WHERE id = $1`, id)
-	return tag.RowsAffected() > 0, err
+	found := false
+	err := pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
+		old, err := lockPost(ctx, tx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := mediarefs.Touch(ctx, tx, old); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM posts WHERE id = $1`, id)
+		found = tag.RowsAffected() > 0
+		return err
+	})
+	return found, err
 }
 
 func isUnique(err error, constraint string) bool {

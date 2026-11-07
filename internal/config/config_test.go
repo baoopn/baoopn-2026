@@ -66,3 +66,29 @@ func TestLoadMediaPublicURL(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadMediaOrphans(t *testing.T) {
+	load := func() (Config, error) {
+		t.Setenv("DATABASE_URL", "postgres://x") // Load unsets it
+		return Load()
+	}
+	c, err := load()
+	if err != nil || c.MediaOrphanGrace.Hours() != 168 || c.MediaOrphanMaxPerPass != 50 {
+		t.Fatalf("defaults = %v %d, %v", c.MediaOrphanGrace, c.MediaOrphanMaxPerPass, err)
+	}
+	t.Setenv("MEDIA_ORPHAN_GRACE", "0")
+	if c, err := load(); err != nil || c.MediaOrphanGrace != 0 {
+		t.Fatalf("grace 0 = %v, %v", c.MediaOrphanGrace, err)
+	}
+	t.Setenv("MEDIA_ORPHAN_GRACE", "-1h")
+	if _, err := load(); err == nil {
+		t.Fatal("negative grace accepted")
+	}
+	t.Setenv("MEDIA_ORPHAN_GRACE", "168h")
+	for _, bad := range []string{"0", "-3", "10001"} {
+		t.Setenv("MEDIA_ORPHAN_MAX_PER_PASS", bad)
+		if _, err := load(); err == nil {
+			t.Errorf("MEDIA_ORPHAN_MAX_PER_PASS=%s accepted", bad)
+		}
+	}
+}

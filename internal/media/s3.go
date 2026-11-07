@@ -122,6 +122,33 @@ func (b *s3Backend) remove(ctx context.Context, name string) error {
 	return err
 }
 
+// listed is one object of a bucket listing.
+type listed struct {
+	Key      string
+	Size     int64
+	Modified time.Time
+}
+
+// list returns up to limit objects of the bucket (ListObjectsV2, paginated)
+// and whether there were more.
+func (b *s3Backend) list(ctx context.Context, limit int) ([]listed, bool, error) {
+	var out []listed
+	p := s3.NewListObjectsV2Paginator(b.client, &s3.ListObjectsV2Input{Bucket: aws.String(b.bucket)})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("media: list objects: %w", err)
+		}
+		for _, o := range page.Contents {
+			if len(out) == limit {
+				return out, true, nil
+			}
+			out = append(out, listed{Key: aws.ToString(o.Key), Size: aws.ToInt64(o.Size), Modified: aws.ToTime(o.LastModified)})
+		}
+	}
+	return out, false, nil
+}
+
 // object is a fetched object (or, for HEAD, only its metadata).
 type object struct {
 	Body          io.ReadCloser // nil for HEAD

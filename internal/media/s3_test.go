@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/xml"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +32,8 @@ type fakeS3 struct {
 	hosts  []string // Host header of every request
 	// failPuts makes the next PUTs answer 500 (storage outage).
 	failPuts int
+	// pageSize is the ListObjectsV2 page size (default 1000).
+	pageSize int
 }
 
 type fakeObj struct {
@@ -59,6 +63,10 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.hosts = append(f.hosts, r.Host)
 	if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 Credential=test-key/") {
 		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2" {
+		f.list(w, r)
 		return
 	}
 	key, ok := f.key(r)
@@ -130,6 +138,60 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// list answers ListObjectsV2 in key order, pageSize keys per page; the
+// continuation token is the last key of the previous page.
+func (f *fakeS3) list(w http.ResponseWriter, r *http.Request) {
+	keys := make([]string, 0, len(f.objs))
+	after := r.URL.Query().Get("continuation-token")
+	for k := range f.objs {
+		if k > after {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	size := f.pageSize
+	if size <= 0 {
+		size = 1000
+	}
+	truncated := len(keys) > size
+	if truncated {
+		keys = keys[:size]
+	}
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+	b.WriteString("<Name>" + f.bucket + "</Name><KeyCount>" + strconv.Itoa(len(keys)) + "</KeyCount>")
+	b.WriteString("<IsTruncated>" + strconv.FormatBool(truncated) + "</IsTruncated>")
+	for _, k := range keys {
+		o := f.objs[k]
+		mod, _ := http.ParseTime(o.header.Get("Last-Modified"))
+		var esc strings.Builder
+		_ = xml.EscapeText(&esc, []byte(k))
+		b.WriteString("<Contents><Key>" + esc.String() + "</Key><LastModified>" + mod.UTC().Format("2006-01-02T15:04:05.000Z") +
+			"</LastModified><Size>" + strconv.Itoa(len(o.body)) + "</Size><StorageClass>STANDARD</StorageClass></Contents>")
+	}
+	if truncated {
+		b.WriteString("<NextContinuationToken>" + keys[len(keys)-1] + "</NextContinuationToken>")
+	}
+	b.WriteString("</ListBucketResult>")
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = io.WriteString(w, b.String())
+}
+
+// putObj stores an object directly, last modified at mod.
+func (f *fakeS3) putObj(key string, body []byte, mod time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h := http.Header{}
+	h.Set("Content-Type", "application/octet-stream")
+	h.Set("Last-Modified", mod.UTC().Format(http.TimeFormat))
+	f.objs[key] = fakeObj{body: body, header: h}
+}
+
+func (f *fakeS3) has(key string) bool {
+	_, ok := f.get(key)
+	return ok
 }
 
 func (f *fakeS3) get(key string) (fakeObj, bool) {

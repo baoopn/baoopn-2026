@@ -263,6 +263,88 @@ export interface Media {
 	created_at: string;
 }
 
+// Orphan cleanup (GET/POST /api/admin/media/orphans). References are matched
+// by the file's 24-hex stem across posts, post parts, projects and settings.
+export type OrphanKind = 'row' | 'object' | 'local' | 'local_copy' | 'original' | 'temp';
+
+export interface OrphanCandidate {
+	key: string; // "<kind>:<name>", what POST takes
+	kind: OrphanKind;
+	name: string; // file name, bucket key, or the original's stem
+	media_id?: number; // row, local_copy
+	url?: string; // row: the file's URL
+	original?: string;
+	content_type?: string;
+	size_bytes: number;
+	created_at?: string;
+	modified_at: string; // row: last used (touched_at)
+	age_seconds: number;
+	reason: string;
+	eligible: boolean;
+	blocked: '' | 'grace' | 'disabled';
+	eligible_at?: string; // blocked = grace
+}
+
+export interface OrphanRun {
+	at: string;
+	trigger: 'auto' | 'manual';
+	deleted: number;
+	bytes: number;
+	errors: number;
+}
+
+export interface OrphanPlan {
+	enabled: boolean; // false: MEDIA_ORPHAN_GRACE=0
+	auto: boolean; // daily cleanup
+	grace_seconds: number;
+	max_per_pass: number;
+	storage: 'bucket' | 'disk';
+	generated_at: string;
+	truncated: boolean; // bucket listing stopped at 10 000 keys: no object deletions
+	candidates: OrphanCandidate[]; // oldest first
+	missing: { stem: string; where: string }[]; // referenced, but no row or file
+	kept: {
+		referenced: number;
+		processing: number;
+		in_grace: number;
+		retained_original: number;
+		foreign: number;
+		foreign_bytes: number;
+	};
+	totals: {
+		candidates: number;
+		eligible: number;
+		bytes: number;
+		eligible_bytes: number;
+		would_delete: number; // min(eligible, max_per_pass)
+	};
+	last_run: OrphanRun | null;
+}
+
+export interface OrphanResult {
+	deleted: {
+		rows: number;
+		objects: number;
+		local: number;
+		local_copies: number;
+		originals: number;
+		temp: number;
+	};
+	bytes: number;
+	already_gone: number;
+	skipped: { key: string; why: string }[];
+	errors: number;
+	capped: boolean;
+	remaining: number;
+	reason?: 'brake';
+}
+
+export interface OrphanSettings {
+	auto: boolean;
+	last_run: OrphanRun | null;
+	last_auto_at?: string;
+}
+
 // ── Contact & threads ───────────────────────────────────────────────────────
 
 export interface ContactInput {

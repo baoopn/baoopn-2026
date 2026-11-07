@@ -76,6 +76,9 @@ services:
       S3_ENDPOINT: http://rustfs:9000
       # gRPC for the mediaworker service below (internal network only).
       GRPC_ADDR: ":9100"
+      # Unused-media cleanup: grace before deletion (0 = off), files per run.
+      MEDIA_ORPHAN_GRACE: ${MEDIA_ORPHAN_GRACE:-168h}
+      MEDIA_ORPHAN_MAX_PER_PASS: ${MEDIA_ORPHAN_MAX_PER_PASS:-50}
     volumes:
       - baoopn-media:/data/media
     depends_on:

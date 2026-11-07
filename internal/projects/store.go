@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/baoopn/baoopn-2026/internal/markdown"
+	"github.com/baoopn/baoopn-2026/internal/mediarefs"
 )
 
 var (
@@ -107,22 +108,30 @@ func (m *Module) createManual(ctx context.Context, title, slug string) (AdminPro
 	} else if !validSlug(slug) {
 		return AdminProject{}, invalid("slug must be lowercase letters, digits and single dashes (max 80)")
 	}
-	for n := 1; n <= 100; n++ {
-		s := suffixed(slug, n)
-		p, err := scanProject(m.db.QueryRow(ctx, `INSERT INTO projects (slug, title) VALUES ($1, $2)
-			ON CONFLICT (slug) DO NOTHING RETURNING `+cols, s, title))
-		if errors.Is(err, pgx.ErrNoRows) {
-			if !generated {
-				return AdminProject{}, ErrSlugTaken
+	var out AdminProject
+	err := pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
+		if err := mediarefs.Touch(ctx, tx, title); err != nil {
+			return err
+		}
+		for n := 1; n <= 100; n++ {
+			s := suffixed(slug, n)
+			p, err := scanProject(tx.QueryRow(ctx, `INSERT INTO projects (slug, title) VALUES ($1, $2)
+				ON CONFLICT (slug) DO NOTHING RETURNING `+cols, s, title))
+			if errors.Is(err, pgx.ErrNoRows) {
+				if !generated {
+					return ErrSlugTaken
+				}
+				continue
 			}
-			continue
+			if err != nil {
+				return err
+			}
+			out = p.admin(0)
+			return nil
 		}
-		if err != nil {
-			return AdminProject{}, err
-		}
-		return p.admin(0), nil
-	}
-	return AdminProject{}, ErrSlugTaken
+		return ErrSlugTaken
+	})
+	return out, err
 }
 
 // Patch is the PATCH body (types.ts ProjectPatch); nil fields are unchanged.
@@ -238,6 +247,9 @@ func (m *Module) patch(ctx context.Context, id int64, in Patch) (p project, beca
 		if err != nil {
 			return err
 		}
+		if err := touchProject(ctx, tx, id); err != nil {
+			return err
+		}
 		wasVisible := cur.Visible
 		bodyChanged, err := in.apply(&cur)
 		if err != nil {
@@ -265,15 +277,46 @@ func (m *Module) patch(ctx context.Context, id int64, in Patch) (p project, beca
 			return err
 		}
 		becameVisible = !wasVisible && cur.Visible
+		// Old text above, new text here: either may name media.
+		if err := touchProject(ctx, tx, id); err != nil {
+			return err
+		}
 		p, err = m.one(ctx, tx, `id = $1`, id)
 		return err
 	})
 	return p, becameVisible, err
 }
 
+// touchProject gives the media named anywhere in project id a fresh grace
+// period (mediarefs.Touch).
+func touchProject(ctx context.Context, tx pgx.Tx, id int64) error {
+	var text string
+	err := tx.QueryRow(ctx, `SELECT row_to_json(p)::text FROM projects p WHERE id = $1`, id).Scan(&text)
+	if err != nil {
+		return err
+	}
+	return mediarefs.Touch(ctx, tx, text)
+}
+
+// remove deletes the project; its media get a full grace period from now.
 func (m *Module) remove(ctx context.Context, id int64) (bool, error) {
-	tag, err := m.db.Exec(ctx, `DELETE FROM projects WHERE id = $1`, id)
-	return tag.RowsAffected() > 0, err
+	found := false
+	err := pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
+		if err := mediarefs.Touch(ctx, tx); err != nil { // the lock first
+			return err
+		}
+		var old string
+		err := tx.QueryRow(ctx, `DELETE FROM projects p WHERE id = $1 RETURNING row_to_json(p)::text`, id).Scan(&old)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		return mediarefs.Touch(ctx, tx, old)
+	})
+	return found, err
 }
 
 // reorder sets sort_order to each id's index in ids.
