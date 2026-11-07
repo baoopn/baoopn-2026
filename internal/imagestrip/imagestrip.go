@@ -41,7 +41,10 @@ func Strip(data []byte, ctype string, orientation int) ([]byte, error) {
 
 // JPEG drops APP1 (EXIF, XMP), APP13 (IPTC/Photoshop), APP2 segments other
 // than the ICC profile, APP3-APP12/APP15 and comments. JFIF (APP0), the ICC
-// profile and Adobe (APP14) are kept: they affect how colours decode.
+// profile and Adobe (APP14) are kept: they affect how colours decode. APP2
+// MPF is dropped with the other APP2 segments. From the first scan on, only
+// scans and the tables between them are kept, and the output ends at EOI:
+// anything after it (motion-photo video, MPF images, gain maps) is dropped.
 func JPEG(d []byte, orientation int) ([]byte, error) {
 	if len(d) < 4 || d[0] != 0xFF || d[1] != 0xD8 {
 		return nil, ErrMalformed
@@ -58,11 +61,14 @@ func JPEG(d []byte, orientation int) ([]byte, error) {
 			i++
 			continue
 		}
-		if m == 0xDA || m == 0xD9 { // start of scan: copy the rest unchanged
+		if m == 0xDA || m == 0xD9 {
 			if !inserted {
 				out = append(out, orientationAPP1(orientation)...)
 			}
-			return append(out, d[i:]...), nil
+			if m == 0xD9 {
+				return append(out, 0xFF, 0xD9), nil
+			}
+			return jpegScans(out, d, i)
 		}
 		n := int(binary.BigEndian.Uint16(d[i+2:]))
 		if n < 2 || i+2+n > len(d) {

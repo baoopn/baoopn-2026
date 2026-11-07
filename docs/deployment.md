@@ -74,6 +74,7 @@ Repository settings (Settings → Secrets and variables → Actions):
    | `GITHUB_TOKEN` | optional fine-grained token (public repos, read) |
    | `TURNSTILE_SECRET_KEY`, `PUBLIC_TURNSTILE_SITE_KEY` | optional contact-form captcha |
    | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `MEDIA_PUBLIC_URL` | R2 media bucket (see below) |
+   | `TRUST_CLOUDFLARE` | `true` while the site is proxied by Cloudflare (see [Client IP and Cloudflare](#client-ip-and-cloudflare)) |
 
    Everything else (`SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, `NOTIFY_EMAIL`,
    `SPOTIFY_API_URL`, …) has a production default in the compose file and can be
@@ -206,6 +207,83 @@ request when the browser disconnects. The API allows 8 streams per client IP, so
 the real client IP reaching it (`X-Client-IP` from the web server, with
 `INTERNAL_API_TOKEN` set); if every request showed the proxy's IP, all visitors would
 share those 8 and the rest would fall back to polling.
+
+### Client IP and Cloudflare
+
+Production runs with `TRUST_CLOUDFLARE=true` and `XFF_DEPTH=1`. The web server
+finds the client IP like this:
+
+1. The peer is the last `X-Forwarded-For` entry, which Traefik adds. It is the
+   address that opened the connection to Traefik.
+2. If `TRUST_CLOUDFLARE` is on and the peer is in Cloudflare's published ranges,
+   the server uses `CF-Connecting-IP` and `CF-IPCountry`.
+3. In every other case it uses the peer and sends no country.
+
+So a request that skips Cloudflare and hits the origin directly cannot fake its
+IP with a `CF-Connecting-IP` header. The ranges live in
+`web/src/lib/server/client-ip.js`, with the date they were copied. Refresh them
+from <https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>
+when Cloudflare announces a change.
+
+**Check it after a deploy.** With trust on, the web service logs this line at most
+once a minute when a peer is not a Cloudflare IP:
+
+```
+{"msg":"TRUST_CLOUDFLARE is on but the peer is not a Cloudflare IP","peer":"..."}
+```
+
+A few of these are normal: they are bots that hit the origin IP directly. If the
+line shows up every minute and the peer is always the same private address
+(such as `10.0.x.x` or `172.x.x.x`), Traefik is not seeing the real source
+address. Docker's userland proxy can cause that. Every visitor then shares one
+IP, so rate limits and the SSE stream cap hit everyone at once. Fix the network
+path first; switching trust off does not help in that case.
+
+**Origin firewall (recommended).** The check above already refuses spoofed
+headers. As defence in depth, keep strangers away from the origin too. Pick one:
+
+- A host firewall that allows ports 80 and 443 only from the Cloudflare ranges.
+- Cloudflare Authenticated Origin Pulls, with Traefik requiring the client certificate.
+- A Cloudflare Tunnel, so the origin has no open web ports at all.
+
+## Security headers and CSP
+
+`web/src/hooks.server.ts` adds these headers to every response, including the
+proxied `/api/*` and `/media/*` responses. It never replaces a header that the
+response already has.
+
+| Header | Value |
+|---|---|
+| `X-Frame-Options` | `DENY` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | camera, microphone, geolocation, payment, usb and browsing-topics turned off |
+| `Strict-Transport-Security` | `max-age=15552000`, only on https requests |
+
+**HSTS.** The app sends HSTS itself, for 180 days, without `includeSubDomains` or
+`preload`. If you turn on HSTS in Cloudflare (SSL/TLS → Edge Certificates), remove
+the app's copy in `web/src/lib/server/security-headers.js` so there is one source.
+
+**Content Security Policy.** The policy is set in `web/vite.config.ts`. Each page
+gets a fresh nonce. Two headers go out:
+
+- `Content-Security-Policy` enforces only `frame-ancestors 'none'`,
+  `base-uri 'none'` and `object-src 'none'`.
+- `Content-Security-Policy-Report-Only` holds the full allow-list. The browser
+  blocks nothing for it. It posts each violation to `/csp-report`.
+
+`/csp-report` logs one JSON line per report (`"msg":"csp-report"`) with the page,
+the directive, the blocked URL and the source file. Query strings are removed. The
+endpoint keeps at most 60 reports a minute and reads at most 8 KiB of each.
+
+**Rollout plan.** Watch the `csp-report` lines in the web logs for about a week.
+For each real violation, add the origin to the right directive in `vite.config.ts`.
+Ignore reports caused by browser extensions (`chrome-extension:` and similar).
+A Svelte upgrade can change the inline `onerror` replay handler that SSR writes on
+images. If `script-src-attr` reports appear after one, recompute the hash in
+`vite.config.ts`.
+When the logs stay quiet, move the `reportOnly` directives into `directives` so
+the policy is enforced. Keep `report-uri` so new breakage still shows up.
 
 ## Inbound email (Cloudflare Email Worker)
 
