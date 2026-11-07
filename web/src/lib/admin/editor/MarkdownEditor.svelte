@@ -18,15 +18,20 @@
 	} from '@lucide/svelte';
 	import { minimalSetup } from 'codemirror';
 	import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import type { PreviewResult } from '#lib/api/types.js';
+	import ImageCropper from '../components/ImageCropper.svelte';
 	import Segmented from '../components/Segmented.svelte';
-	import { post, uploadMedia } from '../api';
+	import UploadProgress from '../components/UploadProgress.svelte';
+	import { post, type Crop } from '../api';
+	import { IMAGE_ACCEPT, isImageFile } from '../media/preview';
+	import { UploadJob } from '../media/upload.svelte';
 	import { errorMessage } from '../format';
 	import { toasts } from '../toast.svelte';
 	import { markdownSupport } from './setup';
 	import * as cmd from './commands';
+	import { stripUploadPlaceholders } from './commands';
 
 	type Mode = 'write' | 'split' | 'preview';
 
@@ -61,8 +66,21 @@
 	const mod = isMac ? '⌘' : 'Ctrl';
 
 	// ---- uploads -------------------------------------------------------------
+	// A single image goes through the cropper; several (or a pasted screenshot)
+	// upload straight away. Each upload holds a placeholder line until it is ready;
+	// placeholders never reach `value`, so drafts and saves never contain them.
+	type Row = { job: UploadJob; token: string; alt: string; anchor: number | null };
 	let uploadSeq = 0;
-	let uploading = $state(0);
+	let rows = $state.raw<Row[]>([]);
+	const uploading = $derived(rows.filter((r) => r.job.inFlight).length);
+	let cropFile = $state.raw<File | null>(null);
+	let cropAt: number | undefined;
+	let cropOpen = $state(false);
+
+	// Leaving the page stops polling; media rows still finish on the server.
+	onDestroy(() => {
+		for (const r of rows) r.job.detach();
+	});
 
 	function altFrom(name: string): string {
 		return name
@@ -71,40 +89,83 @@
 			.replace(/[[\]]/g, '');
 	}
 
-	async function uploadImages(files: File[], at?: number) {
+	function startUpload(file: File, crop: Crop | null, at?: number): UploadJob | undefined {
 		const v = view;
 		if (!v) return;
-		for (const file of files) {
-			if (!file.type.startsWith('image/')) {
-				toasts.warning('Only images can be inserted', file.name);
-				continue;
+		const alt = altFrom(file.name);
+		const token = `![Uploading ${alt}…](#upload-${++uploadSeq})`;
+		const pos = Math.min(at ?? v.state.selection.main.head, v.state.doc.length);
+		v.dispatch({ changes: { from: pos, insert: token + '\n' }, userEvent: 'input' });
+		const row = { token, alt, anchor: null } as Row;
+		row.job = new UploadJob(file, crop, {
+			onready: (m, previous) => onready(row, m.url, previous?.url),
+			onfailed: () => onfailed(row)
+		});
+		rows = [...rows, row];
+		void row.job.start();
+		return row.job;
+	}
+
+	function onready(row: Row, url: string, previousUrl?: string) {
+		const v = view;
+		if (!v) return;
+		const md = `![${row.alt}](${url})`;
+		const doc = v.state.doc.toString();
+		const at = doc.indexOf(row.token);
+		if (at >= 0) {
+			v.dispatch({ changes: { from: at, to: at + row.token.length, insert: md } });
+		} else if (previousUrl && doc.includes(`](${previousUrl})`)) {
+			// Re-converted: swap the URL wherever this image was inserted.
+			const from = `](${previousUrl})`;
+			const changes = [];
+			for (let i = doc.indexOf(from); i >= 0; i = doc.indexOf(from, i + 1)) {
+				changes.push({ from: i, to: i + from.length, insert: `](${url})` });
 			}
-			const token = `![Uploading ${altFrom(file.name)}…](#upload-${++uploadSeq})`;
-			const pos = at ?? v.state.selection.main.head;
-			v.dispatch({ changes: { from: pos, insert: token + '\n' }, userEvent: 'input' });
-			at = undefined;
-			uploading++;
-			try {
-				const m = await uploadMedia(file);
-				replaceToken(token, `![${altFrom(file.name)}](${m.url})`);
-			} catch (err) {
-				replaceToken(token + '\n', '');
-				toasts.error('Image upload failed', errorMessage(err));
-			} finally {
-				uploading--;
-			}
+			v.dispatch({ changes });
+		} else if (row.anchor !== null) {
+			// A retry after a failure: put the image back where the placeholder was.
+			const pos = Math.min(row.anchor, v.state.doc.length);
+			v.dispatch({ changes: { from: pos, insert: md + '\n' } });
+			row.anchor = null;
 		}
 	}
 
-	function replaceToken(token: string, insert: string) {
-		if (!view) return;
-		const at = view.state.doc.toString().indexOf(token);
+	/** Final failure: drop the placeholder (never leave a broken link) but remember where. */
+	function onfailed(row: Row) {
+		const v = view;
+		if (!v) return;
+		const at = v.state.doc.toString().indexOf(row.token);
 		if (at < 0) return;
-		view.dispatch({ changes: { from: at, to: at + token.length, insert } });
+		const end = Math.min(at + row.token.length + 1, v.state.doc.length);
+		v.dispatch({ changes: { from: at, to: end } });
+		row.anchor = at;
 	}
 
-	function imageFiles(list: FileList | null | undefined): File[] {
-		return list ? [...list].filter((f) => f.type.startsWith('image/')) : [];
+	function removeRow(row: Row) {
+		row.job.cancel();
+		onfailed(row);
+		rows = rows.filter((r) => r !== row);
+	}
+
+	function handleImages(files: File[], at?: number, direct = false) {
+		const images = files.filter(isImageFile);
+		if (images.length < files.length) toasts.warning('Only images can be inserted');
+		if (images.length === 0) return;
+		if (images.length === 1 && !direct) {
+			cropFile = images[0];
+			cropAt = at;
+			cropOpen = true;
+			return;
+		}
+		toasts.info(
+			'Converted to WebP on upload',
+			images.length === 1 ? undefined : `${images.length} images uploading`
+		);
+		for (const f of images) startUpload(f, null, at);
+	}
+
+	function fileList(list: FileList | null | undefined): File[] {
+		return list ? [...list] : [];
 	}
 
 	// ---- editor --------------------------------------------------------------
@@ -123,22 +184,24 @@
 					...(untrack(() => id) ? { id: untrack(() => id)! } : {})
 				}),
 				EditorView.updateListener.of((u) => {
-					if (u.docChanged) value = u.state.doc.toString();
+					if (!u.docChanged) return;
+					for (const r of rows) if (r.anchor !== null) r.anchor = u.changes.mapPos(r.anchor);
+					value = stripUploadPlaceholders(u.state.doc.toString());
 				}),
 				EditorView.domEventHandlers({
 					paste(e) {
-						const files = imageFiles(e.clipboardData?.files);
+						const files = fileList(e.clipboardData?.files).filter(isImageFile);
 						if (files.length === 0) return false;
 						e.preventDefault();
-						void uploadImages(files);
+						handleImages(files, undefined, true);
 						return true;
 					},
 					drop(e, ev) {
-						const files = imageFiles(e.dataTransfer?.files);
+						const files = fileList(e.dataTransfer?.files).filter(isImageFile);
 						if (files.length === 0) return false;
 						e.preventDefault();
 						const pos = ev.posAtCoords({ x: e.clientX, y: e.clientY }) ?? undefined;
-						void uploadImages(files, pos);
+						handleImages(files, pos);
 						return true;
 					}
 				})
@@ -155,7 +218,7 @@
 	$effect(() => {
 		const v = view;
 		const next = value;
-		if (v && next !== v.state.doc.toString()) {
+		if (v && next !== stripUploadPlaceholders(v.state.doc.toString())) {
 			v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: next } });
 		}
 	});
@@ -213,7 +276,7 @@
 	];
 </script>
 
-<div class="md-editor overflow-hidden rounded-[10px] border border-rule-strong bg-paper">
+<div class="md-editor relative overflow-hidden rounded-[10px] border border-rule-strong bg-paper">
 	<div
 		class="flex flex-wrap items-center gap-1 border-b border-rule bg-paper-2 px-1.5 py-1"
 		role="toolbar"
@@ -237,15 +300,15 @@
 			>
 				<input
 					type="file"
-					accept="image/*"
+					accept={IMAGE_ACCEPT}
 					multiple
 					class="sr-only"
 					aria-label="Insert image"
 					onchange={(e) => {
 						const input = e.currentTarget;
-						const files = imageFiles(input.files);
+						const files = fileList(input.files);
 						input.value = '';
-						void uploadImages(files);
+						handleImages(files);
 					}}
 				/>
 				<Image class="size-4" aria-hidden="true" />
@@ -307,7 +370,30 @@
 			</div>
 		{/if}
 	</div>
+	{#if rows.length}
+		<ul
+			class="absolute right-2 bottom-2 z-10 grid max-h-[60%] w-[min(22rem,calc(100%-1rem))] gap-2 overflow-y-auto"
+			aria-label="Image uploads"
+		>
+			{#each rows as row (row.job.id)}
+				<li class="shadow-[3px_3px_0_var(--ink)] rounded-lg">
+					<UploadProgress
+						job={row.job}
+						onfinished={() => removeRow(row)}
+						onremove={() => removeRow(row)}
+					/>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 </div>
+
+<ImageCropper
+	bind:open={cropOpen}
+	file={cropFile}
+	title="Insert image"
+	onconfirm={(crop) => (cropFile ? startUpload(cropFile, crop, cropAt) : undefined)}
+/>
 
 <style>
 	.md-editor:focus-within {

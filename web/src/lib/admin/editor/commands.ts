@@ -139,3 +139,11 @@ export const markdownShortcuts: KeyBinding[] = [
 	{ key: 'Mod-Shift-9', run: quote },
 	{ key: 'Mod-Alt-c', run: codeBlock }
 ];
+
+/** Matches the editor's in-flight upload placeholders (and their line break). */
+const UPLOAD_PLACEHOLDER = /!\[Uploading [^\]\n]*\]\(#upload-\d+\)\n?/g;
+
+/** Markdown without upload placeholders: what gets saved and autosaved. */
+export function stripUploadPlaceholders(md: string): string {
+	return md.includes('](#upload-') ? md.replace(UPLOAD_PLACEHOLDER, '') : md;
+}

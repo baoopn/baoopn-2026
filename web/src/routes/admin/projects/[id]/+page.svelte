@@ -14,6 +14,7 @@
 	import { guardUnsaved } from '#lib/admin/guard.svelte.js';
 	import { errorMessage, slugify } from '#lib/admin/format.js';
 	import { toasts } from '#lib/admin/toast.svelte.js';
+	import { uploads } from '#lib/admin/media/upload.svelte.js';
 
 	type Form = Required<ProjectPatch>;
 	const FIELDS: (keyof Form)[] = [
@@ -54,6 +55,7 @@
 	let baseline = $state<Form | null>(null);
 	let error = $state<string | null>(null);
 	let saving = $state(false);
+	let confirmUploads = $state(false);
 	let slugError = $state<string | null>(null);
 	let confirmDelete = $state(false);
 	let posts = $state<AdminPost[]>([]);
@@ -95,8 +97,12 @@
 	const dirty = $derived(!!form && !!baseline && JSON.stringify(form) !== JSON.stringify(baseline));
 	guardUnsaved(() => dirty && !saving);
 
-	async function save() {
+	async function save(force = false) {
 		if (!form || saving) return;
+		if (!force && uploads.pending > 0) {
+			confirmUploads = true;
+			return;
+		}
 		const body = changes();
 		if (Object.keys(body).length === 0) return;
 		saving = true;
@@ -171,7 +177,7 @@
 			<Trash2 class="size-4" aria-hidden="true" />
 		</button>
 	{/if}
-	<button type="button" class="btn btn-primary" onclick={save} disabled={!dirty || saving}>
+	<button type="button" class="btn btn-primary" onclick={() => save()} disabled={!dirty || saving}>
 		{#if saving}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{:else}<Save
 				class="size-4"
 				aria-hidden="true"
@@ -313,7 +319,7 @@
 				<label class="field-label" for="pj-order">Sort order</label>
 				<input id="pj-order" class="input" type="number" step="1" bind:value={form.sort_order} />
 			</div>
-			<MediaField id="pj-cover" label="Cover image" bind:value={form.cover_url} />
+			<MediaField id="pj-cover" label="Cover image" aspect="16:9" bind:value={form.cover_url} />
 			<div>
 				<label class="field-label" for="pj-post">Related post</label>
 				<select id="pj-post" class="input" bind:value={form.post_slug}>
@@ -342,4 +348,12 @@
 	confirmLabel="Delete project"
 	danger
 	onconfirm={remove}
+/>
+
+<ConfirmDialog
+	bind:open={confirmUploads}
+	title="Uploads still in progress"
+	message={uploads.message}
+	confirmLabel="Save anyway"
+	onconfirm={() => save(true)}
 />

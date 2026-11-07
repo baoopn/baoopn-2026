@@ -1,43 +1,70 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { ImageUp, LoaderCircle, X } from '@lucide/svelte';
-	import { uploadMedia } from '../api';
-	import { errorMessage } from '../format';
-	import { toasts } from '../toast.svelte';
+	import type { Crop } from '../api';
+	import { IMAGE_ACCEPT, isImageFile } from '../media/preview';
+	import { UploadJob } from '../media/upload.svelte';
+	import ImageCropper, { type Aspect } from './ImageCropper.svelte';
+	import UploadProgress from './UploadProgress.svelte';
 
 	let {
 		value = $bindable(''),
 		label,
 		id,
-		accept = 'image/*',
+		accept,
 		image = true,
+		aspect = 'free',
 		hint
 	}: {
 		value?: string;
 		label: string;
 		id: string;
+		/** Defaults to every image type (incl. HEIC/HEIF) when `image`. */
 		accept?: string;
-		/** Show an image thumbnail. */
+		/** Show an image thumbnail and crop before uploading. */
 		image?: boolean;
+		/** Crop preset the cropper opens with. */
+		aspect?: Aspect;
 		hint?: string;
 	} = $props();
 
-	let busy = $state(false);
 	let broken = $state(false);
+	let job = $state.raw<UploadJob | null>(null);
+	let cropFile = $state.raw<File | null>(null);
+	let cropOpen = $state(false);
+	const busy = $derived(!!job?.inFlight && !job.slow);
 
-	async function onfile(e: Event) {
+	// Leaving the page stops polling; the media row still finishes on the server.
+	onDestroy(() => job?.detach());
+
+	function clearJob() {
+		job?.cancel();
+		job = null;
+	}
+
+	function upload(file: File, crop: Crop | null): UploadJob {
+		clearJob();
+		const j = new UploadJob(file, crop, {
+			onready: (m) => {
+				value = m.url;
+				broken = false;
+			}
+		});
+		job = j;
+		void j.start();
+		return j;
+	}
+
+	function onfile(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file) return;
-		busy = true;
-		try {
-			const m = await uploadMedia(file);
-			value = m.url;
-			broken = false;
-		} catch (err) {
-			toasts.error('Upload failed', errorMessage(err));
-		} finally {
-			busy = false;
+		if (image && isImageFile(file)) {
+			cropFile = file;
+			cropOpen = true;
+		} else {
+			upload(file, null);
 		}
 	}
 </script>
@@ -62,7 +89,7 @@
 				class="input"
 				type="text"
 				inputmode="url"
-				placeholder="/media/… or https://…"
+				placeholder="https://…"
 				bind:value
 				oninput={() => (broken = false)}
 				aria-describedby={hint ? `${id}-hint` : undefined}
@@ -76,14 +103,15 @@
 				>
 					<input
 						type="file"
-						{accept}
+						accept={accept ?? (image ? IMAGE_ACCEPT : undefined)}
 						class="sr-only"
 						aria-label="Upload {label.toLowerCase()}"
 						disabled={busy}
 						onchange={onfile}
 					/>
 					{#if busy}
-						<LoaderCircle class="size-4 animate-spin" aria-hidden="true" /> Uploading…
+						<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+						{job?.stage === 'converting' ? 'Converting…' : 'Uploading…'}
 					{:else}
 						<ImageUp class="size-4" aria-hidden="true" /> Upload
 					{/if}
@@ -97,4 +125,19 @@
 			{#if hint}<p id="{id}-hint" class="hint">{hint}</p>{/if}
 		</div>
 	</div>
+	{#if job}
+		<div class="mt-3">
+			<UploadProgress {job} onfinished={clearJob} onremove={clearJob} />
+		</div>
+	{/if}
 </div>
+
+{#if image}
+	<ImageCropper
+		bind:open={cropOpen}
+		file={cropFile}
+		{aspect}
+		title="Crop {label.toLowerCase()}"
+		onconfirm={(crop) => (cropFile ? upload(cropFile, crop) : undefined)}
+	/>
+{/if}

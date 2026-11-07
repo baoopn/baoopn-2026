@@ -14,12 +14,15 @@
 	import { guardUnsaved } from '#lib/admin/guard.svelte.js';
 	import { auth } from '#lib/admin/auth.svelte.js';
 	import { errorMessage } from '#lib/admin/format.js';
+	import ConfirmDialog from '#lib/admin/components/ConfirmDialog.svelte';
 	import { toasts } from '#lib/admin/toast.svelte.js';
+	import { uploads } from '#lib/admin/media/upload.svelte.js';
 
 	let form = $state<Profile | null>(null);
 	let baseline = $state('');
 	let loadError = $state<string | null>(null);
 	let saving = $state(false);
+	let confirmUploads = $state(false);
 
 	function set(p: Profile) {
 		const f: Profile = {
@@ -46,9 +49,13 @@
 	const dirty = $derived(!!form && JSON.stringify(form) !== baseline);
 	guardUnsaved(() => dirty && !saving);
 
-	async function save(e?: SubmitEvent) {
+	async function save(e?: SubmitEvent, force = false) {
 		e?.preventDefault();
 		if (!form || saving) return;
+		if (!force && uploads.pending > 0) {
+			confirmUploads = true;
+			return;
+		}
 		saving = true;
 		try {
 			set(await put<Profile>('/profile', $state.snapshot(form)));
@@ -169,7 +176,7 @@
 		<span class="sr-only">Loading profile</span>
 	</div>
 {:else}
-	<form id="profile-form" class="flex flex-col gap-10" onsubmit={save}>
+	<form id="profile-form" class="flex flex-col gap-10" onsubmit={(e) => save(e)}>
 		{#if dirty}
 			<p class="text-warn -mt-4 font-mono text-xs" role="status">Unsaved changes</p>
 		{/if}
@@ -206,8 +213,8 @@
 		<section class="grid gap-6 lg:grid-cols-[14rem_1fr]" aria-labelledby="p-images">
 			<h2 id="p-images" class="font-display text-xl font-semibold">Images and files</h2>
 			<div class="grid gap-5 sm:grid-cols-2">
-				<MediaField id="p-avatar" label="Avatar" bind:value={form.avatar_url} />
-				<MediaField id="p-cover" label="Cover" bind:value={form.cover_url} />
+				<MediaField id="p-avatar" label="Avatar" aspect="1:1" bind:value={form.avatar_url} />
+				<MediaField id="p-cover" label="Cover" aspect="16:9" bind:value={form.cover_url} />
 				<MediaField
 					id="p-resume"
 					label="Résumé (PDF)"
@@ -256,7 +263,12 @@
 						aria-describedby="p-seo-desc-hint"></textarea>
 					<p id="p-seo-desc-hint" class="hint">{form.seo.description.length}/200 characters</p>
 				</div>
-				<MediaField id="p-og" label="Social preview image" bind:value={form.seo.og_image} />
+				<MediaField
+					id="p-og"
+					label="Social preview image"
+					aspect="16:9"
+					bind:value={form.seo.og_image}
+				/>
 			</div>
 		</section>
 	</form>
@@ -289,3 +301,11 @@
 		</button>
 	{/snippet}
 </Dialog>
+
+<ConfirmDialog
+	bind:open={confirmUploads}
+	title="Uploads still in progress"
+	message={uploads.message}
+	confirmLabel="Save anyway"
+	onconfirm={() => save(undefined, true)}
+/>

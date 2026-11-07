@@ -250,7 +250,7 @@ export interface TagCount {
 
 export interface Media {
 	id: number;
-	url: string; // "/media/<filename>"
+	url: string; // absolute, e.g. "https://media.baoopn.com/<file>.webp"
 	filename: string;
 	original: string;
 	content_type: string;
