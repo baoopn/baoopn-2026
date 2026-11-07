@@ -6,7 +6,8 @@ Tailwind 4). The web server is the only public service; it proxies `/api/*` and 
 the API on the internal network (`web/src/hooks.server.ts`). The admin dashboard is `/admin`
 (client-rendered, Clerk auth; the API verifies the session token).
 
-- Run locally: `make deps` (Postgres on :5433), `make run-api`, `make web-dev`.
+- Run locally: `make deps` (Postgres on :5433, RustFS S3 media bucket `baoopn-dev` on :9000,
+  console :9001), `make run-api`, `make web-dev`.
 - Build/test/lint: `make build`, `make test`, `make lint`.
 - Migrations: add `migrations/0000N_name.sql`; never edit an applied one.
 - Config is env vars only: API in `internal/config`, web in `web/src/env.ts` (SvelteKit 3

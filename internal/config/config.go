@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -60,6 +61,22 @@ type Config struct {
 	MediaDir    string `env:"MEDIA_DIR" envDefault:"./data/media"`
 	MaxUploadMB int64  `env:"MAX_UPLOAD_MB" envDefault:"10"`
 
+	// S3-compatible media bucket (Cloudflare R2; RustFS in development). Used
+	// only when the endpoint, bucket and both keys are set; MEDIA_DIR is the
+	// fallback and the source of the startup migration.
+	S3Endpoint        string `env:"S3_ENDPOINT"`
+	S3Region          string `env:"S3_REGION" envDefault:"auto"`
+	S3Bucket          string `env:"S3_BUCKET"`
+	S3AccessKeyID     string `env:"S3_ACCESS_KEY_ID"`
+	S3SecretAccessKey string `env:"S3_SECRET_ACCESS_KEY,unset"`
+	// S3ForcePathStyle addresses <endpoint>/<bucket> (RustFS on localhost);
+	// R2 uses the default virtual-hosted style.
+	S3ForcePathStyle bool `env:"S3_FORCE_PATH_STYLE" envDefault:"false"`
+	// MediaPublicURL is the bucket's public origin (https://media.example.com).
+	// Set: media URLs point there and /media/<file> redirects to it. Empty:
+	// the API streams objects at /media/<file>.
+	MediaPublicURL string `env:"MEDIA_PUBLIC_URL"`
+
 	// SpotifyAPIURL is the spotify-tracker public API (embedded widgets).
 	SpotifyAPIURL string `env:"SPOTIFY_API_URL"`
 
@@ -79,6 +96,17 @@ func (c Config) MailEnabled() bool {
 		!strings.HasPrefix(c.SMTPPassword, "REPLACE_")
 }
 
+// S3Enabled reports whether the media bucket is configured.
+func (c Config) S3Enabled() bool {
+	return c.S3Endpoint != "" && c.S3Bucket != "" && c.S3AccessKeyID != "" && c.S3SecretAccessKey != ""
+}
+
+// S3Partial reports some but not all of the bucket settings (likely a typo).
+func (c Config) S3Partial() bool {
+	some := c.S3Endpoint != "" || c.S3Bucket != "" || c.S3AccessKeyID != "" || c.S3SecretAccessKey != ""
+	return some && !c.S3Enabled()
+}
+
 // Load parses the environment.
 func Load() (Config, error) {
 	var c Config
@@ -87,6 +115,14 @@ func Load() (Config, error) {
 	}
 	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
 	c.SpotifyAPIURL = strings.TrimRight(c.SpotifyAPIURL, "/")
+	c.MediaPublicURL = strings.TrimRight(c.MediaPublicURL, "/")
+	if c.MediaPublicURL != "" {
+		u, err := url.Parse(c.MediaPublicURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			return c, fmt.Errorf("config: MEDIA_PUBLIC_URL must be an origin like https://media.example.com")
+		}
+	}
 	if c.IsProduction() {
 		if c.SecretsKey == "" {
 			return c, fmt.Errorf("config: SECRETS_KEY is required in production")

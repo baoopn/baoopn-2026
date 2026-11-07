@@ -6,15 +6,21 @@ The site runs on Coolify as one Docker Compose resource
 | Service | Image | Exposure |
 |---|---|---|
 | `postgres` | `postgres:17-alpine`, volume `baoopn-postgres-data` | internal |
-| `api` | `deploy/docker/api.Dockerfile` (Go, distroless, non-root), volume `baoopn-media` on `/data/media` | internal only (no domain) |
+| `api` | `deploy/docker/api.Dockerfile` (Go, distroless, non-root), volume `baoopn-media` on `/data/media` (fallback media store) | internal only (no domain) |
 | `web` | `deploy/docker/web.Dockerfile` (SvelteKit adapter-node, non-root) | `https://example.com` → port 3000 |
 
 The web server is the only public service. It proxies `/api/*` and `/media/*` to
 `http://api:8080` and adds the client IP/country with `INTERNAL_API_TOKEN`.
 Coolify builds both images on the server from the repository, so no registry is used.
 
-`docker-compose.yml` is for local development: Postgres only by default, or the
-whole stack with `docker compose --profile full up --build` (site on :3000).
+Uploaded media live in the Cloudflare R2 bucket `baoopn-portfolio`, served from
+its custom domain `https://media.baoopn.com` (see *Media bucket* below). Without
+the S3 variables the api keeps them on the `baoopn-media` volume.
+
+`docker-compose.yml` is for local development: Postgres and RustFS (an
+S3-compatible stand-in for R2; a one-shot `rustfs-init` creates the private
+`baoopn-dev` bucket) by default, or the whole stack with
+`docker compose --profile full up --build` (site on :3000).
 
 ## CI/CD (GitHub Actions)
 
@@ -66,6 +72,7 @@ Repository settings (Settings → Secrets and variables → Actions):
    | `INBOUND_WEBHOOK_SECRET` | the value in `.secrets/inbound.env` (already set on the worker) |
    | `GITHUB_TOKEN` | optional fine-grained token (public repos, read) |
    | `TURNSTILE_SECRET_KEY`, `PUBLIC_TURNSTILE_SITE_KEY` | optional contact-form captcha |
+   | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `MEDIA_PUBLIC_URL` | R2 media bucket (see below) |
 
    Everything else (`SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, `NOTIFY_EMAIL`,
    `SPOTIFY_API_URL`, …) has a production default in the compose file and can be
@@ -84,6 +91,45 @@ replies/test emails return `mail_disabled`.
    (e.g. `SMTP_HOST=smtp.example.com`, `SMTP_PORT=2587`, `SMTP_USER=<useSend SMTP user>`,
    `MAIL_FROM=Jane Doe <jane@mail.example.com>`).
 3. In the admin dashboard, Settings → *Send test email*.
+
+## Media bucket (Cloudflare R2)
+
+Production media are in the R2 bucket `baoopn-portfolio`, with public access
+through the custom domain `media.baoopn.com` (R2 → bucket → Settings → Custom
+Domains). The api uses its own R2 API token, scoped to that bucket only
+(R2 → Manage API tokens → *Object Read & Write*, applied to `baoopn-portfolio`
+only). Its values live only in Coolify's environment and `.secrets/`.
+
+| Variable | Value |
+|---|---|
+| `S3_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
+| `S3_REGION` | `auto` (default) |
+| `S3_BUCKET` | `baoopn-portfolio` |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | the bucket-scoped token's S3 credentials |
+| `S3_FORCE_PATH_STYLE` | `false` (default; R2 uses virtual-hosted URLs) |
+| `MEDIA_PUBLIC_URL` | `https://media.baoopn.com` (no trailing slash) |
+
+The bucket is used only when the endpoint, bucket and both keys are set; a partial
+set logs a warning and keeps the volume. With it on:
+
+- Uploads keep the same validation, size limit, sha256 dedupe and filenames, and are
+  stored with `Cache-Control: public, max-age=31536000, immutable`; SVGs also get
+  `Content-Disposition: attachment`, so a script in an SVG opened directly on
+  `media.baoopn.com` (a sibling of the site) never runs.
+- Media URLs become `https://media.baoopn.com/<file>`, and `/media/<file>` answers
+  `301` there, so links already in posts and the profile keep working. Without
+  `MEDIA_PUBLIC_URL` the api streams `/media/<file>` from the bucket instead (the
+  default in development).
+- Deleting a media item removes the object too.
+- On every start, a background job (15-minute timeout) copies each file in the
+  media table that is on the volume but not in the bucket (`HeadObject` check),
+  logging `media migration done` with counts. It never blocks or fails the boot and
+  keeps the local files; once it reports `uploaded=0 failed=0` the volume is only a
+  backup.
+
+No bucket CORS rule is needed: images are loaded with plain `<img>` tags and
+uploads go through the api. Add one (GET from `https://baoopn.com`) only if the
+site ever fetches media with `fetch()` or `crossorigin`.
 
 ## DNS (Cloudflare, your zone)
 
@@ -132,8 +178,9 @@ temporary failure.
 - **Logs:** Coolify → resource → service → Logs (`LOG_FORMAT=json`).
 - **Health:** the api image probes `/healthz` with `api healthcheck`; the web
   image fetches a static asset.
-- **Backups:** enable Coolify's scheduled backups for the `postgres` service and
-  back up the `baoopn-media` volume (uploaded images).
+- **Backups:** enable Coolify's scheduled backups for the `postgres` service. Media
+  are in R2 (`baoopn-portfolio`); the `baoopn-media` volume keeps the files from
+  before the migration and is the store when R2 is not configured.
 - **Rollback:** redeploy an older commit from Coolify's deployment list.
 
 ## Branch protection
