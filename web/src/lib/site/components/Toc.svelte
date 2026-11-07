@@ -17,7 +17,7 @@
 					const first = list.find((i) => visible[i.id]);
 					if (first) active = first.id;
 				},
-				{ rootMargin: '0px 0px -70% 0px' }
+				{ rootMargin: '-80px 0px -70% 0px' }
 			);
 			for (const i of list) {
 				const el = document.getElementById(i.id);
@@ -54,8 +54,8 @@
 		line-height: 1.35;
 		color: var(--ink-soft);
 		transition:
-			color 160ms ease-out,
-			border-color 160ms ease-out;
+			color var(--motion-fast) var(--ease-soft),
+			border-color var(--motion-fast) var(--ease-soft);
 	}
 	.toc-link:hover {
 		color: var(--ink);

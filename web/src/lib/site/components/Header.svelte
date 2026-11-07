@@ -19,7 +19,7 @@
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && open && (open = false)} />
 
-<header class="border-b border-ink">
+<header class="site-header sticky top-0 z-40 border-b border-ink bg-paper">
 	<div class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
 		<a href="/" class="flex min-h-11 shrink-0 items-center gap-3 rounded-[8px]" aria-label="{name}, home">
 			<img src="/logo/baoopn-wordmark-primary.svg" alt="" width="78" height="32" class="h-8 w-auto" />
@@ -60,7 +60,10 @@
 	<nav
 		id="mobile-nav"
 		aria-label="Main"
-		class={['border-t border-rule md:hidden', !open && 'hidden']}
+		class={[
+			'max-h-[calc(100dvh-var(--header-h))] overflow-y-auto overscroll-contain border-t border-rule md:hidden',
+			!open && 'hidden'
+		]}
 	>
 		<ul class="mx-auto max-w-6xl px-4 py-2">
 			{#each NAV as item, i (item.href)}
@@ -84,6 +87,10 @@
 </header>
 
 <style>
+	/* Its own layer in the page cross-fade, so the bar stays crisp. */
+	.site-header {
+		view-transition-name: site-header;
+	}
 	.navlink {
 		display: inline-flex;
 		align-items: center;

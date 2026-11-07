@@ -124,7 +124,7 @@
 		</section>
 
 		{#if data.tags.length}
-			<aside aria-labelledby="tags-h" class="lg:sticky lg:top-6 lg:self-start">
+			<aside aria-labelledby="tags-h" class="lg:sticky lg:top-[calc(var(--header-h)+1.5rem)] lg:self-start">
 				<h2 id="tags-h" class="label border-b border-ink pb-2 text-ink-soft">Browse by tag</h2>
 				<ul class="mt-2 flex flex-wrap gap-x-1.5 lg:flex-col">
 					{#each data.tags as t (t.tag)}

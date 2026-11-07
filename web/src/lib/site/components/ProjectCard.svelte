@@ -28,9 +28,13 @@
 	// Ink plate for light logos; otherwise the slug's pastel tile. Both read
 	// the same in light and dark themes.
 	const ink = $derived(showLogo && project.logo_bg === 'ink');
+	const hasActions = $derived(!!demo || !!repo);
+	const hasMeta = $derived(
+		project.stars > 0 || project.archived || (!!project.language && showCover)
+	);
 </script>
 
-<article class="card group">
+<article class="card group flex h-full flex-col">
 	<a
 		href="/projects/{project.slug}"
 		class="sleeve relative isolate block rounded-brand"
@@ -105,34 +109,43 @@
 		</ul>
 	{/if}
 
-	<div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-		{#if project.stars > 0}
-			<span class="inline-flex items-center gap-1 font-mono tabular-nums text-ink-soft">
-				<Star class="size-3.5" aria-hidden="true" />
-				{count(project.stars)}<span class="sr-only"> stars</span>
-			</span>
-		{/if}
-		{#if project.language && showCover}
-			<span class="font-mono text-ink-soft">{project.language}</span>
-		{/if}
-		{#if project.archived}
-			<span class="chip label px-2! py-0! [--chip:var(--spot-butter)]">Archived</span>
-		{/if}
-		<span class="ml-auto flex gap-1">
-			{#if repo}
-				<a href={repo} target="_blank" rel="noopener noreferrer" class="iconlink" title="Source code">
-					<SocialIcon icon="github" class="size-4.5" />
-					<span class="sr-only">Source code for {project.title}</span>
-				</a>
-			{/if}
-			{#if demo}
-				<a href={demo} target="_blank" rel="noopener noreferrer" class="iconlink" title="Live site">
-					<ArrowUpRight class="size-4.5" aria-hidden="true" />
-					<span class="sr-only">Live site for {project.title}</span>
-				</a>
-			{/if}
-		</span>
-	</div>
+	{#if hasActions || hasMeta}
+		<!-- mt-auto pins the footer to the card bottom so rows line up across the grid. -->
+		<div class="mt-auto pt-4">
+			<div class="flex flex-wrap items-center gap-2 border-t border-rule pt-3 text-sm">
+				{#if demo}
+					<a href={demo} target="_blank" rel="noopener noreferrer" class="action">
+						<ArrowUpRight class="size-4" aria-hidden="true" />Live site<span class="sr-only"
+							>{' '}for {project.title} (opens in a new tab)</span
+						>
+					</a>
+				{/if}
+				{#if repo}
+					<a href={repo} target="_blank" rel="noopener noreferrer" class="action">
+						<SocialIcon icon="github" class="size-4" />Code<span class="sr-only"
+							>{' '}for {project.title} (opens in a new tab)</span
+						>
+					</a>
+				{/if}
+				{#if hasMeta}
+					<span class="ml-auto flex items-center gap-x-3">
+						{#if project.stars > 0}
+							<span class="inline-flex items-center gap-1 font-mono tabular-nums text-ink-soft">
+								<Star class="size-3.5" aria-hidden="true" />
+								{count(project.stars)}<span class="sr-only"> stars</span>
+							</span>
+						{/if}
+						{#if project.language && showCover}
+							<span class="font-mono text-ink-soft">{project.language}</span>
+						{/if}
+						{#if project.archived}
+							<span class="chip label px-2! py-0! [--chip:var(--spot-butter)]">Archived</span>
+						{/if}
+					</span>
+				{/if}
+			</div>
+		</div>
+	{/if}
 </article>
 
 <style>
@@ -169,16 +182,40 @@
 	.card:focus-within .logo {
 		transform: scale(1.03);
 	}
-	.iconlink {
-		display: grid;
-		place-items: center;
-		width: 2.75rem;
-		height: 2.75rem;
+	/* Labelled pill links in the card footer; the small form of the project page buttons. */
+	.action {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		height: 2.25rem;
+		padding: 0 0.8rem;
+		border: 1px solid var(--ink);
 		border-radius: 999px;
+		background: var(--paper);
 		color: var(--ink);
-		transition: background-color var(--motion-fast) var(--ease-soft);
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		transition:
+			background-color var(--motion-fast) var(--ease-soft),
+			transform var(--motion-fast) var(--ease-soft);
 	}
-	.iconlink:hover {
+	/* 44px hit area; the 8px gap keeps neighbours from overlapping. */
+	.action::after {
+		content: '';
+		position: absolute;
+		inset: -5px;
+	}
+	.action:hover {
 		background: var(--paper-2);
+	}
+	.action:active {
+		transform: translate(1px, 1px);
+	}
+	.action:focus-visible {
+		border-radius: 999px;
 	}
 </style>
