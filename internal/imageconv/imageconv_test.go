@@ -205,3 +205,31 @@ func TestConvertKeepsStraightAlpha(t *testing.T) {
 		t.Fatalf("half-alpha white pixel is %+v", half)
 	}
 }
+
+// A transparent PNG logo that needs no downscale (the NRGBA path) keeps its
+// alpha: the clear background stays clear and the opaque mark stays opaque.
+func TestConvertTransparentPNG(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 40, 40))
+	for y := 10; y < 30; y++ {
+		for x := 10; x < 30; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 20, G: 120, B: 220, A: 255})
+		}
+	}
+	res, err := Convert(testimg.PNG(src), imagemeta.PNG, Options{MaxDimension: 2400})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := decodeWebP(t, res)
+	if b := img.Bounds(); b.Dx() != 40 || b.Dy() != 40 {
+		t.Fatalf("size %v", b)
+	}
+	for _, p := range []image.Point{{0, 0}, {39, 39}, {5, 20}} {
+		if _, _, _, a := img.At(p.X, p.Y).RGBA(); a != 0 {
+			t.Fatalf("background %v has alpha %d", p, a>>8)
+		}
+	}
+	mark := color.NRGBAModel.Convert(img.At(20, 20)).(color.NRGBA)
+	if mark.A != 255 || mark.B < 200 || mark.R > 50 {
+		t.Fatalf("mark pixel is %+v", mark)
+	}
+}
