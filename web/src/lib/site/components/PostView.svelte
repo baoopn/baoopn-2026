@@ -239,7 +239,10 @@
 			max-width: none;
 			display: grid;
 			/* Article centred under the header; parts on the left, TOC on the right. */
-			grid-template-columns: minmax(0, 1fr) minmax(0, 48rem) minmax(0, 1fr);
+			/* Side columns get real widths so part titles wrap by phrase, not by
+			   word; the article column gives way first. */
+			grid-template-columns: minmax(11rem, 14rem) minmax(0, 48rem) minmax(10rem, 13rem);
+			justify-content: center;
 			gap: 2.5rem;
 		}
 		.body.with-side > .main {
