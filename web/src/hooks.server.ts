@@ -49,8 +49,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 			body: ['GET', 'HEAD'].includes(event.request.method) ? undefined : event.request.body,
 			// @ts-expect-error duplex is required by undici for streamed bodies
 			duplex: 'half',
-			redirect: 'manual'
+			redirect: 'manual',
+			// A client that goes away (e.g. a closed SSE tab) aborts the upstream request.
+			signal: event.request.signal
 		});
+		// res.body is passed through as a stream, chunk by chunk, so SSE
+		// (/api/v1/listening/now-playing/stream) is not buffered. fetch already
+		// decoded any compression, so the encoding and length no longer apply.
 		const out = new Headers(res.headers);
 		out.delete('content-encoding');
 		out.delete('content-length');

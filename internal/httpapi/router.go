@@ -19,6 +19,13 @@ type Module interface {
 	Hooks(r chi.Router)  // /api/hooks (signed webhooks)
 }
 
+// Streamer is implemented by modules with long-lived public routes (SSE).
+// They are mounted under /api/v1 with the rate limit but without the request
+// timeout, and must clear their own connection deadlines.
+type Streamer interface {
+	Streams(r chi.Router)
+}
+
 // Deps are the shared dependencies of the router.
 type Deps struct {
 	Log       *slog.Logger
@@ -57,9 +64,17 @@ func New(d Deps) http.Handler {
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(middleware.Timeout(20*time.Second), RateLimit(d.PublicRPM))
+		r.Use(RateLimit(d.PublicRPM))
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(20 * time.Second))
+			for _, m := range d.Modules {
+				m.Public(r)
+			}
+		})
 		for _, m := range d.Modules {
-			m.Public(r)
+			if s, ok := m.(Streamer); ok {
+				s.Streams(r)
+			}
 		}
 	})
 
