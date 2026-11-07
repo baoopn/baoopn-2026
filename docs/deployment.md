@@ -279,6 +279,9 @@ endpoint keeps at most 60 reports a minute and reads at most 8 KiB of each.
 **Rollout plan.** Watch the `csp-report` lines in the web logs for about a week.
 For each real violation, add the origin to the right directive in `vite.config.ts`.
 Ignore reports caused by browser extensions (`chrome-extension:` and similar).
+A Svelte upgrade can change the inline `onerror` replay handler that SSR writes on
+images. If `script-src-attr` reports appear after one, recompute the hash in
+`vite.config.ts`.
 When the logs stay quiet, move the `reportOnly` directives into `directives` so
 the policy is enforced. Keep `report-uri` so new breakage still shows up.
 

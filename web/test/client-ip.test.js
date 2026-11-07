@@ -37,14 +37,15 @@ function inRange(ip, cidr) {
 }
 
 test('IPv6 ranges: first and last address in, neighbours out', () => {
+	const F = ':ffff:ffff:ffff:ffff:ffff:ffff'; // the last six groups all ones
 	const cases = [
-		['2400:cb00::', '2400:cb00:ffff:ffff:ffff:ffff:ffff:ffff', '2400:caff:ffff:ffff:ffff:ffff:ffff:ffff', '2400:cb01::'],
-		['2606:4700::', '2606:4700:ffff:ffff:ffff:ffff:ffff:ffff', '2606:46ff:ffff:ffff:ffff:ffff:ffff:ffff', '2606:4701::'],
-		['2803:f800::', '2803:f800:ffff:ffff:ffff:ffff:ffff:ffff', '2803:f7ff:ffff:ffff:ffff:ffff:ffff:ffff', '2803:f801::'],
-		['2405:b500::', '2405:b500:ffff:ffff:ffff:ffff:ffff:ffff', '2405:b4ff:ffff:ffff:ffff:ffff:ffff:ffff', '2405:b501::'],
-		['2405:8100::', '2405:8100:ffff:ffff:ffff:ffff:ffff:ffff', '2405:80ff:ffff:ffff:ffff:ffff:ffff:ffff', '2405:8101::'],
-		['2a06:98c0::', '2a06:98c7:ffff:ffff:ffff:ffff:ffff:ffff', '2a06:98bf:ffff:ffff:ffff:ffff:ffff:ffff', '2a06:98c8::'],
-		['2c0f:f248::', '2c0f:f248:ffff:ffff:ffff:ffff:ffff:ffff', '2c0f:f247:ffff:ffff:ffff:ffff:ffff:ffff', '2c0f:f249::']
+		['2400:cb00::', '2400:cb00' + F, '2400:caff' + F, '2400:cb01::'],
+		['2606:4700::', '2606:4700' + F, '2606:46ff' + F, '2606:4701::'],
+		['2803:f800::', '2803:f800' + F, '2803:f7ff' + F, '2803:f801::'],
+		['2405:b500::', '2405:b500' + F, '2405:b4ff' + F, '2405:b501::'],
+		['2405:8100::', '2405:8100' + F, '2405:80ff' + F, '2405:8101::'],
+		['2a06:98c0::', '2a06:98c7' + F, '2a06:98bf' + F, '2a06:98c8::'],
+		['2c0f:f248::', '2c0f:f248' + F, '2c0f:f247' + F, '2c0f:f249::']
 	];
 	for (const [first, last, before, after] of cases) {
 		assert.ok(inCloudflare(first), first);

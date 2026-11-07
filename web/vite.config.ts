@@ -39,6 +39,13 @@ export default defineConfig({
 				reportOnly: {
 					'default-src': ['self'],
 					'script-src': ['self', 'wasm-unsafe-eval', TURNSTILE, ...CLERK, CLERK_PROTECT],
+					// Svelte SSR writes onerror="this.__e=event" on <img onerror={...}> so
+					// hydration can replay the event. This hash allows that one handler only.
+					// Re-check the string (and its sha256) after a Svelte upgrade.
+					'script-src-attr': [
+						'unsafe-hashes',
+						'sha256-7dQwUgLau1NFCCGjfn9FsYptB6ZtWxJin6VohGIu20I='
+					],
 					'style-src': ['self', 'unsafe-inline'],
 					'img-src': [
 						'self',
