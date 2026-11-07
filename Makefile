@@ -54,6 +54,10 @@ pg: ## Start an embedded Postgres on :5434 for DB tests (blocks)
 test-db: ## Run Go tests against the embedded Postgres from `make pg`
 	TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5434/postgres?sslmode=disable' $(GO) test -count=1 ./...
 
+.PHONY: mail-preview
+mail-preview: ## Render every email to internal/contact/testdata/email/
+	$(GO) test -count=1 ./internal/contact -run TestEmailGolden -update
+
 .PHONY: docker
 docker: ## Build both Docker images
 	docker build -f deploy/docker/api.Dockerfile --build-arg VERSION=$(VERSION) -t baoopn-api:dev .

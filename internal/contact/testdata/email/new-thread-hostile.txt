@@ -1,0 +1,11 @@
+Name: <img src=x onerror=alert(1)>
+Email: victim@example.test
+Subject: "><script>x</script>
+Received: 7 Nov 2026, 14:05 UTC
+Reference: #123
+
+QZXMARKERQZX unique words </td></table>{{.}} javascript:alert(1) visit evil.example now or https://evil.example/login?next=x, www.evil.example, mail admin@evil.example
+
+Open in inbox: https://example.test/admin/inbox/123
+
+Sent by the example.test contact form.

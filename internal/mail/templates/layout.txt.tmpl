@@ -1,0 +1,3 @@
+{{- range $i, $b := .Blocks}}{{sep $i $.Personal}}{{textBlock $ $b}}{{end}}
+{{- if .Signature}}{{sigSep}}{{.Signature}}{{end}}
+{{- if and .Footer (not .Personal)}}{{"\n\n"}}{{.Footer}}{{end -}}

@@ -16,9 +16,6 @@ import (
 // thread.
 const notifyEvery = 10 * time.Minute
 
-// sigSep starts the signature under a reply.
-const sigSep = "\n\n-- \n"
-
 func (m *Module) adminLink(id int64) string {
 	return strings.TrimRight(m.d.PublicURL, "/") + "/admin/inbox/" + strconv.FormatInt(id, 10)
 }
@@ -31,10 +28,12 @@ func (m *Module) notifyNewThread(ctx context.Context, id int64, s submission) {
 		"Subject: " + s.subject + "\n\n" +
 		s.message + "\n\n" +
 		"Open it in the admin: " + m.adminLink(id) + "\n"
+	text, html := m.render(newThreadDoc(m.brand(), m.adminLink(id), id, s), text)
 	m.send(ctx, "notification", id, bmail.Message{
 		To:            m.d.Settings.NotifyTo(ctx),
 		Subject:       bmail.HeaderText("New message: " + s.subject),
 		Text:          text,
+		HTML:          html,
 		AutoSubmitted: "auto-generated",
 	})
 }
@@ -45,21 +44,30 @@ func (m *Module) notifyNewThread(ctx context.Context, id int64, s submission) {
 // Anyone can type any address into the form, so this is a potential relay:
 // it is only sent when Turnstile is configured (checked by the caller), never
 // quotes the visitor's message, only uses a link-free name, and is capped
-// site-wide by ackPerHour.
+// per address by ackPerAddress and site-wide by ackPerHour.
 func (m *Module) acknowledge(ctx context.Context, id int64, token string, s submission, template, signature string) {
+	// The per-address cap is checked first, so a refusal uses no slot of the
+	// site-wide one.
+	if !m.ackAllowed(ctx, id, s.email) {
+		m.d.Log.Info("contact: acknowledgement cap for this address reached, skipped", slog.Int64("thread_id", id))
+		return
+	}
 	if !m.allowAck(time.Now()) {
 		m.d.Log.Warn("contact: acknowledgement cap reached, skipped", slog.Int64("thread_id", id))
 		return
 	}
-	text := strings.ReplaceAll(template, "{name}", safeName(s.name))
+	doc, subject := ackDoc(m.brand(), id, s, template, signature)
+	fallback := strings.ReplaceAll(template, "{name}", safeName(s.name))
 	if signature != "" {
-		text += sigSep + signature
+		fallback += sigSep + signature
 	}
+	text, html := m.render(doc, fallback)
 	m.send(ctx, "acknowledgement", id, bmail.Message{
 		To:            s.email,
 		ReplyTo:       m.replyTo(ctx, token),
-		Subject:       replySubject(s.subject),
+		Subject:       subject,
 		Text:          text,
+		HTML:          html,
 		AutoSubmitted: "auto-replied",
 	})
 }
@@ -85,18 +93,6 @@ func (m *Module) allowAck(now time.Time) bool {
 	return true
 }
 
-// safeName returns the visitor's name for the greeting, or "there" when it
-// looks like it carries a link or address (relay/phishing content).
-func safeName(name string) string {
-	n := strings.TrimSpace(name)
-	l := strings.ToLower(n)
-	if n == "" || len([]rune(n)) > 40 || strings.ContainsAny(n, "@/<>:") ||
-		strings.Contains(l, "www.") || strings.Contains(l, "http") || strings.Count(n, ".") > 1 {
-		return "there"
-	}
-	return n
-}
-
 // notifyInbound tells the owner a visitor answered by email, at most once per
 // thread every notifyEvery.
 func (m *Module) notifyInbound(parent context.Context, t thread, body string) {
@@ -118,10 +114,12 @@ func (m *Module) notifyInbound(parent context.Context, t thread, body string) {
 	m.mu.Unlock()
 	m.background(parent, func(ctx context.Context) {
 		text := t.Name + " <" + t.Email + "> replied:\n\n" + body + "\n\nOpen it in the admin: " + m.adminLink(t.ID) + "\n"
+		text, html := m.render(inboundDoc(m.brand(), m.adminLink(t.ID), t, body), text)
 		m.send(ctx, "notification", t.ID, bmail.Message{
 			To:            m.d.Settings.NotifyTo(ctx),
 			Subject:       bmail.HeaderText("New reply: " + t.Subject),
 			Text:          text,
+			HTML:          html,
 			AutoSubmitted: "auto-generated",
 		})
 	})
