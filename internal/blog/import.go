@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/baoopn/baoopn-2026/internal/mediarefs"
 )
 
 // Import inserts posts with their parts in one transaction. A post whose
@@ -28,6 +30,13 @@ func (m *Module) Import(ctx context.Context, posts []PostInput) (inserted []stri
 	}
 
 	err = pgx.BeginFunc(ctx, m.db, func(tx pgx.Tx) error {
+		texts := make([]string, len(batch))
+		for i, p := range batch {
+			texts[i] = inputText(p.in)
+		}
+		if err := mediarefs.Touch(ctx, tx, texts...); err != nil {
+			return err
+		}
 		for _, p := range batch {
 			_, ok, err := insertPost(ctx, tx, p.in.Slug, p.in, p.rp)
 			if err != nil {

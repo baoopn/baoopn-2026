@@ -95,6 +95,11 @@ type Config struct {
 	MediaFallbackAfter time.Duration `env:"MEDIA_FALLBACK_AFTER" envDefault:"2m"`
 	// MediaFailedRetention keeps a failed upload's original for a retry.
 	MediaFailedRetention time.Duration `env:"MEDIA_FAILED_RETENTION" envDefault:"24h"`
+	// MediaOrphanGrace: unreferenced media are deleted only after going this
+	// long unused. 0 turns every orphan deletion off (the preview still works).
+	MediaOrphanGrace time.Duration `env:"MEDIA_ORPHAN_GRACE" envDefault:"168h"`
+	// MediaOrphanMaxPerPass caps the deletions of one cleanup run.
+	MediaOrphanMaxPerPass int `env:"MEDIA_ORPHAN_MAX_PER_PASS" envDefault:"50"`
 
 	// SpotifyAPIURL is the spotify-tracker public API (embedded widgets).
 	SpotifyAPIURL string `env:"SPOTIFY_API_URL"`
@@ -179,6 +184,12 @@ func Load() (Config, error) {
 			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 			return c, fmt.Errorf("config: MEDIA_PUBLIC_URL must be an origin like https://media.example.com")
 		}
+	}
+	if c.MediaOrphanGrace < 0 {
+		return c, fmt.Errorf("config: MEDIA_ORPHAN_GRACE must not be negative (0 turns the cleanup off)")
+	}
+	if c.MediaOrphanMaxPerPass < 1 || c.MediaOrphanMaxPerPass > 10000 {
+		return c, fmt.Errorf("config: MEDIA_ORPHAN_MAX_PER_PASS must be between 1 and 10000")
 	}
 	if c.IsProduction() {
 		if c.SecretsKey == "" {

@@ -51,7 +51,8 @@ func (s *Store) safeTick(ctx context.Context) (err error) {
 //  2. conversion jobs nobody leased for FallbackAfter fall back
 //     ("converter unavailable");
 //  3. due fallback jobs publish their stripped original;
-//  4. originals of jobs failed longer than FailedRetention ago are deleted.
+//  4. originals of jobs failed longer than FailedRetention ago are deleted;
+//  5. once a day, when turned on, unused media are deleted (orphans.go).
 func (s *Store) Tick(ctx context.Context) error {
 	if err := s.expireLeases(ctx); err != nil {
 		return fmt.Errorf("expire leases: %w", err)
@@ -69,7 +70,11 @@ func (s *Store) Tick(ctx context.Context) error {
 		}
 		s.publishOriginal(ctx, j)
 	}
-	return s.cleanupOriginals(ctx)
+	if err := s.cleanupOriginals(ctx); err != nil {
+		return err
+	}
+	s.maybeOrphanPass(ctx)
+	return nil
 }
 
 func (s *Store) ids(ctx context.Context, q string, args ...any) ([]int64, error) {

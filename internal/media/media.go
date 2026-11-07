@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,6 +55,12 @@ type Deps struct {
 	FallbackAfter time.Duration
 	// FailedRetention keeps a failed job's original for a retry.
 	FailedRetention time.Duration
+	// OrphanGrace: unreferenced files are deleted only after going this long
+	// unused (orphans.go). Negative turns all orphan deletion off; 0 is the
+	// default (7 days).
+	OrphanGrace time.Duration
+	// OrphanMaxPerPass caps the deletions of one cleanup run (default 50).
+	OrphanMaxPerPass int
 	// OnRename is called when a fallback publishes a file under a new name
 	// (the WebP name changes extension), so stored references can follow.
 	OnRename func(ctx context.Context, oldURL, newURL string) error
@@ -76,6 +83,11 @@ type Store struct {
 	fallbackAfter   time.Duration
 	failedRetention time.Duration
 	onRename        func(ctx context.Context, oldURL, newURL string) error
+
+	orphanGrace time.Duration // <= 0: deletion disabled
+	orphanMax   int
+	listMax     int        // bucket listing limit (tests lower it)
+	orphanMu    sync.Mutex // serializes media.orphans settings updates
 }
 
 // Media statuses.
@@ -125,6 +137,9 @@ const (
 	defaultMaxAttempts     = 5
 	defaultFallbackAfter   = 2 * time.Minute
 	defaultFailedRetention = 24 * time.Hour
+	defaultOrphanGrace     = 7 * 24 * time.Hour
+	defaultOrphanMax       = 50
+	defaultListMax         = 10_000
 )
 
 // New creates the media directory (0o755) and returns the store.
@@ -145,7 +160,11 @@ func New(d Deps) (*Store, error) {
 		maxPixels: orDefault(d.MaxPixels, defaultMaxPixels), uploadWait: d.UploadWait,
 		jobLease: orDefault(d.JobLease, defaultJobLease), maxAttempts: orDefault(d.MaxAttempts, defaultMaxAttempts),
 		fallbackAfter:   orDefault(d.FallbackAfter, defaultFallbackAfter),
-		failedRetention: orDefault(d.FailedRetention, defaultFailedRetention), onRename: d.OnRename}
+		failedRetention: orDefault(d.FailedRetention, defaultFailedRetention), onRename: d.OnRename,
+		orphanGrace: d.OrphanGrace, orphanMax: orDefault(d.OrphanMaxPerPass, defaultOrphanMax), listMax: defaultListMax}
+	if s.orphanGrace == 0 {
+		s.orphanGrace = defaultOrphanGrace
+	}
 	if s.uploadWait == 0 {
 		s.uploadWait = defaultUploadWait
 	}
@@ -319,10 +338,13 @@ func scanMedia(row scanner, extra ...any) (Media, error) {
 }
 
 // bySHA finds a non-failed file whose stored bytes or uncropped original
-// have this hash.
+// have this hash, and bumps its touched_at: the upload is about to be used,
+// so the orphan cleanup must not take it. A row the cleanup is deleting
+// waits on its lock and then matches nothing (pgx.ErrNoRows: a new file).
 func (s *Store) bySHA(ctx context.Context, sum string) (Media, error) {
-	m, err := scanMedia(s.db.QueryRow(ctx, `SELECT `+mediaCols+` FROM media
-		WHERE (sha256 = $1 OR original_sha256 = $1) AND status <> 'failed' ORDER BY id LIMIT 1`, sum))
+	m, err := scanMedia(s.db.QueryRow(ctx, `UPDATE media SET touched_at = now() WHERE id = (
+		SELECT id FROM media WHERE (sha256 = $1 OR original_sha256 = $1) AND status <> 'failed'
+		ORDER BY id LIMIT 1) RETURNING `+mediaCols, sum))
 	if err != nil {
 		return Media{}, err
 	}

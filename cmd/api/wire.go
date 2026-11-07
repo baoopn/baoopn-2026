@@ -53,6 +53,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		MaxPixels: cfg.MediaMaxPixels, UploadWait: cfg.MediaUploadWait, JobLease: cfg.MediaJobLease,
 		MaxAttempts: cfg.MediaJobMaxAttempts, FallbackAfter: cfg.MediaFallbackAfter,
 		FailedRetention: cfg.MediaFailedRetention, OnRename: followRename(pool),
+		OrphanGrace: orphanGrace(cfg.MediaOrphanGrace), OrphanMaxPerPass: cfg.MediaOrphanMaxPerPass,
 		S3: mediaS3(cfg)})
 	if err != nil {
 		return nil, err
@@ -100,6 +101,15 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		syncer:  syncer,
 		contact: contactMod,
 	}, nil
+}
+
+// orphanGrace maps MEDIA_ORPHAN_GRACE=0 (cleanup off) to the store's
+// "disabled" (negative); a zero Deps value would mean the default instead.
+func orphanGrace(d time.Duration) time.Duration {
+	if d <= 0 {
+		return -1
+	}
+	return d
 }
 
 func mediaS3(cfg config.Config) media.S3Config {

@@ -28,6 +28,39 @@ export function writeDraft<T>(key: string, value: T): void {
 	}
 }
 
+// A stem not touching other hex digits, or right after an escape that ends in
+// hex digits (%2F, %252F, , /).
+const STEM_RE =
+	/(?:(?<![0-9a-fA-F])|(?<=%(?:[0-9a-fA-F]{2}){1,3})|(?<=\\[bf])|(?<=\\u[0-9a-fA-F]{4}))[0-9a-f]{24}(?![0-9a-fA-F])/g;
+
+/**
+ * Every bounded 24-character lowercase hex run in s (a stored media file's
+ * stem). Same rule as the API's mediarefs.Stems.
+ */
+export function mediaStems(s: string): Set<string> {
+	const out = new Set<string>();
+	for (const m of s.matchAll(STEM_RE)) out.add(m[0]);
+	return out;
+}
+
+/**
+ * Stems named in this browser's local drafts. The server cannot see them, so
+ * the orphan cleanup leaves those files out.
+ */
+export function draftMediaStems(): Set<string> {
+	const out = new Set<string>();
+	try {
+		for (let i = 0; i < localStorage.length; i++) {
+			const key = localStorage.key(i);
+			if (!key?.startsWith(PREFIX)) continue;
+			for (const st of mediaStems(localStorage.getItem(key) ?? '')) out.add(st);
+		}
+	} catch {
+		// storage blocked: nothing known
+	}
+	return out;
+}
+
 export function clearDraft(key: string): void {
 	try {
 		localStorage.removeItem(PREFIX + key);
