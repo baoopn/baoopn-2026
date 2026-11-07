@@ -43,6 +43,7 @@ export function normalizeInput(
 		title: typeof v.title === 'string' ? v.title : fallback.title,
 		excerpt: typeof v.excerpt === 'string' ? v.excerpt : fallback.excerpt,
 		cover_url: typeof v.cover_url === 'string' ? v.cover_url : fallback.cover_url,
+		category: v.category === 'tech' || v.category === 'life' ? v.category : fallback.category,
 		tags: Array.isArray(v.tags) ? v.tags.map(String) : fallback.tags,
 		status: v.status === 'published' || v.status === 'draft' ? v.status : fallback.status,
 		published_at:

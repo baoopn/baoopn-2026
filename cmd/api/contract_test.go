@@ -106,6 +106,17 @@ func TestContractPosts(t *testing.T) {
 	if field(now, "published_at") == nil {
 		t.Error("published with null published_at must default to now")
 	}
+	if field(pub, "category") != "tech" {
+		t.Errorf("missing category = %v, want tech", field(pub, "category"))
+	}
+	lifeIn := input("A Day Off", "published", past)
+	lifeIn["category"], lifeIn["tags"] = "life", []string{"Travel"}
+	if got := c.ok("POST", "/api/admin/posts", lifeIn, 201, adminPost, false); field(got, "category") != "life" {
+		t.Errorf("life category = %v", field(got, "category"))
+	}
+	badCat := input("Bad Category", "draft", nil)
+	badCat["category"] = "food"
+	c.fail("POST", "/api/admin/posts", badCat, 422, "validation")
 	c.fail("POST", "/api/admin/posts", map[string]any{"title": "x", "slug": "contract-testing-in-go", "status": "draft",
 		"excerpt": "", "cover_url": "", "tags": []string{}, "published_at": nil,
 		"parts": []map[string]string{{"title": "", "content_md": ""}}}, 409, "slug_taken")
@@ -134,6 +145,15 @@ func TestContractPosts(t *testing.T) {
 		}
 	}
 	c.ok("GET", "/api/v1/posts?tag=go&page=1&limit=1", nil, 200, arr(postSummary), true)
+	if s := list(c.ok("GET", "/api/v1/posts?category=life", nil, 200, arr(postSummary), true)); len(s) != 1 {
+		t.Errorf("life posts = %d, want 1", len(s))
+	}
+	c.ok("GET", "/api/v1/posts?category=tech", nil, 200, arr(postSummary), true)
+	c.fail("GET", "/api/v1/posts?category=food", nil, 400, "bad_request")
+	c.ok("GET", "/api/v1/tags?category=life", nil, 200, arr(tagCount), false)
+	c.fail("GET", "/api/v1/tags?category=food", nil, 400, "bad_request")
+	c.ok("GET", "/api/admin/posts?category=tech", nil, 200, arr(adminPost), false)
+	c.fail("GET", "/api/admin/posts?category=food", nil, 400, "bad_request")
 	c.ok("GET", "/api/v1/posts?q=hello", nil, 200, arr(postSummary), true)
 	c.fail("GET", "/api/v1/posts?limit=51", nil, 400, "bad_request")
 	pubSlug := field(pub, "slug").(string)

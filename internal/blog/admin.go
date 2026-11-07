@@ -28,12 +28,17 @@ func (m *Module) adminList(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "state must be draft, scheduled or published")
 		return
 	}
+	category, ok := categoryParam(r.URL.Query().Get("category"))
+	if !ok {
+		httpapi.Error(w, http.StatusBadRequest, "bad_request", "category must be tech or life")
+		return
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if runes(q) > 200 {
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "q is too long")
 		return
 	}
-	posts, err := m.listAdmin(r.Context(), state, q)
+	posts, err := m.listAdmin(r.Context(), state, category, q)
 	if err != nil {
 		m.internal(w, r, "blog: admin list", err)
 		return

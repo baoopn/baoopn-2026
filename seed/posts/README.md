@@ -20,6 +20,7 @@ seed/posts/<slug>/
   "slug": "my-post",
   "title": "My post",
   "excerpt": "",
+  "category": "tech",
   "tags": ["go", "postgres"],
   "parts": [
     { "title": "Setup", "file": "part-1.md" },
@@ -33,6 +34,7 @@ seed/posts/<slug>/
 ```
 
 - `slug` defaults to the folder name; `excerpt` empty = generated from part 1.
+- `category` is `tech` (the default when missing) or `life`.
 - `parts` (1–20) are saved in order; `file` is relative to the post folder and
   defaults to `part-<n>.md`. An empty part title shows as "Part <n>".
 - In Markdown, `![alt](screenshot:<id>)` is replaced by the uploaded image's

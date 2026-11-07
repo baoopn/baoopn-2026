@@ -8,6 +8,7 @@
 	import NowPlayingCard from '#lib/site/components/NowPlayingCard.svelte';
 	import RecentPlays from '#lib/site/components/RecentPlays.svelte';
 	import { absolute, safeImage, safeUrl } from '#lib/site/format.js';
+	import { LISTENING_URL } from '#lib/links.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -158,6 +159,9 @@
 		<div class="mt-8 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 			<div>
 				<NowPlayingCard initial={data.nowPlaying} />
+				<a href={LISTENING_URL} class="btn btn-secondary mt-4">
+					See what I'm listening to <ArrowRight class="size-4" aria-hidden="true" />
+				</a>
 			</div>
 			<div>
 				<h3 class="label mb-3 text-ink-soft">Recently played</h3>

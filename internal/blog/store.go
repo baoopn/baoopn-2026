@@ -19,9 +19,9 @@ const (
 			SELECT '/blog/' || p.slug || CASE WHEN n = 0 THEN '' ELSE '/' || n END
 			FROM generate_series(0, 20) n))) v ON true`
 	partsJoin   = `LEFT JOIN LATERAL (SELECT count(*)::int AS n FROM post_parts pp WHERE pp.post_id = p.id) pc ON true`
-	summaryCols = `p.slug, p.title, p.excerpt, p.cover_url, p.tags, pc.n, p.published_at, p.updated_at,
+	summaryCols = `p.slug, p.title, p.excerpt, p.cover_url, p.category, p.tags, pc.n, p.published_at, p.updated_at,
 		p.reading_minutes, v.views`
-	adminCols = `p.id, p.slug, p.title, p.excerpt, p.cover_url, p.tags, p.status, p.published_at,
+	adminCols = `p.id, p.slug, p.title, p.excerpt, p.cover_url, p.category, p.tags, p.status, p.published_at,
 		p.reading_minutes, v.views, p.created_at, p.updated_at`
 )
 
@@ -29,7 +29,7 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanSummary(row scanner, extra ...any) (PostSummary, error) {
 	var s PostSummary
-	dest := append([]any{&s.Slug, &s.Title, &s.Excerpt, &s.CoverURL, &s.Tags, &s.PartCount,
+	dest := append([]any{&s.Slug, &s.Title, &s.Excerpt, &s.CoverURL, &s.Category, &s.Tags, &s.PartCount,
 		&s.PublishedAt, &s.UpdatedAt, &s.ReadingMinutes, &s.Views}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return s, err
@@ -43,7 +43,7 @@ func scanSummary(row scanner, extra ...any) (PostSummary, error) {
 
 func (m *Module) scanAdmin(row scanner) (AdminPost, error) {
 	var p AdminPost
-	err := row.Scan(&p.ID, &p.Slug, &p.Title, &p.Excerpt, &p.CoverURL, &p.Tags, &p.Status, &p.PublishedAt,
+	err := row.Scan(&p.ID, &p.Slug, &p.Title, &p.Excerpt, &p.CoverURL, &p.Category, &p.Tags, &p.Status, &p.PublishedAt,
 		&p.ReadingMinutes, &p.Views, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
@@ -62,8 +62,8 @@ func (m *Module) scanAdmin(row scanner) (AdminPost, error) {
 }
 
 type publicFilter struct {
-	Tag, Q      string
-	Page, Limit int
+	Tag, Q, Category string
+	Page, Limit      int
 }
 
 func (m *Module) listPublic(ctx context.Context, f publicFilter) ([]PostSummary, int64, error) {
@@ -72,6 +72,9 @@ func (m *Module) listPublic(ctx context.Context, f publicFilter) ([]PostSummary,
 	add := func(cond string, v any) {
 		args = append(args, v)
 		where = append(where, strings.ReplaceAll(cond, "$?", "$"+strconv.Itoa(len(args))))
+	}
+	if f.Category != "" {
+		add(`p.category = $?`, f.Category)
 	}
 	if f.Tag != "" {
 		add(`$? = ANY(p.tags)`, f.Tag)
@@ -169,9 +172,10 @@ func (m *Module) detail(ctx context.Context, slug string, no int) (PostDetail, e
 	return d, nil
 }
 
-func (m *Module) tags(ctx context.Context) ([]TagCount, error) {
+// tags counts the tags of visible posts, of one category when it is set.
+func (m *Module) tags(ctx context.Context, category string) ([]TagCount, error) {
 	rows, err := m.db.Query(ctx, `SELECT t, count(*) FROM posts p, unnest(p.tags) t
-		WHERE `+visible+` GROUP BY t ORDER BY 2 DESC, 1`)
+		WHERE `+visible+` AND ($1 = '' OR p.category = $1) GROUP BY t ORDER BY 2 DESC, 1`, category)
 	if err != nil {
 		return nil, err
 	}
@@ -193,12 +197,18 @@ var stateSQL = map[string]string{
 	"published": visible,
 }
 
-func (m *Module) listAdmin(ctx context.Context, state, q string) ([]AdminPost, error) {
+func (m *Module) listAdmin(ctx context.Context, state, category, q string) ([]AdminPost, error) {
 	where := stateSQL[state]
 	var args []any
+	if category != "" {
+		args = append(args, category)
+		where += ` AND p.category = $` + strconv.Itoa(len(args))
+	}
 	if q != "" {
 		args = append(args, "%"+escapeLike(q)+"%")
-		where += ` AND (p.title ILIKE $1 ESCAPE '\' OR p.slug ILIKE $1 ESCAPE '\' OR p.excerpt ILIKE $1 ESCAPE '\')`
+		n := "$" + strconv.Itoa(len(args))
+		where += ` AND (p.title ILIKE ` + n + ` ESCAPE '\' OR p.slug ILIKE ` + n + ` ESCAPE '\' OR p.excerpt ILIKE ` +
+			n + ` ESCAPE '\')`
 	}
 	rows, err := m.db.Query(ctx, `SELECT `+adminCols+` FROM posts p `+viewsJoin+
 		` WHERE `+where+` ORDER BY p.updated_at DESC, p.id DESC`, args...)

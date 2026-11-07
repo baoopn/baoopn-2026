@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ExternalLink, NotebookPen, Pencil, Plus } from '@lucide/svelte';
-	import type { AdminPost, PostState } from '#lib/api/types.js';
+	import type { AdminPost, PostCategory, PostState } from '#lib/api/types.js';
 	import PageHeader from '#lib/admin/components/PageHeader.svelte';
 	import Segmented from '#lib/admin/components/Segmented.svelte';
 	import SearchInput from '#lib/admin/components/SearchInput.svelte';
@@ -13,11 +13,16 @@
 	import { dateTime, num } from '#lib/admin/format.js';
 
 	type Filter = 'all' | PostState;
+	type CategoryFilter = 'all' | PostCategory;
 	let filter = $state<Filter>('all');
+	let category = $state<CategoryFilter>('all');
 	let q = $state('');
 
 	const posts = new Resource(() =>
-		get<AdminPost[]>('/posts' + qs({ state: filter === 'all' ? '' : filter, q }))
+		get<AdminPost[]>(
+			'/posts' +
+				qs({ state: filter === 'all' ? '' : filter, category: category === 'all' ? '' : category, q })
+		)
 	);
 
 	$effect(() => {
@@ -30,6 +35,13 @@
 		{ value: 'scheduled', label: 'Scheduled' },
 		{ value: 'published', label: 'Published' }
 	];
+
+	const categoryOptions: { value: CategoryFilter; label: string }[] = [
+		{ value: 'all', label: 'All' },
+		{ value: 'tech', label: 'Tech' },
+		{ value: 'life', label: 'Life' }
+	];
+	const filtered = $derived(!!q || filter !== 'all' || category !== 'all');
 
 	const summary = $derived(
 		posts.data ? `${posts.data.length} ${posts.data.length === 1 ? 'post' : 'posts'}` : 'Loading…'
@@ -45,7 +57,10 @@
 </PageHeader>
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-	<Segmented {options} bind:value={filter} label="Filter by state" />
+	<div class="flex flex-wrap items-center gap-3">
+		<Segmented {options} bind:value={filter} label="Filter by state" />
+		<Segmented options={categoryOptions} bind:value={category} label="Filter by category" />
+	</div>
 	<SearchInput label="Search posts" placeholder="Search title, tags…" onsearch={(v) => (q = v)} />
 </div>
 
@@ -61,8 +76,8 @@
 {:else if posts.data.length === 0}
 	<EmptyState
 		icon={NotebookPen}
-		title={q || filter !== 'all' ? 'No posts match' : 'No posts yet'}
-		message={q || filter !== 'all'
+		title={filtered ? 'No posts match' : 'No posts yet'}
+		message={filtered
 			? 'Try another filter or search.'
 			: 'Write the first one; drafts stay private until you publish.'}
 	>
@@ -77,6 +92,7 @@
 			<thead>
 				<tr>
 					<th scope="col">Title</th>
+					<th scope="col">Category</th>
 					<th scope="col">State</th>
 					<th scope="col" class="num">Parts</th>
 					<th scope="col" class="num">Views</th>
@@ -96,6 +112,7 @@
 								{/each}
 							</p>
 						</td>
+						<td class="text-sm">{p.category === 'life' ? 'Life' : 'Tech'}</td>
 						<td>
 							<StateChip state={p.state} />
 							{#if p.state === 'scheduled' && p.published_at}

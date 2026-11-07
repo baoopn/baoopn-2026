@@ -79,16 +79,17 @@ func TestRunImportsSeedPostsOnce(t *testing.T) {
 	if posts != 1 || mediaRows != 2 {
 		t.Fatalf("posts %d media %d", posts, mediaRows)
 	}
-	var status, excerpt string
+	var status, excerpt, category string
 	var tags []string
 	var published *string
-	err = pool.QueryRow(ctx, `SELECT status, excerpt, tags, published_at::text FROM posts WHERE slug = 'two-parts'`).
-		Scan(&status, &excerpt, &tags, &published)
+	err = pool.QueryRow(ctx, `SELECT status, excerpt, tags, published_at::text, category FROM posts
+		WHERE slug = 'two-parts'`).Scan(&status, &excerpt, &tags, &published, &category)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != "draft" || published != nil || excerpt != "First paragraph." || strings.Join(tags, ",") != "go,testing" {
-		t.Fatalf("post %s %v %q %v", status, published, excerpt, tags)
+	if status != "draft" || published != nil || excerpt != "First paragraph." || strings.Join(tags, ",") != "go,testing" ||
+		category != "tech" {
+		t.Fatalf("post %s %v %q %v %s", status, published, excerpt, tags, category)
 	}
 	rows, err := pool.Query(ctx, `SELECT pp.part_no, pp.title, pp.content_md FROM post_parts pp
 		JOIN posts p ON p.id = pp.post_id WHERE p.slug = 'two-parts' ORDER BY pp.part_no`)
@@ -136,7 +137,8 @@ func TestRunImportsSeedPostsOnce(t *testing.T) {
 		Parts: []blog.PartInput{{ContentMD: "keep me"}}}}); err != nil {
 		t.Fatal(err)
 	}
-	fsys["posts/later/post.json"] = &fstest.MapFile{Data: []byte(`{"title":"Later","parts":[{"title":"Only"}]}`)}
+	fsys["posts/later/post.json"] = &fstest.MapFile{Data: []byte(`{"title":"Later","category":"life",
+		"parts":[{"title":"Only"}]}`)}
 	fsys["posts/later/part-1.md"] = &fstest.MapFile{Data: []byte("Later text")}
 	fsys["posts/taken/post.json"] = &fstest.MapFile{Data: []byte(`{"title":"Seed","parts":[{"file":"part-1.md"}]}`)}
 	fsys["posts/taken/part-1.md"] = &fstest.MapFile{Data: []byte("seed text")}
@@ -147,6 +149,11 @@ func TestRunImportsSeedPostsOnce(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT array_agg(slug ORDER BY slug) FROM posts`).Scan(&slugs)
 	if strings.Join(slugs, ",") != "later,taken" {
 		t.Fatalf("slugs after re-run %v", slugs)
+	}
+	var laterCat string
+	_ = pool.QueryRow(ctx, `SELECT category FROM posts WHERE slug = 'later'`).Scan(&laterCat)
+	if laterCat != "life" {
+		t.Fatalf("later category %q, want life", laterCat)
 	}
 	var kept string
 	_ = pool.QueryRow(ctx, `SELECT pp.content_md FROM post_parts pp JOIN posts p ON p.id = pp.post_id

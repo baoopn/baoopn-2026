@@ -1,5 +1,7 @@
 <script lang="ts">
+	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import NowPlayingChip from './NowPlayingChip.svelte';
+	import { LISTENING_URL } from '#lib/links.js';
 	import SocialIcon from './SocialIcon.svelte';
 	import { NAV } from '#lib/site/defaults.js';
 	import { safeUrl } from '#lib/site/format.js';
@@ -25,7 +27,12 @@
 			<p class="font-display text-2xl font-semibold tracking-tight text-balance">
 				Thanks for reading the liner notes.
 			</p>
-			<div class="max-w-md"><NowPlayingChip /></div>
+			<div class="max-w-md space-y-1">
+				<NowPlayingChip />
+				<a href={LISTENING_URL} class="link inline-flex min-h-11 items-center gap-1.5 text-ink-soft">
+					See what I'm listening to <ArrowRight class="size-4" aria-hidden="true" />
+				</a>
+			</div>
 		</div>
 
 		<nav aria-label="Footer" class="grid grid-cols-2 gap-x-10 gap-y-1 sm:grid-cols-[auto_auto]">

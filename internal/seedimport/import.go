@@ -39,11 +39,12 @@ type Deps struct {
 
 // postFile is seed/posts/<slug>/post.json.
 type postFile struct {
-	Slug    string   `json:"slug"`
-	Title   string   `json:"title"`
-	Excerpt string   `json:"excerpt"`
-	Tags    []string `json:"tags"`
-	Parts   []struct {
+	Slug     string   `json:"slug"`
+	Title    string   `json:"title"`
+	Excerpt  string   `json:"excerpt"`
+	Category string   `json:"category"` // optional: "tech" (default) or "life"
+	Tags     []string `json:"tags"`
+	Parts    []struct {
 		Title string `json:"title"`
 		File  string `json:"file"`
 	} `json:"parts"`
@@ -141,7 +142,8 @@ func (im *importer) importPost(ctx context.Context, file string, handled map[str
 		shots[s.ID] = s.File
 	}
 	img := &images{im: im, dir: dir, files: shots, urls: map[string]string{}}
-	in := blog.PostInput{Slug: slug, Title: pf.Title, Excerpt: pf.Excerpt, Tags: pf.Tags, Status: "draft"}
+	in := blog.PostInput{Slug: slug, Title: pf.Title, Excerpt: pf.Excerpt, Category: pf.Category, Tags: pf.Tags,
+		Status: "draft"}
 	for i, p := range pf.Parts {
 		name := p.File
 		if name == "" {
