@@ -248,15 +248,16 @@ temporary failure.
 ## Branch protection
 
 `main` only changes through pull requests with green CI (squash or rebase merge).
-While the repository is private on a free plan GitHub cannot enforce rulesets, so
-the rule is enforced by `.githooks/pre-push` (run `git config core.hooksPath
-.githooks` once per clone) and by the deploy gate in `release.yml`, which never
-deploys a commit that did not come from a merged PR.
+GitHub enforces this with the ruleset saved in `.github/rulesets/main.json`: no
+deletion, no force push, a pull request and the required CI checks before merge.
+Two more guards back it up: `.githooks/pre-push` (run `git config core.hooksPath
+.githooks` once per clone), and the deploy gate in `release.yml`, which never deploys
+a commit that did not come from a merged PR.
 
-When the repository becomes public (or the account has Pro), apply the saved ruleset:
+To apply the ruleset to a new copy of the repository (public, or private on GitHub Pro):
 
 ```sh
 gh api -X POST repos/<owner>/<repo>/rulesets --input .github/rulesets/main.json
 ```
 
-Before making it public, run `sh scripts/check-public.sh` (CI runs it on every PR).
+Run `sh scripts/check-public.sh` before pushing anything that might hold local setup (CI runs it on every PR).

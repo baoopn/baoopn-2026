@@ -97,4 +97,4 @@ in [`web/src/lib/api/types.ts`](web/src/lib/api/types.ts).
 
 ## License
 
-The code is MIT licensed; see [LICENSE](LICENSE). The blog posts, photos and profile text under `seed/` are not: they are all rights reserved.
+The code is MIT licensed; see [LICENSE](LICENSE). The blog posts, photos and profile text under `seed/` are not: they are all rights reserved. See [seed/LICENSE.md](seed/LICENSE.md).
