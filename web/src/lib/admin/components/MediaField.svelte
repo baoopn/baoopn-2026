@@ -14,6 +14,7 @@
 		accept,
 		image = true,
 		aspect = 'free',
+		fit = 'cover',
 		hint
 	}: {
 		value?: string;
@@ -25,6 +26,8 @@
 		image?: boolean;
 		/** Crop preset the cropper opens with. */
 		aspect?: Aspect;
+		/** How the thumbnail shows the image: fill the box, or fit inside it (logos). */
+		fit?: 'cover' | 'contain';
 		hint?: string;
 	} = $props();
 
@@ -60,7 +63,8 @@
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file) return;
-		if (image && isImageFile(file)) {
+		// The server stores SVG as is and ignores crops for it, so skip the cropper.
+		if (image && isImageFile(file) && file.type !== 'image/svg+xml') {
 			cropFile = file;
 			cropOpen = true;
 		} else {
@@ -77,7 +81,12 @@
 				class="grid size-[4.5rem] shrink-0 place-items-center overflow-hidden rounded-lg border border-rule-strong bg-paper-3"
 			>
 				{#if value && !broken}
-					<img src={value} alt="" class="size-full object-cover" onerror={() => (broken = true)} />
+					<img
+						src={value}
+						alt=""
+						class={['size-full', fit === 'contain' ? 'object-contain p-1' : 'object-cover']}
+						onerror={() => (broken = true)}
+					/>
 				{:else}
 					<ImageUp class="size-5 text-ink-soft" aria-hidden="true" />
 				{/if}

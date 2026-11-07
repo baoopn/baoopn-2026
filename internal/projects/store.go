@@ -23,7 +23,8 @@ var (
 const cols = `id, slug, github_id, repo_full_name, repo_url, gh_homepage, gh_description, gh_language,
 	gh_languages, gh_topics, gh_stars, gh_forks, gh_archived, gh_fork, gh_private, gh_pushed_at,
 	gh_created_at, readme_html, synced_at, title, summary, body_md, body_html, tech, period, cover_url,
-	demo_url, post_slug, visible, featured, sort_order, created_at, updated_at, gh_default_branch`
+	demo_url, post_slug, visible, featured, sort_order, created_at, updated_at, gh_default_branch,
+	logo_url, logo_bg`
 
 const order = `ORDER BY featured DESC, sort_order, gh_pushed_at DESC NULLS LAST, id`
 
@@ -33,7 +34,8 @@ func scanProject(row pgx.Row) (project, error) {
 		&p.GHLanguage, &p.GHLanguages, &p.GHTopics, &p.GHStars, &p.GHForks, &p.GHArchived, &p.GHFork,
 		&p.GHPrivate, &p.GHPushedAt, &p.GHCreatedAt, &p.ReadmeHTML, &p.SyncedAt, &p.Title, &p.Summary,
 		&p.BodyMD, &p.BodyHTML, &p.Tech, &p.Period, &p.CoverURL, &p.DemoURL, &p.PostSlug, &p.Visible,
-		&p.Featured, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt, &p.GHDefaultBranch)
+		&p.Featured, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt, &p.GHDefaultBranch,
+		&p.LogoURL, &p.LogoBG)
 	return p, err
 }
 
@@ -143,6 +145,8 @@ type Patch struct {
 	Tech      *[]string `json:"tech"`
 	Period    *string   `json:"period"`
 	CoverURL  *string   `json:"cover_url"`
+	LogoURL   *string   `json:"logo_url"`
+	LogoBG    *string   `json:"logo_bg"`
 	DemoURL   *string   `json:"demo_url"`
 	PostSlug  *string   `json:"post_slug"`
 	Visible   *bool     `json:"visible"`
@@ -208,7 +212,7 @@ func (in Patch) apply(p *project) (bodyChanged bool, err error) {
 		v    *string
 		dst  *string
 		name string
-	}{{in.CoverURL, &p.CoverURL, "cover_url"}, {in.DemoURL, &p.DemoURL, "demo_url"}} {
+	}{{in.CoverURL, &p.CoverURL, "cover_url"}, {in.LogoURL, &p.LogoURL, "logo_url"}, {in.DemoURL, &p.DemoURL, "demo_url"}} {
 		if u.v == nil {
 			continue
 		}
@@ -217,6 +221,13 @@ func (in Patch) apply(p *project) (bodyChanged bool, err error) {
 			return false, invalid(u.name + " must be an http(s) URL or a /path")
 		}
 		*u.dst = s
+	}
+	if in.LogoBG != nil {
+		s := strings.TrimSpace(*in.LogoBG)
+		if s != "tile" && s != "ink" {
+			return false, invalid("logo_bg must be tile or ink")
+		}
+		p.LogoBG = s
 	}
 	if in.PostSlug != nil {
 		s := strings.TrimSpace(*in.PostSlug)
@@ -267,9 +278,10 @@ func (m *Module) patch(ctx context.Context, id int64, in Patch) (p project, beca
 		}
 		_, err = tx.Exec(ctx, `UPDATE projects SET slug = $2, title = $3, summary = $4, body_md = $5,
 			body_html = $6, tech = $7, period = $8, cover_url = $9, demo_url = $10, post_slug = $11,
-			visible = $12, featured = $13, sort_order = $14, updated_at = now() WHERE id = $1`,
+			visible = $12, featured = $13, sort_order = $14, logo_url = $15, logo_bg = $16, updated_at = now()
+			WHERE id = $1`,
 			id, cur.Slug, cur.Title, cur.Summary, cur.BodyMD, cur.BodyHTML, orEmpty(cur.Tech), cur.Period,
-			cur.CoverURL, cur.DemoURL, cur.PostSlug, cur.Visible, cur.Featured, cur.SortOrder)
+			cur.CoverURL, cur.DemoURL, cur.PostSlug, cur.Visible, cur.Featured, cur.SortOrder, cur.LogoURL, cur.LogoBG)
 		if isUnique(err) {
 			return ErrSlugTaken
 		}
