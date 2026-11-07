@@ -52,7 +52,7 @@
 	const sizes = $derived.by(() => {
 		const m = job.media;
 		if (job.stage !== 'ready' || !m) return bytes(job.file.size);
-		const kind = m.content_type === 'image/webp' ? 'WebP' : 'original';
+		const kind = m.converted ? 'WebP' : 'original';
 		return `${bytes(job.file.size)} → ${bytes(m.size_bytes)} ${kind}`;
 	});
 

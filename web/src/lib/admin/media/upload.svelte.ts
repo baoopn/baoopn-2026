@@ -7,9 +7,9 @@ import {
 	retryConversion,
 	uploadMedia,
 	UploadRequestError,
-	type Crop,
-	type UploadedMedia
+	type Crop
 } from '../api';
+import type { Media } from '#lib/api/types.js';
 import { bytes, errorMessage } from '../format';
 
 export type UploadStage = 'uploading' | 'converting' | 'ready' | 'failed';
@@ -56,7 +56,7 @@ let seq = 0;
 
 type Handlers = {
 	/** Ready (again, after a conversion retry: `previous` is the media it replaces). */
-	onready: (m: UploadedMedia, previous: UploadedMedia | null) => void;
+	onready: (m: Media, previous: Media | null) => void;
 	/** Final failure (after automatic retries). */
 	onfailed?: (job: UploadJob) => void;
 };
@@ -76,7 +76,7 @@ export class UploadJob {
 	slow = $state(false);
 	/** ms spent converting (ticks once a second). */
 	elapsed = $state(0);
-	media = $state.raw<UploadedMedia | null>(null);
+	media = $state.raw<Media | null>(null);
 	/** Which step failed: a re-upload, or a conversion retry, fixes it. */
 	failKind = $state<'upload' | 'conversion' | null>(null);
 	error = $state('');
@@ -88,7 +88,7 @@ export class UploadJob {
 	#h: Handlers;
 	#abort: AbortController | null = null;
 	#timer: ReturnType<typeof setInterval> | undefined;
-	#delivered: UploadedMedia | null = null;
+	#delivered: Media | null = null;
 	#detached = false;
 
 	constructor(file: File, crop: Crop | null, handlers: Handlers) {
@@ -103,7 +103,7 @@ export class UploadJob {
 		const signal = this.#begin();
 		this.stage = 'uploading';
 		this.media = null;
-		let m: UploadedMedia | undefined;
+		let m: Media | undefined;
 		for (let attempt = 1; !m; attempt++) {
 			this.attempt = attempt;
 			this.loaded = 0;
@@ -200,7 +200,7 @@ export class UploadJob {
 		return this.#abort.signal;
 	}
 
-	async #settle(m: UploadedMedia, signal: AbortSignal): Promise<void> {
+	async #settle(m: Media, signal: AbortSignal): Promise<void> {
 		this.media = m;
 		const deadline = Date.now() + POLL_WINDOW_MS;
 		let delay = POLL_MS;
@@ -229,9 +229,10 @@ export class UploadJob {
 		if (this.#detached) return this.cancel();
 		if (m.status === 'failed') return this.#fail('conversion', m.error || 'Conversion failed');
 		this.stage = 'ready';
-		if (m.converted === false) {
-			this.warning =
-				'Saved the original (WebP conversion failed)' + (m.error ? `: ${m.error}` : '');
+		// SVG, PDF and animated images are stored as is (converted: false, no error);
+		// only a fallback after a failed conversion carries an error.
+		if (!m.converted && m.error) {
+			this.warning = `Saved the original (WebP conversion failed): ${m.error}`;
 		}
 		const previous = this.#delivered;
 		this.#delivered = m;

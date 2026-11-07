@@ -41,17 +41,6 @@ export function qs(params: Record<string, string | number | null | undefined>): 
 	return s ? `?${s}` : '';
 }
 
-/**
- * Media plus the conversion-queue fields (also added to types.ts by the API side).
- * `converted: false` with `status: "ready"` means WebP conversion failed and the
- * metadata-stripped original was saved instead; `error` then says why.
- */
-export type UploadedMedia = Media & {
-	status?: 'ready' | 'processing' | 'failed';
-	error?: string;
-	converted?: boolean;
-};
-
 export type Crop = { x: number; y: number; w: number; h: number };
 
 /** Upload byte progress. */
@@ -88,7 +77,7 @@ export async function uploadMedia(
 		onsent?: () => void;
 		signal?: AbortSignal;
 	} = {}
-): Promise<UploadedMedia> {
+): Promise<Media> {
 	const fd = new FormData();
 	fd.append('file', file);
 	const { crop } = opts;
@@ -99,7 +88,7 @@ export async function uploadMedia(
 		fd.append('crop_h', String(Math.round(crop.h)));
 	}
 	const token = await auth.getToken();
-	return new Promise<UploadedMedia>((resolve, reject) => {
+	return new Promise<Media>((resolve, reject) => {
 		const xhr = new XMLHttpRequest();
 		xhr.open('POST', '/api/admin/media');
 		xhr.timeout = UPLOAD_TIMEOUT_MS;
@@ -117,7 +106,7 @@ export async function uploadMedia(
 			reject(new UploadRequestError(0, { code: 'timeout', message: 'The upload timed out' }));
 		xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
 		xhr.onload = () => {
-			let json: { data?: UploadedMedia; error?: ApiError } | null = null;
+			let json: { data?: Media; error?: ApiError } | null = null;
 			try {
 				json = JSON.parse(xhr.responseText);
 			} catch {
@@ -138,7 +127,8 @@ export async function uploadMedia(
 	});
 }
 
-export const getMedia = (id: number) => get<UploadedMedia>(`/media/${id}`);
+export const getMedia = (id: number) => get<Media>(`/media/${id}`);
 
 /** Re-queue a failed conversion. Rejects with 410 when the original has expired. */
-export const retryConversion = (id: number) => post<UploadedMedia>(`/media/${id}/retry`);
+// The JSON client drops 202 bodies (data: undefined), so the caller polls from the id it has.
+export const retryConversion = (id: number) => post<Media | undefined>(`/media/${id}/retry`);
