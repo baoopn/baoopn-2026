@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+// Internal API between the baoopn API and the media worker (cmd/mediaworker).
+// The API serves it on GRPC_ADDR inside the private network; every call
+// carries "authorization: Bearer <INTERNAL_API_TOKEN>".
+package media.v1;
+
+// MediaWorkerService hands out WebP conversion jobs from the API's Postgres
+// queue (media_jobs) and takes back their results.
+service MediaWorkerService {
+  // LeaseJob leases the next due job; the response has no job when the
+  // queue is empty (the worker then polls again later).
+  rpc LeaseJob(LeaseJobRequest) returns (LeaseJobResponse);
+  // GetOriginal streams the leased job's original file.
+  rpc GetOriginal(GetOriginalRequest) returns (stream GetOriginalResponse);
+  // CompleteJob uploads the WebP: the first message is the metadata, the
+  // rest are chunks. The API stores it and marks the media ready.
+  rpc CompleteJob(stream CompleteJobRequest) returns (CompleteJobResponse);
+  // FailJob reports a failed conversion.
+  rpc FailJob(FailJobRequest) returns (FailJobResponse);
+}
+
+message LeaseJobRequest {
+  string worker_id = 1;
+}
+
+message LeaseJobResponse {
+  // Unset when no job is due.
+  Job job = 1;
+}
+
+message Job {
+  int64 id = 1;
+  int64 media_id = 2;
+  // Proves the lease on every later call; a re-leased job gets a new one.
+  string lease_token = 3;
+  string original_content_type = 4;
+  int64 original_size = 5;
+  // Unset: convert the whole image.
+  Crop crop = 6;
+  int32 attempt = 7;
+  int32 max_attempts = 8;
+  // Seconds until the lease expires and the job may be handed out again.
+  int64 lease_seconds = 9;
+}
+
+// Crop is a rectangle in original pixels, after EXIF orientation.
+message Crop {
+  int32 x = 1;
+  int32 y = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message GetOriginalRequest {
+  int64 job_id = 1;
+  string lease_token = 2;
+}
+
+message GetOriginalResponse {
+  bytes chunk = 1;
+}
+
+message CompleteJobRequest {
+  oneof payload {
+    CompleteJobMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message CompleteJobMetadata {
+  int64 job_id = 1;
+  string lease_token = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message CompleteJobResponse {
+  string url = 1;
+  int64 size_bytes = 2;
+  string sha256 = 3;
+}
+
+message FailJobRequest {
+  int64 job_id = 1;
+  string lease_token = 2;
+  string error = 3;
+  // True for transient problems (transfer errors, worker shutdown); false
+  // when the input can never convert (undecodable, too many pixels, bad crop).
+  bool retryable = 4;
+}
+
+message FailJobResponse {
+  // True when the job was re-queued with backoff.
+  bool will_retry = 1;
+}

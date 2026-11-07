@@ -1,13 +1,14 @@
 # Deployment
 
 The site runs on Coolify as one Docker Compose resource
-(`docker-compose.coolify.yml`) with three services:
+(`docker-compose.coolify.yml`) with four services:
 
 | Service | Image | Exposure |
 |---|---|---|
 | `postgres` | `postgres:17-alpine`, volume `baoopn-postgres-data` | internal |
 | `api` | `deploy/docker/api.Dockerfile` (Go, distroless, non-root), volume `baoopn-media` on `/data/media` (fallback media store) | internal only (no domain) |
 | `web` | `deploy/docker/web.Dockerfile` (SvelteKit adapter-node, non-root) | `https://example.com` → port 3000 |
+| `mediaworker` | same image as `api`, command `/usr/local/bin/mediaworker` (WebP conversion) | internal only; talks to `api:9100` over gRPC |
 
 The web server is the only public service. It proxies `/api/*` and `/media/*` to
 `http://api:8080` and adds the client IP/country with `INTERNAL_API_TOKEN`.
@@ -126,10 +127,56 @@ set logs a warning and keeps the volume. With it on:
   logging `media migration done` with counts. It never blocks or fails the boot and
   keeps the local files; once it reports `uploaded=0 failed=0` the volume is only a
   backup.
+- After that copy, with `MEDIA_PUBLIC_URL` set, a second background step rewrites stored
+  `/media/<file>` links (post parts, post and project covers, project bodies, the profile)
+  to `https://media.baoopn.com/<file>` and re-renders their HTML. It is idempotent and
+  logs `media link rewrite done` with counts; the `/media` 301 stays for external links.
+  It runs only after a complete copy: if the copy stops early or any file fails, the api
+  logs `media migration incomplete; media link rewrite skipped` and tries again on the
+  next start. Unsetting `MEDIA_PUBLIC_URL` later does not undo a rewrite, so take a
+  `pg_dump` before the first deploy with `MEDIA_PUBLIC_URL` set.
 
 No bucket CORS rule is needed: images are loaded with plain `<img>` tags and
 uploads go through the api. Add one (GET from `https://baoopn.com`) only if the
 site ever fetches media with `fetch()` or `crossorigin`.
+
+## Image conversion (media worker)
+
+Raster uploads (JPEG, PNG, static GIF, WebP, HEIC/HEIF, BMP, TIFF) are stored as WebP.
+
+- **Queue.** The api keeps the original on the `baoopn-media` volume (`/data/media/originals`,
+  never in the public bucket) and queues a job in Postgres (`media_jobs`).
+- **Worker.** The `mediaworker` service leases jobs over gRPC from `api:9100`:
+  - Authenticated with `INTERNAL_API_TOKEN`; the port is not published.
+  - It converts with pure-Go codecs and uploads the WebP; the api stores it in R2.
+  - The worker binary carries the WebAssembly codecs (`gen2brain/webp`, `gen2brain/heic`);
+    the api binary does not.
+- **Upload response.** An upload waits up to `MEDIA_UPLOAD_WAIT` for its WebP, then answers
+  `202 processing`; the admin polls `GET /api/admin/media/{id}`.
+- **Fallbacks.** If the worker is down or a file cannot convert, the api publishes the
+  metadata-stripped original after `MEDIA_FALLBACK_AFTER` (JPEG/PNG/GIF/WebP) or marks the
+  upload failed (HEIC/TIFF/BMP). R2 errors are retried with backoff. Details:
+  `docs/api.md` → *Media uploads*.
+
+| Variable | Service | Default |
+|---|---|---|
+| `GRPC_ADDR` | api | `:9100` (off without `INTERNAL_API_TOKEN`) |
+| `MEDIA_MAX_PIXELS` | api, mediaworker | `50000000` |
+| `MEDIA_UPLOAD_WAIT` | api | `10s` |
+| `MEDIA_JOB_LEASE` / `MEDIA_JOB_MAX_ATTEMPTS` | api | `5m` / `5` |
+| `MEDIA_FALLBACK_AFTER` / `MEDIA_FAILED_RETENTION` | api | `2m` / `24h` |
+| `API_GRPC_ADDR` | mediaworker | `api:9100` |
+| `MEDIA_MAX_DIMENSION` / `MEDIA_WEBP_QUALITY` | mediaworker | `2400` / `82` |
+| `MEDIAWORKER_CONCURRENCY` / `MEDIAWORKER_JOB_TIMEOUT` | mediaworker | `2` / `4m` |
+| `MEDIAWORKER_POLL_INTERVAL` / `MEDIAWORKER_HEALTH_ADDR` | mediaworker | `2s` / `127.0.0.1:8081` |
+
+`mediaworker healthcheck` reports healthy while the worker has reached the api recently.
+Each conversion can use a few hundred MB for very large photos, so the Coolify compose
+caps the worker at `MEDIAWORKER_MEM_LIMIT` (default `1g`, with `GOMEMLIMIT` at `768MiB`)
+and keeps it from taking memory from postgres and the api. A conversion that runs past
+`MEDIAWORKER_JOB_TIMEOUT` fails the job as permanent, and the worker exits so Docker
+restarts it (`restart: unless-stopped`). Scale by raising `MEDIAWORKER_CONCURRENCY` and
+the memory limit together.
 
 ## DNS (Cloudflare, your zone)
 

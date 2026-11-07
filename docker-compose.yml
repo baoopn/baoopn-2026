@@ -74,6 +74,8 @@ services:
       MEDIA_DIR: /data/media
       # .env points at localhost:9000; inside the network RustFS is rustfs:9000.
       S3_ENDPOINT: http://rustfs:9000
+      # gRPC for the mediaworker service below (internal network only).
+      GRPC_ADDR: ":9100"
     volumes:
       - baoopn-media:/data/media
     depends_on:
@@ -81,6 +83,31 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+
+  # WebP conversion worker (same image, other binary). Needs INTERNAL_API_TOKEN in .env.
+  mediaworker:
+    profiles: [full]
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    command: ["/usr/local/bin/mediaworker"]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      API_GRPC_ADDR: api:9100
+      MEDIAWORKER_HEALTH_ADDR: 127.0.0.1:8081
+    # The image's HEALTHCHECK is the api's; check the worker instead.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mediaworker", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      api:
+        condition: service_healthy
 
   web:
     profiles: [full]

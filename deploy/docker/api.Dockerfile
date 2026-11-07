@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# The Go API (cmd/api). Build context: the repository root.
+# The Go API (cmd/api) and the media worker (cmd/mediaworker). Build context: the repository root.
 #   docker build -f deploy/docker/api.Dockerfile --build-arg VERSION=$(git rev-parse --short HEAD) .
 
 ARG GO_VERSION=1.27
@@ -8,7 +8,10 @@ ARG GO_VERSION=1.27
 # ─── Build ────────────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
 WORKDIR /src
-ENV CGO_ENABLED=0 GOFLAGS=-trimpath
+# nodynamic: gen2brain/webp and /heic must not load system libraries through
+# purego, which would make the binary dynamically linked (distroless static has no
+# loader); they then always use their embedded pure-Go/WebAssembly codecs.
+ENV CGO_ENABLED=0 GOFLAGS="-trimpath -tags=nodynamic"
 
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -24,7 +27,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
       -ldflags="-s -w -X github.com/baoopn/baoopn-2026/internal/platform/app.Version=${VERSION}" \
-      -o /out/api ./cmd/api \
+      -o /out/ ./cmd/api ./cmd/mediaworker \
  && mkdir -p /data/media
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────
@@ -39,13 +42,16 @@ LABEL org.opencontainers.image.title="baoopn-api" \
       org.opencontainers.image.version="${VERSION}"
 
 COPY --from=build /out/api /usr/local/bin/api
+# The media worker (WebP conversion) runs from this image too, as its own service.
+COPY --from=build /out/mediaworker /usr/local/bin/mediaworker
 # Uploaded media lives here; mount a volume on it. A fresh named volume is
 # initialised from this directory, so it is owned by the non-root user.
 COPY --from=build --chown=65532:65532 /data/media /data/media
 
 ENV MEDIA_DIR=/data/media HTTP_ADDR=:8080
 USER nonroot:nonroot
-EXPOSE 8080
+# 8080 HTTP; 9100 gRPC for the media worker (internal network only).
+EXPOSE 8080 9100
 VOLUME ["/data/media"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

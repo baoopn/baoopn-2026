@@ -124,5 +124,5 @@
 		<p id="{id}-tags-hint" class="hint">Enter or comma to add, Backspace to remove.</p>
 	</div>
 
-	<MediaField id="{id}-cover" label="Cover image" bind:value={form.cover_url} />
+	<MediaField id="{id}-cover" label="Cover image" aspect="16:9" bind:value={form.cover_url} />
 </div>

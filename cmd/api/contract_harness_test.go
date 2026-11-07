@@ -174,7 +174,7 @@ func newHarness(t *testing.T, opts ...func(*httpapi.Deps)) *harness {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 
 	site := sitesettings.New(sitesettings.Deps{DB: pool, Log: log, DefaultNotify: ctNotify, Mailer: mailer})
-	mediaStore, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 1 << 20})
+	mediaStore, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 1 << 20, UploadWait: -1})
 	if err != nil {
 		t.Fatal(err)
 	}

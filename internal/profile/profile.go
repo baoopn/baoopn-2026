@@ -405,3 +405,9 @@ func quote(s string) string {
 	}
 	return `"` + s + `"`
 }
+
+// SettingsKey is the settings row holding the profile.
+const SettingsKey = key
+
+// RenderHTML fills the read-only HTML fields of p from its Markdown.
+func RenderHTML(p *Profile) error { return render(p) }

@@ -2,7 +2,7 @@
 // route 401/403 back to the auth gate.
 
 import { ApiRequestError, apiFull, type ApiOptions, type ApiResult } from '#lib/api/client.js';
-import type { Media } from '#lib/api/types.js';
+import type { ApiError, Media } from '#lib/api/types.js';
 import { auth } from './auth.svelte';
 
 export { ApiRequestError };
@@ -41,9 +41,94 @@ export function qs(params: Record<string, string | number | null | undefined>): 
 	return s ? `?${s}` : '';
 }
 
-/** Upload one file to the media library. */
-export function uploadMedia(file: File): Promise<Media> {
+export type Crop = { x: number; y: number; w: number; h: number };
+
+/** Upload byte progress. */
+export type UploadProgressEvent = { loaded: number; total: number };
+
+/** A failed upload request. `status` 0 is a network failure or timeout. */
+export class UploadRequestError extends ApiRequestError {
+	/** Seconds from a 429/503 Retry-After header. */
+	retryAfter: number | null;
+	constructor(status: number, err: ApiError, retryAfter: number | null = null) {
+		super(status, err);
+		this.retryAfter = retryAfter;
+	}
+	/** Transport-level failures worth retrying automatically. */
+	get transient(): boolean {
+		return this.status === 0 || this.status === 429 || this.status >= 500;
+	}
+}
+
+const UPLOAD_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Upload one file to the media library over XHR (fetch has no upload progress).
+ * Raster images are converted to WebP on the server; `crop` is in ORIGINAL image
+ * pixels (after EXIF orientation). Resolves on 201 (ready) and on 202
+ * (`status: "processing"`: poll {@link getMedia}).
+ */
+export async function uploadMedia(
+	file: File,
+	opts: {
+		crop?: Crop | null;
+		onprogress?: (p: UploadProgressEvent) => void;
+		/** Called once every byte is sent: the server is now converting. */
+		onsent?: () => void;
+		signal?: AbortSignal;
+	} = {}
+): Promise<Media> {
 	const fd = new FormData();
 	fd.append('file', file);
-	return admin<Media>('/media', { method: 'POST', body: fd });
+	const { crop } = opts;
+	if (crop) {
+		fd.append('crop_x', String(Math.round(crop.x)));
+		fd.append('crop_y', String(Math.round(crop.y)));
+		fd.append('crop_w', String(Math.round(crop.w)));
+		fd.append('crop_h', String(Math.round(crop.h)));
+	}
+	const token = await auth.getToken();
+	return new Promise<Media>((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('POST', '/api/admin/media');
+		xhr.timeout = UPLOAD_TIMEOUT_MS;
+		xhr.setRequestHeader('Accept', 'application/json');
+		if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+		xhr.upload.onprogress = (e) => {
+			if (e.lengthComputable) opts.onprogress?.({ loaded: e.loaded, total: e.total });
+		};
+		xhr.upload.onload = () => opts.onsent?.();
+		xhr.onerror = () =>
+			reject(
+				new UploadRequestError(0, { code: 'network', message: 'Network error during upload' })
+			);
+		xhr.ontimeout = () =>
+			reject(new UploadRequestError(0, { code: 'timeout', message: 'The upload timed out' }));
+		xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
+		xhr.onload = () => {
+			let json: { data?: Media; error?: ApiError } | null = null;
+			try {
+				json = JSON.parse(xhr.responseText);
+			} catch {
+				/* non-JSON body (proxy error page) */
+			}
+			if (xhr.status >= 200 && xhr.status < 300 && json?.data) return resolve(json.data);
+			const ra = Number(xhr.getResponseHeader('Retry-After'));
+			const err = new UploadRequestError(
+				xhr.status,
+				json?.error ?? { code: 'http_' + xhr.status, message: xhr.statusText || 'Upload failed' },
+				Number.isFinite(ra) && ra > 0 ? ra : null
+			);
+			if (xhr.status === 401 || xhr.status === 403) auth.rejected(xhr.status);
+			reject(err);
+		};
+		opts.signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+		xhr.send(fd);
+	});
 }
+
+export const getMedia = (id: number) => get<Media>(`/media/${id}`);
+
+/** Re-queue a failed conversion. Rejects with 410 when the original has expired. */
+// The JSON client drops 202 bodies (data: undefined), so the caller polls from the id it has.
+export const retryConversion = (id: number) => post<Media | undefined>(`/media/${id}/retry`);

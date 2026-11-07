@@ -19,6 +19,7 @@
 	import { guardUnsaved } from '#lib/admin/guard.svelte.js';
 	import { dateTime, errorMessage, slugify, wordCount } from '#lib/admin/format.js';
 	import { toasts } from '#lib/admin/toast.svelte.js';
+	import { uploads } from '#lib/admin/media/upload.svelte.js';
 
 	const routeId = $derived(page.params.id ?? 'new');
 	const isNew = $derived(routeId === 'new');
@@ -61,6 +62,7 @@
 	let slugTouched = $state(false);
 	let slugError = $state<string | null>(null);
 	let saving = $state(false);
+	let confirmUploads = $state(false);
 	let keys = $state<number[]>([partKey()]);
 	let active = $state(0);
 	// Reading minutes known from the API, by Markdown text (saved parts + last preview).
@@ -156,8 +158,12 @@
 		if (!slugTouched) form.slug = slugify(form.title);
 	}
 
-	async function save() {
+	async function save(force = false) {
 		if (saving) return;
+		if (!force && uploads.pending > 0) {
+			confirmUploads = true;
+			return;
+		}
 		if (!form.title.trim()) {
 			toasts.error('A title is required');
 			document.getElementById('post-title')?.focus();
@@ -274,7 +280,7 @@
 		<button
 			type="button"
 			class="btn btn-primary"
-			onclick={save}
+			onclick={() => save()}
 			disabled={saving || loadedFor !== routeId}
 			title="Save (Ctrl/⌘+S)"
 		>
@@ -350,4 +356,12 @@
 	confirmLabel="Delete post"
 	danger
 	onconfirm={remove}
+/>
+
+<ConfirmDialog
+	bind:open={confirmUploads}
+	title="Uploads still in progress"
+	message={uploads.message}
+	confirmLabel="Save anyway"
+	onconfirm={() => save(true)}
 />

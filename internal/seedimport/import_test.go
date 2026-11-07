@@ -14,6 +14,7 @@ import (
 	"github.com/baoopn/baoopn-2026/internal/profile"
 	"github.com/baoopn/baoopn-2026/internal/settings"
 	"github.com/baoopn/baoopn-2026/internal/testdb"
+	"github.com/baoopn/baoopn-2026/internal/testimg"
 	"github.com/baoopn/baoopn-2026/seed"
 )
 
@@ -38,7 +39,10 @@ func TestRewriteScreenshots(t *testing.T) {
 	}
 }
 
-var png = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR placeholder")
+var (
+	png  = testimg.PNG(testimg.Halves(4, 4))
+	png2 = testimg.PNG(testimg.Halves(5, 4))
+)
 
 func fixture() fstest.MapFS {
 	return fstest.MapFS{
@@ -50,7 +54,7 @@ func fixture() fstest.MapFS {
 			"![Named](screenshot:named)\n\n![Missing](screenshot:gone)\n\nAfter.")},
 		"posts/two-parts/part-2.md":          {Data: []byte("## Second\n\n![Again](screenshot:dash)")},
 		"posts/two-parts/img/dash.png":       {Data: png},
-		"posts/two-parts/img/other-name.png": {Data: append([]byte{}, append(png, '2')...)},
+		"posts/two-parts/img/other-name.png": {Data: png2},
 		// Skipped with a warning: a part file is missing.
 		"posts/broken/post.json": {Data: []byte(`{"title":"Broken","parts":[{"title":"x","file":"part-1.md"}]}`)},
 		// Skipped with a warning: a part path leaves the folder.
@@ -62,7 +66,7 @@ func TestRunImportsSeedPostsOnce(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
-	store, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 10 << 20})
+	store, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 10 << 20, UploadWait: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,10 +113,10 @@ func TestRunImportsSeedPostsOnce(t *testing.T) {
 	if len(parts) != 2 || titles[0] != "Setup" || titles[1] != "" {
 		t.Fatalf("parts %v %v", titles, parts)
 	}
-	mediaURL := regexp.MustCompile(`!\[Dashboard\]\((/media/[0-9a-f]{24}\.png)\)`)
+	mediaURL := regexp.MustCompile(`!\[Dashboard\]\((/media/[0-9a-f]{24}.webp)\)`)
 	m := mediaURL.FindStringSubmatch(parts[0])
 	if m == nil || strings.Contains(parts[0], "screenshot:") || strings.Contains(parts[0], "Missing") ||
-		!regexp.MustCompile(`!\[Named\]\(/media/[0-9a-f]{24}\.png\)`).MatchString(parts[0]) ||
+		!regexp.MustCompile(`!\[Named\]\(/media/[0-9a-f]{24}\.webp\)`).MatchString(parts[0]) ||
 		!strings.Contains(parts[0], "After.") {
 		t.Fatalf("part 1 not rewritten:\n%s", parts[0])
 	}
@@ -172,7 +176,7 @@ func TestRunEmbeddedSeedAndProfile(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
-	store, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 10 << 20})
+	store, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 10 << 20, UploadWait: -1})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -248,13 +248,18 @@ export interface TagCount {
 
 // ── Media ───────────────────────────────────────────────────────────────────
 
+export type MediaStatus = 'ready' | 'processing' | 'failed';
+
 export interface Media {
 	id: number;
-	url: string; // "/media/<filename>"
+	url: string; // MEDIA_PUBLIC_URL + "/<filename>" (or "/media/<filename>" without a public bucket)
 	filename: string;
 	original: string;
-	content_type: string;
-	size_bytes: number;
+	content_type: string; // "image/webp" while processing
+	size_bytes: number; // 0 while processing
+	status: MediaStatus; // processing: poll GET /api/admin/media/{id}
+	error: string; // why it failed, or why the original was published instead ("" when fine)
+	converted: boolean; // true for WebP outputs; false for fallbacks, SVG, PDF and other as-is files
 	created_at: string;
 }
 
