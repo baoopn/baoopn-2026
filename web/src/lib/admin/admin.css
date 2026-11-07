@@ -1,0 +1,348 @@
+/*
+ * Admin-only component classes ("liner notes", see the spotify-tracker design
+ * direction). Everything is scoped under `.admin` so nothing leaks into the
+ * public site, and lives in the `components` / `utilities` layers declared by
+ * Tailwind in app.css so utilities still win.
+ */
+
+@layer components {
+	.admin {
+		--ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+		min-height: 100dvh;
+		background: var(--paper);
+		color: var(--ink);
+	}
+
+	/* Mono small-caps credit label. */
+	.admin .eyebrow {
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--ink-soft);
+	}
+	.admin .num {
+		font-family: var(--font-mono);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.admin .card {
+		background: var(--paper-2);
+		border: 1px solid var(--rule);
+		border-radius: var(--baoopn-radius);
+	}
+	.admin .card-print {
+		background: var(--paper-2);
+		border: 1px solid var(--ink);
+		border-radius: var(--baoopn-radius);
+		box-shadow: var(--print-shadow);
+	}
+
+	/* Buttons: app.css owns .btn/.btn-primary/.btn-secondary; add the rest. */
+	.admin .btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.admin .btn-ghost {
+		background: transparent;
+		color: var(--ink);
+		border-color: transparent;
+	}
+	.admin .btn-ghost:not(:disabled):hover {
+		background: var(--paper-3);
+	}
+	.admin .btn-danger {
+		background: var(--spot-rose);
+		color: var(--on-spot);
+		border-color: var(--on-spot);
+		box-shadow: 3px 3px 0 var(--on-spot);
+	}
+	.admin .btn-sm {
+		min-height: 2.75rem;
+		padding: 0.35rem 0.8rem;
+		font-size: 0.8125rem;
+	}
+	.admin .btn-primary:disabled,
+	.admin .btn-secondary:disabled,
+	.admin .btn-danger:disabled {
+		box-shadow: none;
+	}
+
+	/* Form controls. */
+	.admin .input {
+		width: 100%;
+		min-height: 2.75rem;
+		padding: 0.55rem 0.85rem;
+		border-radius: 8px;
+		border: 1px solid var(--rule-strong);
+		background: var(--paper);
+		color: var(--ink);
+		font-size: 1rem;
+		transition: border-color 160ms var(--ease-out);
+	}
+	.admin textarea.input {
+		line-height: 1.5;
+		resize: vertical;
+	}
+	.admin select.input {
+		appearance: auto;
+	}
+	.admin .input:hover {
+		border-color: var(--ink-soft);
+	}
+	.admin .input:focus-visible,
+	.admin .input:focus-within {
+		outline: 2px solid var(--ink);
+		outline-offset: 2px;
+		border-color: var(--ink);
+	}
+	.admin .input[aria-invalid='true'] {
+		border-color: var(--danger);
+	}
+	.admin .field-label {
+		display: block;
+		margin-bottom: 0.4rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: var(--ink);
+	}
+	.admin .hint {
+		margin-top: 0.35rem;
+		font-size: 0.8125rem;
+		color: var(--ink-soft);
+	}
+	.admin .field-error {
+		margin-top: 0.35rem;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: var(--danger);
+	}
+	.admin .check {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.6rem;
+		min-height: 2.75rem;
+		font-size: 0.9375rem;
+	}
+	.admin .check input[type='checkbox'],
+	.admin .check input[type='radio'] {
+		width: 1.15rem;
+		height: 1.15rem;
+		accent-color: var(--ink);
+	}
+
+	/* Tag chip (pill, spot wash, ink text). */
+	.admin .tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.15rem 0.6rem;
+		border-radius: 999px;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		line-height: 1.5;
+		background: var(--tag, var(--spot-select));
+		color: var(--on-spot);
+		white-space: nowrap;
+	}
+
+	.admin .skeleton {
+		background: var(--paper-3);
+		border-radius: 6px;
+		animation: admin-pulse 1.6s ease-in-out infinite;
+	}
+
+	/* Ruled tracklist table. */
+	.admin .data-table {
+		width: 100%;
+		border-collapse: separate;
+		border-spacing: 0;
+		font-size: 0.9375rem;
+	}
+	.admin .data-table th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--paper);
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--ink-soft);
+		text-align: left;
+		padding: 0.75rem 1rem;
+		border-bottom: 1px solid var(--ink);
+		white-space: nowrap;
+	}
+	.admin .data-table td {
+		height: 3.5rem;
+		padding: 0.5rem 1rem;
+		border-bottom: 1px solid var(--rule);
+		vertical-align: middle;
+	}
+	.admin .data-table tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.admin .data-table tbody tr:hover {
+		background: var(--paper-3);
+	}
+	.admin .data-table td.num,
+	.admin .data-table th.num {
+		text-align: right;
+	}
+
+	/* Rendered markdown preview, matching the public prose. */
+	.admin .prose {
+		font-size: 1.0625rem;
+		line-height: 1.7;
+		color: var(--ink);
+		overflow-wrap: anywhere;
+	}
+	.admin .prose > * + * {
+		margin-top: 1.1em;
+	}
+	.admin .prose h1,
+	.admin .prose h2,
+	.admin .prose h3,
+	.admin .prose h4 {
+		font-family: var(--font-display);
+		font-weight: 600;
+		line-height: 1.2;
+		letter-spacing: -0.01em;
+		margin-top: 1.8em;
+	}
+	.admin .prose h1 {
+		font-size: 2rem;
+	}
+	.admin .prose h2 {
+		font-size: 1.6rem;
+		padding-bottom: 0.3em;
+		border-bottom: 1px solid var(--rule);
+	}
+	.admin .prose h3 {
+		font-size: 1.3rem;
+	}
+	.admin .prose h4 {
+		font-size: 1.1rem;
+	}
+	.admin .prose > :first-child {
+		margin-top: 0;
+	}
+	.admin .prose a {
+		text-decoration: underline;
+		text-decoration-color: var(--rule-strong);
+		text-underline-offset: 0.2em;
+	}
+	.admin .prose a:hover {
+		text-decoration-color: currentColor;
+	}
+	.admin .prose ul {
+		list-style: disc;
+		padding-left: 1.4em;
+	}
+	.admin .prose ol {
+		list-style: decimal;
+		padding-left: 1.4em;
+	}
+	.admin .prose li + li {
+		margin-top: 0.3em;
+	}
+	.admin .prose blockquote {
+		border-left: 3px solid var(--spot-now);
+		padding-left: 1em;
+		color: var(--ink-soft);
+	}
+	.admin .prose code {
+		font-family: var(--font-mono);
+		font-size: 0.88em;
+		background: var(--paper-3);
+		border: 1px solid var(--rule);
+		border-radius: 5px;
+		padding: 0.1em 0.35em;
+	}
+	.admin .prose pre {
+		font-family: var(--font-mono);
+		font-size: 0.875rem;
+		line-height: 1.6;
+		background: var(--paper-2);
+		border: 1px solid var(--ink);
+		border-radius: 10px;
+		padding: 1em 1.1em;
+		overflow-x: auto;
+	}
+	.admin .prose pre code {
+		background: none;
+		border: 0;
+		padding: 0;
+		font-size: inherit;
+	}
+	.admin .prose img {
+		max-width: 100%;
+		height: auto;
+		border: 1px solid var(--ink);
+		border-radius: 10px;
+	}
+	.admin .prose hr {
+		border: 0;
+		border-top: 1px solid var(--rule-strong);
+	}
+	.admin .prose table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.9375rem;
+		display: block;
+		overflow-x: auto;
+	}
+	.admin .prose th,
+	.admin .prose td {
+		border-bottom: 1px solid var(--rule);
+		padding: 0.5em 0.75em;
+		text-align: left;
+	}
+	.admin .prose th {
+		border-bottom-color: var(--ink);
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+}
+
+@layer utilities {
+	.admin .text-danger {
+		color: var(--danger);
+	}
+	.admin .text-ok {
+		color: var(--ok);
+	}
+	.admin .text-warn {
+		color: var(--warn);
+	}
+	.admin .text-info {
+		color: var(--info);
+	}
+	.admin .border-danger {
+		border-color: var(--danger);
+	}
+	.admin .bg-paper-4 {
+		background-color: var(--paper-4);
+	}
+}
+
+@keyframes admin-pulse {
+	0%,
+	100% {
+		opacity: 0.55;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@media (pointer: coarse) {
+	.admin .btn-icon {
+		min-width: 44px;
+	}
+}

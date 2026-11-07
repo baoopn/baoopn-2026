@@ -1,0 +1,15 @@
+:root {
+  --baoopn-navy: #0b0537;
+  --baoopn-cream: #fff5eb;
+  --baoopn-navy-900: #06031f;
+  --baoopn-navy-700: #251f52;
+  --baoopn-navy-500: #4a4573;
+  --baoopn-navy-300: #8c88a8;
+  --baoopn-navy-100: #d6d4e0;
+  --baoopn-cream-300: #f2e4d4;
+  --baoopn-cream-100: #fffaf5;
+  --baoopn-font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --baoopn-font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --baoopn-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --baoopn-radius: 14px;
+}

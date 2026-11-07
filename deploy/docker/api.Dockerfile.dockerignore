@@ -1,0 +1,24 @@
+# Build context for deploy/docker/api.Dockerfile (Go only).
+.git
+.github
+.claude
+.claude-flow
+.swarm
+.hive-mind
+.worktrees
+.secrets
+.env
+.env.*
+!.env.example
+.mcp.json
+bin
+data
+coverage.out
+docker-compose*.yml
+**/node_modules
+web/.svelte-kit
+web/build
+workers/inbound-email/.wrangler
+web
+workers
+docs

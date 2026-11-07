@@ -1,0 +1,41 @@
+# secrets
+.env
+.env.*
+!.env.example
+.secrets/
+
+# build output
+/bin/
+/data/
+web/build/
+web/.svelte-kit/
+node_modules/
+workers/inbound-email/.wrangler/
+coverage.out
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Ruflo local secrets and runtime data
+.env.local
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/metrics/
+.swarm/
+
+# Agent worktrees (temporary checkouts of this repo, one per parallel writer)
+/.worktrees/
+
+# Local-only notes and machine-specific files (never published)
+/docs/internal/
+.claude-flow/memory-package.json
+# Ruflo runtime state (machine/session specific)
+.claude-flow/policy/
+.claude-flow/swarm/
+.claude-flow/security/
+.claude-flow/harness-active-policy.json

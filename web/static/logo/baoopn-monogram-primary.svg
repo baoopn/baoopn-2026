@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="baoopn monogram">
+  <title>baoopn monogram</title>
+  <rect width="200" height="200" rx="21" fill="#0b0537"/>
+  <g fill="none" stroke="#fff5eb" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M37.5 50V125"/>
+    <path d="M37.5 125a25 25 0 1 1 25 25H61.7"/>
+    <path d="M112.5 150V125a25 25 0 0 1 50 0V150"/>
+  </g>
+</svg>

@@ -1,0 +1,28 @@
+{
+	"name": "Bao Nguyen",
+	"headline": "Full-stack Web Developer & UI Designer",
+	"location": "",
+	"email": "me@baoopn.com",
+	"avatar_url": "/Bao_photo.jpg",
+	"cover_url": "https://cdn.baoopn.com/data/img/Bao_cover.jpg",
+	"resume_url": "",
+	"available_for_work": false,
+	"bio_md": "Hi, I'm Bao Nguyen, a passionate Full-Stack Web and App Developer with a drive for creating innovative solutions. With a solid background in modern technologies and a knack for problem-solving, I bring creativity and technical expertise to every project I undertake.\n\nOver the years, I have developed a deep understanding of both front-end and back-end technologies. From building responsive user interfaces to designing efficient databases, I strive to deliver seamless and robust applications. My journey has involved working with a variety of frameworks and tools, including React, Next.js, Node.js, and more.\n\nI'm constantly exploring new trends in the tech world and learning new skills to stay ahead. Whether you're looking for a dynamic web application or a complex backend system, I am excited to collaborate and bring your vision to life.\n\nLet's connect and create something amazing together!",
+	"socials": [
+		{ "label": "GitHub", "url": "https://github.com/baoopn", "icon": "github", "handle": "@baoopn" },
+		{ "label": "LinkedIn", "url": "https://www.linkedin.com/in/baoopn", "icon": "linkedin", "handle": "Bao Nguyen" },
+		{ "label": "Instagram", "url": "https://www.instagram.com/baoongisoo", "icon": "instagram", "handle": "@baoongisoo" },
+		{ "label": "Email", "url": "mailto:me@baoopn.com", "icon": "email", "handle": "me@baoopn.com" }
+	],
+	"skills": [
+		{ "group": "Frontend", "items": ["React", "Next.js", "TypeScript"] },
+		{ "group": "Backend", "items": ["Node.js", "Express", "Spring Boot"] },
+		{ "group": "Data", "items": ["MongoDB", "Redis"] }
+	],
+	"experience": [],
+	"seo": {
+		"title": "Bao Nguyen | Full-stack Web Developer & UI Designer",
+		"description": "Bao Nguyen is a full-stack web and app developer building responsive interfaces and robust backends with React, Next.js and Node.js.",
+		"og_image": "https://cdn.baoopn.com/data/img/Bao_cover.jpg"
+	}
+}

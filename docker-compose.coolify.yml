@@ -1,0 +1,131 @@
+# Coolify deployment ("Docker Compose" build pack, Git source). See docs/deployment.md.
+#
+# Coolify builds both images from the repository on the target server, so no
+# container-registry credentials are needed.
+#
+# In Coolify: New Resource → Public/Private Repository → Build Pack "Docker
+# Compose" → Docker Compose Location "/docker-compose.coolify.yml".
+# Set the domain on the "web" service only (e.g. https://example.com); Coolify's
+# Traefik routes it to port 3000 and handles TLS. The api has no domain: the
+# web server proxies /api/* and /media/* to it on the internal network.
+#
+# Coolify generates every SERVICE_* value below on first deploy:
+#   SERVICE_USER_POSTGRES / SERVICE_PASSWORD_POSTGRES   database credentials
+#   SERVICE_PASSWORD_64_INTERNAL   INTERNAL_API_TOKEN shared by web and api
+#   SERVICE_PASSWORD_64_SECRETS    SECRETS_KEY (salts visitor hashes; keep stable)
+#   SERVICE_URL_WEB / SERVICE_FQDN_WEB_3000   from the web service's domain
+#
+# Set these by hand in the resource's Environment Variables tab (all optional
+# unless noted; features stay off while their variables are empty):
+#   CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY        admin dashboard (production instance)
+#   ADMIN_ALLOWED_EMAILS / ADMIN_ALLOWED_USER_IDS  (public_metadata.role = admin also works)
+#   GITHUB_USER, GITHUB_TOKEN                      project sync (token raises the rate limit)
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM, NOTIFY_EMAIL   outgoing mail
+#   INBOUND_MAIL_DOMAIN, INBOUND_WEBHOOK_SECRET    reply threading via the Email Worker
+#                                                  (secret must equal the worker's)
+#   SPOTIFY_API_URL                                spotify-tracker listening widgets
+#   TURNSTILE_SECRET_KEY / PUBLIC_TURNSTILE_SITE_KEY  contact-form captcha
+#
+# Do not add custom networks or published ports: Coolify manages networking.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${SERVICE_USER_POSTGRES}
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DB=${POSTGRES_DB:-baoopn}
+    volumes:
+      - baoopn-postgres-data:/var/lib/postgresql/data
+    shm_size: 128mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+      args:
+        # Coolify provides SOURCE_COMMIT ("Include Source Commit in Build");
+        # shown as the version in the admin dashboard.
+        VERSION: ${SOURCE_COMMIT:-coolify}
+    image: baoopn-api:latest
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=json
+      - HTTP_ADDR=:8080
+      - PUBLIC_URL=${SERVICE_URL_WEB}
+      - DATABASE_URL=postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-baoopn}?sslmode=disable
+      - MIGRATE_ON_START=${MIGRATE_ON_START:-true}
+      - SECRETS_KEY=${SERVICE_PASSWORD_64_SECRETS}
+      - INTERNAL_API_TOKEN=${SERVICE_PASSWORD_64_INTERNAL}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-240}
+      - CLERK_PUBLISHABLE_KEY=${CLERK_PUBLISHABLE_KEY:-}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
+      - ADMIN_ALLOWED_EMAILS=${ADMIN_ALLOWED_EMAILS:-}
+      - ADMIN_ALLOWED_USER_IDS=${ADMIN_ALLOWED_USER_IDS:-}
+      - ADMIN_ROLE=${ADMIN_ROLE:-admin}
+      - GITHUB_USER=${GITHUB_USER:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_SYNC_INTERVAL=${GITHUB_SYNC_INTERVAL:-6h}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-2587}
+      - SMTP_USER=${SMTP_USER:-}
+      # useSend: the API key is the SMTP password. Mail stays disabled until set.
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - NOTIFY_EMAIL=${NOTIFY_EMAIL:-}
+      - INBOUND_MAIL_DOMAIN=${INBOUND_MAIL_DOMAIN:-}
+      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY:-}
+      - MEDIA_DIR=/data/media
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
+      - SPOTIFY_API_URL=${SPOTIFY_API_URL:-}
+    volumes:
+      - baoopn-media:/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/api", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    image: baoopn-web:latest
+    environment:
+      - SERVICE_FQDN_WEB_3000
+      - PORT=3000
+      - ORIGIN=${SERVICE_URL_WEB}
+      - PROTOCOL_HEADER=x-forwarded-proto
+      - HOST_HEADER=x-forwarded-host
+      - ADDRESS_HEADER=x-forwarded-for
+      - XFF_DEPTH=${XFF_DEPTH:-1}
+      # Honour CF-Connecting-IP/CF-IPCountry only behind an origin firewall that admits Cloudflare IPs only.
+      - TRUST_CLOUDFLARE=${TRUST_CLOUDFLARE:-false}
+      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-16M}
+      - API_URL=http://api:8080
+      - INTERNAL_API_TOKEN=${SERVICE_PASSWORD_64_INTERNAL}
+      - PUBLIC_TURNSTILE_SITE_KEY=${PUBLIC_TURNSTILE_SITE_KEY:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/favicon.svg || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
+volumes:
+  baoopn-postgres-data:
+  baoopn-media:

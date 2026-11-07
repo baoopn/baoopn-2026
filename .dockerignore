@@ -1,0 +1,22 @@
+# Shared Docker build-context exclusions. BuildKit prefers the per-Dockerfile
+# files in deploy/docker/*.Dockerfile.dockerignore when they exist.
+.git
+.github
+.claude
+.claude-flow
+.swarm
+.hive-mind
+.worktrees
+.secrets
+.env
+.env.*
+!.env.example
+.mcp.json
+bin
+data
+coverage.out
+docker-compose*.yml
+**/node_modules
+web/.svelte-kit
+web/build
+workers/inbound-email/.wrangler

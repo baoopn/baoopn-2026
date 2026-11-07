@@ -1,0 +1,34 @@
+From: Priya <priya@example.com>
+To: reply+0123456789abcdef0123456789abcdef@reply.baoopn.com
+Cc: Other <Other@Example.com>
+Delivered-To: reply+0123456789abcdef0123456789abcdef@reply.baoopn.com
+Subject: With files
+Message-ID: <att-1@mail.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b1"
+
+--b1
+Content-Type: multipart/alternative; boundary="b2"
+
+--b2
+Content-Type: text/plain; charset=utf-8
+
+See attached.
+--b2
+Content-Type: text/html; charset=utf-8
+
+<p>See attached.</p>
+--b2--
+--b1
+Content-Type: application/pdf; name="a.pdf"
+Content-Disposition: attachment; filename="a.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--b1
+Content-Type: image/png
+Content-Disposition: inline; filename="b.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgo=
+--b1--

@@ -1,0 +1,4 @@
+# Build scripts of these dependencies are not needed (postinstall banners only).
+allowBuilds:
+  browser-tabs-lock: false
+  core-js: false

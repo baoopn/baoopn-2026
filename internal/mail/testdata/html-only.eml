@@ -1,0 +1,8 @@
+From: sam@example.com
+To: reply+0123456789abcdef0123456789abcdef@reply.baoopn.com
+Subject: HTML only
+Message-ID: <html-1@mail.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<div>Hello <b>there</b></div><blockquote>Old text</blockquote>

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refuse direct pushes to main: all changes go through pull requests.
+# Enable once per clone with:  git config core.hooksPath .githooks
+# (Emergency override: git push --no-verify — the deploy gate in
+#  .github/workflows/release.yml still won't deploy a non-PR commit.)
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "pre-push: direct pushes to main are not allowed. Push a branch and open a PR:" >&2
+      echo "  git switch -c <topic> && git push -u origin <topic> && gh pr create" >&2
+      exit 1 ;;
+  esac
+done
+exit 0

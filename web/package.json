@@ -1,0 +1,50 @@
+{
+	"name": "baoopn-web",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"imports": {
+		"#lib": "./src/lib/index.js",
+		"#lib/*": "./src/lib/*"
+	},
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+	},
+	"devDependencies": {
+		"@codemirror/commands": "^6.11.1",
+		"@codemirror/lang-markdown": "^6.5.2",
+		"@codemirror/language": "^6.13.1",
+		"@codemirror/language-data": "^6.5.2",
+		"@codemirror/state": "^6.7.6",
+		"@codemirror/view": "^6.43.15",
+		"@fontsource-variable/inter": "^5.3.0",
+		"@fontsource-variable/jetbrains-mono": "^5.3.0",
+		"@fontsource-variable/outfit": "^5.3.0",
+		"@lezer/highlight": "^1.2.5",
+		"@lucide/svelte": "^1.69.0",
+		"@sveltejs/adapter-node": "^6.0.1",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
+		"@tailwindcss/vite": "^4.3.4",
+		"@types/node": "^26.6.6",
+		"codemirror": "^6.0.2",
+		"prettier": "^3.9.10",
+		"prettier-plugin-svelte": "^4.1.1",
+		"svelte": "^5.57.2",
+		"svelte-check": "^4.6.0",
+		"tailwindcss": "^4.3.4",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.0"
+	},
+	"dependencies": {
+		"@clerk/clerk-js": "6.42.3",
+		"@clerk/ui": "1.42.4",
+		"react": "19.3.1",
+		"react-dom": "19.3.1"
+	}
+}

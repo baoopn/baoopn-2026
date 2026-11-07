@@ -1,0 +1,397 @@
+/*
+ * Public-site styles that Tailwind utilities can't reach: rendered Markdown
+ * prose (post content, project case studies, bio) and the chroma code theme.
+ * Flat colours from the tokens only ("liner notes": paper, ink, hairlines).
+ */
+
+/* ---------- code colours (text on --code-bg, all >= 4.5:1) ---------- */
+:root,
+[data-theme='light'] {
+	--code-bg: var(--paper-2);
+	--code-fg: #3b3552;
+	--code-keyword: #7a2e8c;
+	--code-string: #24714a;
+	--code-comment: #6b6585;
+	--code-func: #2f5f93;
+	--code-number: #85540b;
+	--code-tag: #a8324c;
+	--code-type: #6a3fa0;
+	--code-ins-bg: #c8ecd9;
+	--code-del-bg: #f9cfdc;
+	--code-hl-bg: #fbedb3;
+}
+[data-theme='dark'] {
+	--code-bg: #1d1a26;
+	--code-fg: #f2ecf9;
+	--code-keyword: #d6c2ff;
+	--code-string: #a8d8bf;
+	--code-comment: #b2aac6;
+	--code-func: #a9c9ea;
+	--code-number: #e8d68e;
+	--code-tag: #f1aec1;
+	--code-type: #e3d7fb;
+	--code-ins-bg: #2c4a3b;
+	--code-del-bg: #4d2c38;
+	--code-hl-bg: #3d384c;
+}
+
+@layer components {
+	/* ---------- prose ---------- */
+	.prose {
+		font-size: 1.0625rem;
+		line-height: 1.75;
+		color: var(--ink);
+		overflow-wrap: break-word;
+	}
+	.prose > :first-child {
+		margin-top: 0;
+	}
+	.prose :where(p, ul, ol, blockquote, pre, table, figure, hr, dl, details) {
+		margin-block: 1.25em;
+	}
+	.prose :where(h2, h3, h4, h5, h6) {
+		font-family: var(--font-display);
+		font-weight: 600;
+		letter-spacing: -0.015em;
+		line-height: 1.2;
+		scroll-margin-top: 6rem;
+		text-wrap: balance;
+	}
+	.prose h2 {
+		font-size: 1.75rem;
+		margin-top: 2.4em;
+		margin-bottom: 0.6em;
+		padding-top: 0.9em;
+		border-top: 1px solid var(--rule);
+	}
+	.prose h3 {
+		font-size: 1.35rem;
+		margin-top: 1.9em;
+		margin-bottom: 0.5em;
+	}
+	.prose :where(h4, h5, h6) {
+		font-size: 1.1rem;
+		margin-top: 1.6em;
+		margin-bottom: 0.4em;
+	}
+	/* Heading self-links ("#" anchors from the renderer) */
+	.prose :where(h2, h3, h4) > a[href^='#'] {
+		color: inherit;
+		text-decoration: none;
+	}
+	.prose :where(h2, h3, h4) > a[href^='#']:hover {
+		text-decoration: underline;
+		text-decoration-thickness: 1px;
+		text-underline-offset: 0.2em;
+	}
+	.prose a {
+		color: var(--ink);
+		font-weight: 500;
+		text-decoration-line: underline;
+		text-decoration-color: var(--rule-strong);
+		text-decoration-thickness: 1px;
+		text-underline-offset: 0.2em;
+		transition: text-decoration-color 180ms ease-out;
+	}
+	.prose a:hover {
+		text-decoration-color: currentColor;
+	}
+	.prose strong {
+		font-weight: 650;
+	}
+	.prose :where(ul, ol) {
+		padding-left: 1.4em;
+	}
+	.prose ul {
+		list-style: disc;
+	}
+	.prose ol {
+		list-style: decimal;
+	}
+	.prose li {
+		margin-block: 0.35em;
+		padding-left: 0.2em;
+	}
+	.prose li::marker {
+		color: var(--ink-soft);
+		font-family: var(--font-mono);
+		font-size: 0.85em;
+	}
+	.prose li > :where(ul, ol) {
+		margin-block: 0.35em;
+	}
+	.prose li:has(> input[type='checkbox']) {
+		list-style: none;
+		margin-left: -1.3em;
+	}
+	.prose input[type='checkbox'] {
+		accent-color: var(--ink);
+		margin-right: 0.4em;
+	}
+	.prose blockquote {
+		border-left: 3px solid var(--ink);
+		padding: 0.15em 0 0.15em 1.1em;
+		color: var(--ink-soft);
+		font-style: italic;
+	}
+	.prose blockquote > :first-child {
+		margin-top: 0;
+	}
+	.prose blockquote > :last-child {
+		margin-bottom: 0;
+	}
+	.prose hr {
+		border: 0;
+		border-top: 1px solid var(--rule-strong);
+		margin-block: 2.5em;
+	}
+	.prose :where(img, video) {
+		max-width: 100%;
+		height: auto;
+		border-radius: var(--baoopn-radius);
+		border: 1px solid var(--ink);
+	}
+	.prose figure img {
+		margin: 0;
+	}
+	.prose figcaption {
+		margin-top: 0.6em;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		letter-spacing: 0.04em;
+		color: var(--ink-soft);
+	}
+
+	/* inline code */
+	.prose :not(pre) > code {
+		font-family: var(--font-mono);
+		font-size: 0.86em;
+		padding: 0.12em 0.38em;
+		border-radius: 5px;
+		background: var(--code-bg);
+		border: 1px solid var(--rule);
+		overflow-wrap: anywhere;
+	}
+	.prose kbd {
+		font-family: var(--font-mono);
+		font-size: 0.8em;
+		padding: 0.1em 0.4em;
+		border: 1px solid var(--rule-strong);
+		border-bottom-width: 2px;
+		border-radius: 5px;
+		background: var(--paper);
+	}
+
+	/* code blocks */
+	.prose pre {
+		font-family: var(--font-mono);
+		font-size: 0.85rem;
+		line-height: 1.65;
+		padding: 1rem 1.15rem;
+		overflow-x: auto;
+		background: var(--code-bg);
+		color: var(--code-fg);
+		border: 1px solid var(--ink);
+		border-radius: 10px;
+		box-shadow: 3px 3px 0 var(--print-color);
+		tab-size: 4;
+	}
+	.prose pre code {
+		font: inherit;
+		background: none;
+		padding: 0;
+		border: 0;
+	}
+	.prose pre:focus-visible {
+		outline: 2px solid var(--ink);
+		outline-offset: 3px;
+	}
+
+	/* tables */
+	.prose table {
+		display: block;
+		width: max-content;
+		max-width: 100%;
+		overflow-x: auto;
+		border-collapse: collapse;
+		font-size: 0.925rem;
+		line-height: 1.5;
+	}
+	.prose :where(th, td) {
+		padding: 0.55em 0.9em;
+		border-bottom: 1px solid var(--rule);
+		text-align: left;
+		vertical-align: top;
+	}
+	.prose th {
+		font-family: var(--font-mono);
+		font-size: 0.72rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		border-bottom: 1px solid var(--ink);
+		background: var(--paper-2);
+	}
+	.prose td {
+		font-variant-numeric: tabular-nums;
+	}
+
+	.prose details {
+		border: 1px solid var(--rule-strong);
+		border-radius: 10px;
+		padding: 0.6em 1em;
+	}
+	.prose summary {
+		font-weight: 600;
+		cursor: pointer;
+		min-height: 2.75rem;
+		display: flex;
+		align-items: center;
+	}
+
+	/* footnotes (goldmark: sup > a.footnote-ref, div.footnotes / section.footnotes) */
+	.prose sup {
+		line-height: 0;
+	}
+	.prose .footnote-ref,
+	.prose sup > a[href^='#fn'] {
+		font-family: var(--font-mono);
+		font-size: 0.75em;
+		text-decoration: none;
+		padding: 0 0.15em;
+	}
+	.prose :where(.footnotes, section[data-footnotes]) {
+		margin-top: 3em;
+		padding-top: 1em;
+		border-top: 1px solid var(--rule-strong);
+		font-size: 0.9rem;
+		color: var(--ink-soft);
+	}
+	.prose :where(.footnotes, section[data-footnotes]) hr {
+		display: none;
+	}
+	.prose :where(.footnotes, section[data-footnotes]) :target {
+		background: var(--spot-butter);
+		color: var(--on-spot);
+	}
+	.prose .footnote-backref {
+		text-decoration: none;
+	}
+
+	/* ---------- chroma (Go syntax highlighter, class-based) ---------- */
+	.chroma .err {
+		color: var(--code-tag);
+	}
+	.chroma .lnlinks {
+		outline: none;
+		text-decoration: none;
+		color: inherit;
+	}
+	.chroma .lntd {
+		vertical-align: top;
+		padding: 0;
+		margin: 0;
+		border: 0;
+	}
+	.chroma .lntable {
+		border-spacing: 0;
+		padding: 0;
+		margin: 0;
+		border: 0;
+		display: table;
+		width: auto;
+	}
+	.chroma .hl {
+		background: var(--code-hl-bg);
+		display: block;
+	}
+	.chroma :where(.ln, .lnt) {
+		color: var(--code-comment);
+		margin-right: 0.9em;
+		padding: 0 0.4em 0 0;
+		user-select: none;
+	}
+	.chroma .line {
+		display: flex;
+	}
+	/* keywords */
+	.chroma :where(.k, .kc, .kd, .kn, .kp, .kr, .ow) {
+		color: var(--code-keyword);
+		font-weight: 500;
+	}
+	.chroma .kt {
+		color: var(--code-type);
+	}
+	/* names */
+	.chroma :where(.nf, .fm, .nx) {
+		color: var(--code-func);
+	}
+	.chroma :where(.nc, .nn, .ne, .bp) {
+		color: var(--code-type);
+	}
+	.chroma :where(.nb, .nv, .vc, .vg, .vi, .vm, .no) {
+		color: var(--code-number);
+	}
+	.chroma :where(.nt, .nd) {
+		color: var(--code-tag);
+	}
+	.chroma .na {
+		color: var(--code-func);
+	}
+	/* literals */
+	.chroma :where(.s, .sa, .sb, .sc, .dl, .sd, .s1, .s2, .sh, .sx, .ss) {
+		color: var(--code-string);
+	}
+	.chroma :where(.se, .si, .sr) {
+		color: var(--code-number);
+	}
+	.chroma :where(.m, .mb, .mf, .mh, .mi, .il, .mo) {
+		color: var(--code-number);
+	}
+	/* comments */
+	.chroma :where(.c, .ch, .cm, .c1, .cs, .cpf) {
+		color: var(--code-comment);
+		font-style: italic;
+	}
+	.chroma .cp {
+		color: var(--code-keyword);
+	}
+	/* operators, punctuation */
+	.chroma :where(.o, .p) {
+		color: var(--code-fg);
+	}
+	/* generic (diffs, markdown) */
+	.chroma .gd {
+		background: var(--code-del-bg);
+		display: inline-block;
+		min-width: 100%;
+	}
+	.chroma .gi {
+		background: var(--code-ins-bg);
+		display: inline-block;
+		min-width: 100%;
+	}
+	.chroma .ge {
+		font-style: italic;
+	}
+	.chroma .gs {
+		font-weight: 700;
+	}
+	.chroma :where(.gh, .gu) {
+		color: var(--code-func);
+		font-weight: 600;
+	}
+	.chroma :where(.go, .gp) {
+		color: var(--code-comment);
+	}
+	.chroma .gr,
+	.chroma .gt {
+		color: var(--code-tag);
+	}
+}
+
+@media (forced-colors: active) {
+	.prose pre {
+		box-shadow: none;
+	}
+}

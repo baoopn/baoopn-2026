@@ -1,0 +1,13 @@
+# Cloudflare Email Worker for replies to reply+<token>@<INBOUND_DOMAIN>.
+# Deploy with `npx wrangler deploy` from this directory (account chosen at login).
+name = "baoopn-inbound-email"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Variables live in Cloudflare (dashboard or API), not in this file, so
+# deploying never overwrites them. Set them once:
+#   API_URL         = "https://<site>/api/hooks/inbound-email"   (public web origin)
+#   INBOUND_DOMAIN  = "reply.<site>"   must equal the API's INBOUND_MAIL_DOMAIN
+#   INBOUND_WEBHOOK_SECRET (secret)    must equal the API's INBOUND_WEBHOOK_SECRET
+#     npx wrangler secret put INBOUND_WEBHOOK_SECRET
+keep_vars = true

@@ -1,0 +1,9 @@
+{
+  "name": "baoopn-inbound-email",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test",
+    "deploy": "wrangler deploy"
+  }
+}

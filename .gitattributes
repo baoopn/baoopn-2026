@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.png binary
+*.ico binary
+
+# GitHub language stats: AI-assistant tooling and generated/seed content are not
+# part of the project's code (linguist-vendored hides them from the language bar).
+.claude/** linguist-vendored
+.claude-flow/** linguist-vendored
+.mcp.json linguist-vendored
+CLAUDE.md linguist-documentation
+seed/** linguist-documentation
+docs/** linguist-documentation

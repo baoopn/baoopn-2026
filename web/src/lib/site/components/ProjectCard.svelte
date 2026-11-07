@@ -1,0 +1,126 @@
+<script lang="ts">
+	import Star from '@lucide/svelte/icons/star';
+	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
+	import SocialIcon from './SocialIcon.svelte';
+	import { count, safeImage, safeUrl, spotFor } from '#lib/site/format.js';
+	import type { ProjectSummary } from '#lib/api/types.js';
+
+	let { project, index }: { project: ProjectSummary; index?: number } = $props();
+
+	const cover = $derived(safeImage(project.cover_url));
+	const demo = $derived(safeUrl(project.demo_url));
+	const repo = $derived(safeUrl(project.repo_url));
+	const initials = $derived(
+		project.title
+			.split(/[\s\-_.]+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((w) => w[0]?.toUpperCase())
+			.join('')
+	);
+	let failed = $state(false);
+</script>
+
+<article class="card group">
+	<a href="/projects/{project.slug}" class="block rounded-brand" tabindex="-1" aria-hidden="true">
+		{#if cover && !failed}
+			<img
+				src={cover}
+				alt=""
+				width="800"
+				height="500"
+				loading="lazy"
+				decoding="async"
+				class="cover aspect-[8/5] w-full rounded-brand border border-ink bg-paper-2 object-cover"
+				onerror={() => (failed = true)}
+			/>
+		{:else}
+			<div
+				class="cover relative grid aspect-[8/5] w-full place-items-center overflow-hidden rounded-brand border border-ink text-on-spot"
+				style:background={spotFor(project.slug)}
+			>
+				<span class="font-display text-7xl font-semibold tracking-[-0.04em]">{initials}</span>
+				{#if project.language}
+					<span class="label absolute bottom-3 left-3">{project.language}</span>
+				{/if}
+				{#if index != null}
+					<span class="label absolute top-3 right-3">No. {String(index + 1).padStart(2, '0')}</span>
+				{/if}
+			</div>
+		{/if}
+	</a>
+
+	<div class="mt-4 flex items-baseline justify-between gap-3">
+		<h3 class="min-w-0 font-display text-xl font-semibold tracking-[-0.01em]">
+			<a href="/projects/{project.slug}" class="link">{project.title}</a>
+		</h3>
+		{#if project.period}
+			<span class="label shrink-0 text-ink-soft">{project.period}</span>
+		{/if}
+	</div>
+	{#if project.summary}
+		<p class="mt-1.5 text-ink-soft">{project.summary}</p>
+	{/if}
+
+	{#if project.tech.length}
+		<ul class="mt-3 flex flex-wrap gap-1.5" aria-label="Built with">
+			{#each project.tech.slice(0, 6) as t (t)}
+				<li class="label rounded-full border border-rule-strong px-2 py-0.5">{t}</li>
+			{/each}
+		</ul>
+	{/if}
+
+	<div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+		{#if project.stars > 0}
+			<span class="inline-flex items-center gap-1 font-mono tabular-nums text-ink-soft">
+				<Star class="size-3.5" aria-hidden="true" />
+				{count(project.stars)}<span class="sr-only"> stars</span>
+			</span>
+		{/if}
+		{#if project.language && cover}
+			<span class="font-mono text-ink-soft">{project.language}</span>
+		{/if}
+		{#if project.archived}
+			<span class="chip label px-2! py-0! [--chip:var(--spot-butter)]">Archived</span>
+		{/if}
+		<span class="ml-auto flex gap-1">
+			{#if repo}
+				<a href={repo} target="_blank" rel="noopener noreferrer" class="iconlink" title="Source code">
+					<SocialIcon icon="github" class="size-4.5" />
+					<span class="sr-only">Source code for {project.title}</span>
+				</a>
+			{/if}
+			{#if demo}
+				<a href={demo} target="_blank" rel="noopener noreferrer" class="iconlink" title="Live site">
+					<ArrowUpRight class="size-4.5" aria-hidden="true" />
+					<span class="sr-only">Live site for {project.title}</span>
+				</a>
+			{/if}
+		</span>
+	</div>
+</article>
+
+<style>
+	.cover {
+		transition:
+			transform 180ms ease-out,
+			box-shadow 180ms ease-out;
+	}
+	.card:hover .cover,
+	.card:focus-within .cover {
+		transform: translate(-2px, -2px);
+		box-shadow: 4px 4px 0 var(--print-color);
+	}
+	.iconlink {
+		display: grid;
+		place-items: center;
+		width: 2.75rem;
+		height: 2.75rem;
+		border-radius: 999px;
+		color: var(--ink);
+		transition: background-color 160ms ease-out;
+	}
+	.iconlink:hover {
+		background: var(--paper-2);
+	}
+</style>

@@ -1,0 +1,92 @@
+name: Release & deploy
+
+# On every push to main: run CI, then trigger the Coolify resource, which
+# builds the same commit from the repository (docker-compose.coolify.yml) and
+# deploys it. No registry push: Coolify builds on the server.
+#
+# Repository configuration (Settings → Secrets and variables → Actions):
+#   secrets.COOLIFY_TOKEN          Coolify API token with deploy permission
+#   vars.COOLIFY_URL               e.g. https://coolify.example.com
+#   vars.COOLIFY_RESOURCE_UUID     UUID of the baoopn Coolify resource
+# The deploy job is skipped while COOLIFY_RESOURCE_UUID is unset, so the site
+# is not published until that variable exists.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to Coolify
+    needs: ci
+    if: vars.COOLIFY_RESOURCE_UUID != '' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # Policy: changes reach production only through merged pull requests.
+      # (Branch rulesets need GitHub Pro on private personal repos, so this
+      # gate enforces it at deploy time: direct pushes are built and tested
+      # but never deployed. Manual runs are allowed.)
+      - name: Require a merged pull request
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prs=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
+          if [ "$prs" -eq 0 ]; then
+            echo "::error::Commit ${{ github.sha }} was pushed to main without a merged pull request. Not deploying. Open a PR instead."
+            exit 1
+          fi
+          echo "Commit came from $prs merged pull request(s)."
+
+      - name: Trigger deployment
+        id: deploy
+        env:
+          COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          UUID: ${{ vars.COOLIFY_RESOURCE_UUID }}
+        run: |
+          set -euo pipefail
+          # Coolify v4 requires POST for /deploy.
+          resp=$(curl -fsS -X POST "$COOLIFY_URL/api/v1/deploy" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" -H "Content-Type: application/json" -A github-actions \
+            --data "{\"uuid\":\"$UUID\",\"force\":false}")
+          echo "$resp"
+          echo "deployment_uuid=$(echo "$resp" | jq -r '.deployments[0].deployment_uuid')" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for deployment to finish
+        env:
+          COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment_uuid }}
+        run: |
+          set -euo pipefail
+          # Builds the Go API and the SvelteKit app on the server: allow 20 min.
+          for i in $(seq 1 120); do
+            status=$(curl -fsS "$COOLIFY_URL/api/v1/deployments/$DEPLOYMENT" \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" -A github-actions | jq -r 'if type == "array" then .[0].status else .status end')
+            echo "[$i] status=$status"
+            case "$status" in
+              finished) exit 0 ;;
+              failed|cancelled*) echo "::error::Coolify deployment $status"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Timed out waiting for deployment"; exit 1

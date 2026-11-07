@@ -1,0 +1,59 @@
+# Local development. By default only Postgres starts: run the API with
+# `make run-api` and the web app with `make web-dev`.
+# `docker compose --profile full up --build` also runs the api and web images
+# (site on http://localhost:3000), reading the rest of the config from .env.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: baoopn
+      POSTGRES_PASSWORD: baoopn
+      POSTGRES_DB: baoopn
+    ports:
+      - "5433:5432"
+    volumes:
+      - baoopn-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baoopn -d baoopn"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    profiles: [full]
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://baoopn:baoopn@postgres:5432/baoopn?sslmode=disable
+      PUBLIC_URL: http://localhost:3000
+      MEDIA_DIR: /data/media
+    volumes:
+      - baoopn-media:/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    profiles: [full]
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ORIGIN: http://localhost:3000
+      API_URL: http://api:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  baoopn-pg:
+  baoopn-media:

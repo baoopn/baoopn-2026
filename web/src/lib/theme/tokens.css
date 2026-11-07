@@ -1,0 +1,188 @@
+/*
+ * baoopn listening — design tokens ("liner notes", truly pastel, no gradients).
+ * Self-contained and framework-free; shared verbatim by web/admin and web/public.
+ * Spec: docs/design-direction.md (Colour).
+ *
+ * Model
+ *   --paper*      flat paper colours ("pastel day" milk / "pastel night" plum-grey)
+ *   --ink*        text, rules, focus, primary button fill
+ *   --spot-*      flat pastel spot inks: FILLS ONLY. Text on any spot is --on-spot
+ *                 (the dark aubergine ink) in both modes.
+ *   --spot-now / --spot-select / --spot-chart  which spot leads (set per palette;
+ *                 palettes also tint --paper-2).
+ *   --baoopn-* / --brand*  logo, favicon and the small brand badge ONLY.
+ *
+ * Usage: <html data-palette="baoopn|lavender|mint|peach|sky|rose" data-theme="light|dark">
+ * (data-theme = resolved mode; "system" is resolved in JS). Any element may carry
+ * data-palette / data-theme to preview locally.
+ *
+ * Contrast (web/admin/scripts/check-contrast.mjs, WCAG AA): ink on every paper >= 7:1,
+ * ink-soft and status text >= 4.5:1, --on-spot on every spot >= 4.5:1 in both modes,
+ * primary button text >= 4.5:1.
+ */
+
+/* ---------- brand kit: design/brand/tokens/colors.css (verbatim; logo use only) ---------- */
+:root {
+	--baoopn-navy: #0b0537;
+	--baoopn-cream: #fff5eb;
+	--baoopn-navy-900: #06031f;
+	--baoopn-navy-700: #251f52;
+	--baoopn-navy-500: #4a4573;
+	--baoopn-navy-300: #8c88a8;
+	--baoopn-navy-100: #d6d4e0;
+	--baoopn-cream-300: #f2e4d4;
+	--baoopn-cream-100: #fffaf5;
+	--baoopn-font-display: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+	--baoopn-font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--baoopn-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+	--baoopn-radius: 14px;
+}
+
+/* ---------- pastel day ---------- */
+:root,
+[data-theme='light'] {
+	--paper: #fbf7f2; /* soft milk */
+	--paper-2: #f4eefa; /* lilac milk (tinted per palette) */
+	--paper-3: #eef6f1; /* mint milk: hover / selected row */
+	--paper-4: #efe9f3; /* sunken: skeletons, empty art */
+	--ink: #3b3552; /* soft aubergine */
+	--ink-soft: #6b6585;
+	--on-spot: #3b3552;
+	--rule: rgb(59 53 82 / 0.14);
+	--rule-strong: rgb(59 53 82 / 0.32);
+	--spot-peach: #ffd6c4;
+	--spot-mint: #c8ecd9;
+	--spot-lilac: #e3d7fb;
+	--spot-butter: #fbedb3;
+	--spot-sky: #cfe5fb;
+	--spot-rose: #f9cfdc;
+	/* status text (field errors, inline states); fills use the spots */
+	--ok: #24714a;
+	--warn: #85540b;
+	--danger: #a8324c;
+	--info: #2f5f93;
+	--print-color: var(--ink);
+	--brand: var(--baoopn-navy);
+	--brand-fg: var(--baoopn-cream);
+	--brand-border: transparent;
+	--grain-opacity: 0.04;
+	color-scheme: light;
+}
+
+/* ---------- pastel night ---------- */
+[data-theme='dark'] {
+	--paper: #24212e; /* muted plum-grey */
+	--paper-2: #2d2939;
+	--paper-3: #353043;
+	--paper-4: #3d384c;
+	--ink: #f2ecf9; /* lavender white */
+	--ink-soft: #bdb5cf;
+	--on-spot: #3b3552;
+	--rule: rgb(242 236 249 / 0.18);
+	--rule-strong: rgb(242 236 249 / 0.36);
+	--spot-peach: #f0b8a3;
+	--spot-mint: #a8d8bf;
+	--spot-lilac: #c6b4ef;
+	--spot-butter: #e8d68e;
+	--spot-sky: #a9c9ea;
+	--spot-rose: #eaa9bd;
+	--ok: #9fdcbc;
+	--warn: #ecd58a;
+	--danger: #f1aec1;
+	--info: #a9c9ea;
+	--print-color: var(--spot-now);
+	--brand: var(--baoopn-navy);
+	--brand-fg: var(--baoopn-cream);
+	--brand-border: rgb(255 245 235 / 0.14);
+	--grain-opacity: 0.05;
+	color-scheme: dark;
+}
+
+/* ---------- palettes: which spot leads, and the paper-2 tint ---------- */
+:root,
+[data-palette='baoopn'] {
+	--spot-now: var(--spot-peach);
+	--spot-select: var(--spot-lilac);
+	--spot-chart: var(--spot-sky);
+	--paper-2: #f4eefa;
+}
+[data-palette='lavender'] {
+	--spot-now: var(--spot-lilac);
+	--spot-select: var(--spot-lilac);
+	--spot-chart: var(--spot-lilac);
+	--paper-2: #f3eefc;
+}
+[data-palette='mint'] {
+	--spot-now: var(--spot-mint);
+	--spot-select: var(--spot-mint);
+	--spot-chart: var(--spot-mint);
+	--paper-2: #eef6f1;
+}
+[data-palette='peach'] {
+	--spot-now: var(--spot-peach);
+	--spot-select: var(--spot-peach);
+	--spot-chart: var(--spot-peach);
+	--paper-2: #fcefe8;
+}
+[data-palette='sky'] {
+	--spot-now: var(--spot-sky);
+	--spot-select: var(--spot-sky);
+	--spot-chart: var(--spot-sky);
+	--paper-2: #edf4fb;
+}
+[data-palette='rose'] {
+	--spot-now: var(--spot-rose);
+	--spot-select: var(--spot-rose);
+	--spot-chart: var(--spot-rose);
+	--paper-2: #fbeef2;
+}
+[data-theme='dark'][data-palette='baoopn'],
+[data-theme='dark'] [data-palette='baoopn']:not([data-theme='light']) {
+	--paper-2: #2d2939;
+}
+[data-theme='dark'][data-palette='lavender'],
+[data-theme='dark'] [data-palette='lavender']:not([data-theme='light']) {
+	--paper-2: #2e2940;
+}
+[data-theme='dark'][data-palette='mint'],
+[data-theme='dark'] [data-palette='mint']:not([data-theme='light']) {
+	--paper-2: #28322f;
+}
+[data-theme='dark'][data-palette='peach'],
+[data-theme='dark'] [data-palette='peach']:not([data-theme='light']) {
+	--paper-2: #332a2c;
+}
+[data-theme='dark'][data-palette='sky'],
+[data-theme='dark'] [data-palette='sky']:not([data-theme='light']) {
+	--paper-2: #28303b;
+}
+[data-theme='dark'][data-palette='rose'],
+[data-theme='dark'] [data-palette='rose']:not([data-theme='light']) {
+	--paper-2: #322a33;
+}
+
+/* ---------- derived + semantic aliases (recomputed wherever theme/palette is set) ---------- */
+:root,
+[data-theme],
+[data-palette] {
+	--print-shadow: 2px 2px 0 var(--print-color);
+	--print-shadow-spot: 3px 3px 0 var(--spot-now);
+
+	/* semantic names used by components */
+	--bg: var(--paper);
+	--surface: var(--paper-2);
+	--surface-2: var(--paper-3);
+	--surface-3: var(--paper-4);
+	--border: var(--rule);
+	--border-strong: var(--rule-strong);
+	--text: var(--ink);
+	--muted: var(--ink-soft);
+	--accent: var(--spot-select);
+	--primary: var(--ink);
+	--primary-fg: var(--paper);
+	--ring: var(--ink);
+	/* charts: ink strokes over spot fills */
+	--series-a: var(--ink);
+	--series-a-fill: var(--spot-chart);
+	--series-b-fill: var(--spot-rose);
+}
