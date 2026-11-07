@@ -18,9 +18,47 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/tags` | `category` (`tech` or `life`; none = all) | `TagCount[]` (visible posts of that category) |
 | POST | `/contact` | `ContactInput` | `201 { ok: true }`; 422 `validation` with message; 429 `rate_limited` (5/hour/IP) |
 | POST | `/events` | `BeaconEvent` (text/plain or JSON, max 2 KB) | `202` empty |
-| GET | `/listening/now-playing` | – | `NowPlaying \| null` (cached 5 s) |
+| GET | `/listening/now-playing` | – | `NowPlaying \| null` (cached 5 s; served from the stream hub's snapshot while it is live). Polling fallback for the stream below |
+| GET | `/listening/now-playing/stream` | – | Server-Sent Events, see below |
 | GET | `/listening/recent` | `limit` (1–20, default 6) | `RecentPlay[]` (cached 60 s) |
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
+| GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
+
+### Now-playing stream — `GET /api/v1/listening/now-playing/stream`
+
+`text/event-stream` (`Cache-Control: no-store`, `X-Accel-Buffering: no`). Not an
+envelope: each event's `data` is a bare `NowPlaying` JSON object or `null`.
+
+```
+retry: 5000
+
+event: now-playing
+data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
+
+: keep-alive
+```
+
+- The current snapshot is sent right after connecting, then one `now-playing`
+  event per change; `: keep-alive` comments every 25 s. While the upstream is
+  reconnecting, a new client gets no stale snapshot: its first event is the one the
+  reconnect brings.
+- The API keeps **one** upstream connection to spotify-tracker
+  (`SPOTIFY_API_URL` + `/api/v1/now-playing/stream`) for all clients, opened on
+  the first subscriber and closed 60 s after the last one leaves. It reconnects with
+  exponential backoff and jitter (1 s → 30 s) and after 70 s without any data.
+- A slow client only misses intermediate updates; it always gets the latest.
+- At most 500 concurrent streams: above that `503 too_many_streams` with `Retry-After`.
+  At most 8 per client IP (IPv6 /64): above that `429 too_many_streams` with
+  `Retry-After`. Either way the site falls back to polling.
+- Mounted under `/api/v1` with the public rate limit but without the 20 s request
+  timeout. The handler clears the server's 2 min read deadline and gives each write
+  its own 30 s deadline, so a client that stops reading is dropped.
+- `SPOTIFY_API_URL` unset: one `now-playing` event with `null`, then keep-alives only.
+- The site (`web/src/lib/site/listening.svelte.ts`) uses one `EventSource` per page.
+  It falls back to polling `/listening/now-playing` every 15 s when EventSource is
+  missing, when the browser gives up on the stream (e.g. a 429/503), after 3 errors
+  within a minute, or with no event 15 s after opening, and it
+  retries the stream every 5 min. The stream closes after the tab has been hidden for 60 s.
 
 ## Admin — `/api/admin` (Bearer Clerk session token)
 

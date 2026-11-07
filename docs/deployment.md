@@ -192,6 +192,21 @@ Cloudflare SSL mode should be *Full (strict)*: Traefik serves a Let's Encrypt
 certificate. If you proxy through Cloudflare, Let's Encrypt's HTTP challenge
 still works through the proxy.
 
+### Server-Sent Events through Cloudflare
+
+`/api/v1/listening/now-playing/stream` is a long-lived SSE response. It works
+through the Cloudflare proxy as is: Cloudflare does not buffer `text/event-stream`,
+and the stream sends a `: keep-alive` comment every 25 s, well under Cloudflare's
+100 s idle timeout (a proxied connection with no bytes for 100 s gets a 524). Keep it
+that way: do not add a Cache Rule that caches `/api/*`, and a Worker placed in front
+of the site would have to stream the body rather than buffer it. Traefik does not buffer
+responses by default; `X-Accel-Buffering: no` covers an nginx in the path. The
+SvelteKit proxy (`hooks.server.ts`) streams the body through and aborts the upstream
+request when the browser disconnects. The API allows 8 streams per client IP, so it relies on
+the real client IP reaching it (`X-Client-IP` from the web server, with
+`INTERNAL_API_TOKEN` set); if every request showed the proxy's IP, all visitors would
+share those 8 and the rest would fall back to polling.
+
 ## Inbound email (Cloudflare Email Worker)
 
 Visitor replies go to `reply+<token>@reply.example.com`. Cloudflare Email

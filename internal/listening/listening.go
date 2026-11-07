@@ -1,8 +1,11 @@
 // Package listening proxies the spotify-tracker public API (now playing,
-// recent plays, top artists), trimmed to the types.ts shapes and cached.
+// recent plays, top artists, top playlists), trimmed to the types.ts shapes and
+// cached, and relays the upstream now-playing SSE stream through one shared
+// connection.
 package listening
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -20,6 +23,9 @@ type Deps struct {
 	BaseURL string
 	Log     *slog.Logger
 	HTTP    *http.Client
+	// StreamHTTP is used for the long-lived upstream SSE connection; it must
+	// not have an overall timeout. Default: dial/TLS/header timeouts only.
+	StreamHTTP *http.Client
 }
 
 // Module implements httpapi.Module for /listening/*.
@@ -28,6 +34,13 @@ type Module struct {
 	log   *slog.Logger
 	http  *http.Client
 	cache *cache
+
+	hub                 *hub // nil when BaseURL is empty
+	streams             streamSlots
+	maxStreams          int
+	maxStreamsPerClient int
+	keepAlive           time.Duration
+	writeTimeout        time.Duration
 }
 
 // New returns the listening module. An empty BaseURL serves empty results.
@@ -38,7 +51,13 @@ func New(d Deps) *Module {
 	if d.HTTP == nil {
 		d.HTTP = &http.Client{Timeout: 5 * time.Second}
 	}
-	return &Module{base: strings.TrimRight(d.BaseURL, "/"), log: d.Log, http: d.HTTP, cache: newCache(time.Now)}
+	m := &Module{base: strings.TrimRight(d.BaseURL, "/"), log: d.Log, http: d.HTTP, cache: newCache(time.Now),
+		maxStreams: maxStreams, maxStreamsPerClient: maxStreamsPerClient,
+		keepAlive: streamKeepAlive, writeTimeout: streamWriteTimeout}
+	if m.base != "" {
+		m.hub = newHub(m.base, d.StreamHTTP, d.Log)
+	}
+	return m
 }
 
 // Artist is types.ts SpotifyArtist.
@@ -104,11 +123,15 @@ func (m *Module) Public(r chi.Router) {
 		empty := func(w http.ResponseWriter, _ *http.Request) { httpapi.JSON(w, http.StatusOK, []any{}) }
 		r.Get("/listening/recent", empty)
 		r.Get("/listening/top-artists", empty)
+		r.Get("/listening/top-playlists", func(w http.ResponseWriter, _ *http.Request) {
+			httpapi.JSON(w, http.StatusOK, emptyTopPlaylists())
+		})
 		return
 	}
 	r.Get("/listening/now-playing", m.nowPlaying)
 	r.Get("/listening/recent", m.recent)
 	r.Get("/listening/top-artists", m.topArtists)
+	r.Get("/listening/top-playlists", m.topPlaylists)
 }
 
 // Admin implements httpapi.Module (no admin routes).
@@ -124,6 +147,12 @@ const (
 )
 
 func (m *Module) nowPlaying(w http.ResponseWriter, r *http.Request) {
+	// While the upstream stream is live its cached snapshot is always current.
+	if b, ok := m.hub.snapshot(); ok {
+		w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(int(ttlNow/time.Second)))
+		httpapi.JSON(w, http.StatusOK, json.RawMessage(b))
+		return
+	}
 	m.serve(w, r, "/api/v1/now-playing", ttlNow, func(raw []byte) (any, error) {
 		var v *NowPlaying
 		if err := decodeData(raw, &v); err != nil {

@@ -127,6 +127,20 @@ func fakeSpotifyTracker(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"data":[{"id":"h1","played_at":"2026-11-07T09:00:00+07:00","replay_count":1,"track":` + track + `}],"next_cursor":"c"}`))
 		case "/api/v1/stats/top-artists":
 			_, _ = w.Write([]byte(`{"data":[{"artist":{"id":"ar1","name":"Artist","uri":"u","image_url":"https://i.scdn.co/a.jpg"},"plays":42,"last_played":"2026-11-06T00:00:00Z"}]}`))
+		case "/api/v1/playlists/top":
+			entry := func(period, id, start, end, label, tracks string) string {
+				return `{"period":"` + period + `","period_start":"` + start + `","period_end":"` + end + `","time_zone":"UTC",
+					"label":"` + label + `","name":"Top 50 · ` + label + `","spotify_id":"` + id + `",
+					"spotify_url":"https://open.spotify.com/playlist/` + id + `","track_count":50,"total_plays":120,
+					"published_at":"2026-11-03T08:00:00+07:00","snapshot_id":"snap","tracks":` + tracks + `}`
+			}
+			week := entry("week", "plWeek1", "2026-11-02T00:00:00Z", "2026-11-09T00:00:00Z", "Week of Nov 2, 2026",
+				`[{"position":1,"plays":12,"added_at":"x","track":`+track+`}]`)
+			older := entry("week", "plWeek0", "2026-10-26T00:00:00Z", "2026-11-02T00:00:00Z", "Week of Oct 26, 2026", `[]`)
+			invalid := entry("week", "bad-id", "2026-10-19T00:00:00Z", "2026-10-26T00:00:00Z", "Week of Oct 19, 2026", `[]`)
+			month := entry("month", "plMonth1", "2026-11-01T00:00:00Z", "2026-12-01T00:00:00Z", "November 2026", `[]`)
+			_, _ = w.Write([]byte(`{"data":{"time_zone":"UTC","extra":1,"periods":{"week":[` + week + `,` + older + `,` + invalid +
+				`],"month":[` + month + `],"year":[]}}}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

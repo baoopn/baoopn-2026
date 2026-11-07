@@ -2,12 +2,25 @@ import { createSubscriber } from 'svelte/reactivity';
 import { api } from '#lib/api/client.js';
 import type { NowPlaying } from '#lib/api/types.js';
 
+const STREAM_URL = '/api/v1/listening/now-playing/stream';
 const POLL_MS = 15_000;
+/** No event this long after opening the stream: fall back to polling. */
+const FIRST_EVENT_MS = 15_000;
+/** This many stream errors within ERROR_WINDOW_MS: fall back to polling. */
+const MAX_ERRORS = 3;
+const ERROR_WINDOW_MS = 60_000;
+/** While polling as a fallback, try the stream again this often. */
+const SSE_RETRY_MS = 5 * 60_000;
+/** Hidden this long: close the stream / stop polling until visible again. */
+const HIDDEN_PAUSE_MS = 60_000;
 
 /**
- * Shared now-playing state (header chip + home section). Polls
- * /listening/now-playing every 15 s, only while something reads `now` and the
- * tab is visible. Can be seeded from SSR data.
+ * Shared now-playing state (header chip + home section). Follows the
+ * Server-Sent Events stream at /listening/now-playing/stream, one connection
+ * per page however many components read `now`, and only while something does.
+ * Falls back to polling /listening/now-playing every 15 s when EventSource is
+ * missing or the stream misbehaves, and retries the stream every 5 min.
+ * Pauses after the tab has been hidden for a minute. Can be seeded from SSR data.
  */
 class Listening {
 	current = $state<NowPlaying | null>(null);
@@ -17,29 +30,111 @@ class Listening {
 	failed = $state(false);
 
 	#subscribe = createSubscriber(() => {
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		let stopped = false;
-		const tick = async () => {
-			if (stopped) return;
-			if (document.visibilityState === 'visible') await this.refresh();
-			if (!stopped) timer = setTimeout(tick, POLL_MS);
+		let es: EventSource | null = null;
+		let errors: number[] = [];
+		let firstEventTimer: ReturnType<typeof setTimeout> | undefined;
+		let pollTimer: ReturnType<typeof setTimeout> | undefined;
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
+		let hiddenTimer: ReturnType<typeof setTimeout> | undefined;
+		let polling = false;
+		let paused = false;
+		const sseSupported = typeof EventSource !== 'undefined';
+
+		const closeStream = () => {
+			clearTimeout(firstEventTimer);
+			es?.close();
+			es = null;
 		};
-		const onVisibility = () => {
-			if (document.visibilityState === 'visible') {
-				clearTimeout(timer);
-				void tick();
+
+		const stopPolling = () => {
+			polling = false;
+			clearTimeout(pollTimer);
+			clearTimeout(retryTimer);
+		};
+
+		const poll = async () => {
+			if (!polling) return;
+			if (document.visibilityState === 'visible') await this.refresh();
+			if (polling) pollTimer = setTimeout(poll, POLL_MS);
+		};
+
+		const startPolling = () => {
+			closeStream();
+			if (polling) return;
+			polling = true;
+			pollTimer = setTimeout(poll, 0);
+			if (sseSupported) {
+				retryTimer = setTimeout(() => {
+					stopPolling();
+					openStream();
+				}, SSE_RETRY_MS);
 			}
 		};
-		timer = setTimeout(tick, this.loaded ? POLL_MS : 0);
+
+		const openStream = () => {
+			closeStream();
+			errors = [];
+			const source = new EventSource(STREAM_URL);
+			es = source;
+			firstEventTimer = setTimeout(startPolling, FIRST_EVENT_MS);
+			source.addEventListener('now-playing', (e) => {
+				clearTimeout(firstEventTimer);
+				try {
+					this.set(JSON.parse((e as MessageEvent<string>).data) as NowPlaying | null);
+				} catch {
+					// A malformed event is ignored; the next one replaces it.
+				}
+			});
+			source.addEventListener('error', () => {
+				if (es !== source) return;
+				const now = Date.now();
+				errors = [...errors.filter((t) => now - t < ERROR_WINDOW_MS), now];
+				// CLOSED: the browser gave up (e.g. a 503 or a non-stream reply).
+				if (source.readyState === EventSource.CLOSED || errors.length >= MAX_ERRORS) {
+					startPolling();
+				}
+			});
+		};
+
+		const start = () => {
+			paused = false;
+			if (sseSupported) openStream();
+			else startPolling();
+		};
+
+		const pause = () => {
+			paused = true;
+			closeStream();
+			stopPolling();
+		};
+
+		const onVisibility = () => {
+			clearTimeout(hiddenTimer);
+			if (document.visibilityState === 'hidden') {
+				hiddenTimer = setTimeout(pause, HIDDEN_PAUSE_MS);
+			} else if (paused) {
+				start();
+			} else if (polling) {
+				// Catch up right away instead of waiting for the next tick.
+				clearTimeout(pollTimer);
+				void poll();
+			}
+		};
+
+		start();
+		// Opened in a background tab: no visibilitychange fires until it is
+		// shown, so start the hidden countdown now.
+		if (document.visibilityState === 'hidden') hiddenTimer = setTimeout(pause, HIDDEN_PAUSE_MS);
 		document.addEventListener('visibilitychange', onVisibility);
 		return () => {
-			stopped = true;
-			clearTimeout(timer);
+			clearTimeout(hiddenTimer);
+			closeStream();
+			stopPolling();
 			document.removeEventListener('visibilitychange', onVisibility);
 		};
 	});
 
-	/** Reading this (in an effect/template) keeps the poller running. */
+	/** Reading this (in an effect/template) keeps the stream (or poller) running. */
 	get now(): NowPlaying | null {
 		this.#subscribe();
 		return this.current;

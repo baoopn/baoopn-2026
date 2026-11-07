@@ -42,6 +42,32 @@ export function yearMonth(v: string | undefined): string {
 	return monthYear.format(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1)));
 }
 
+const RANGE_OPTS: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' };
+
+/**
+ * Half-open period [start, end) as a calendar range in `timeZone`
+ * ("Nov 2 – 8, 2026"). The last instant shown is end − 1 ms. An unknown zone
+ * falls back to UTC.
+ */
+export function periodRange(start: string, end: string, timeZone: string): string {
+	const s = toDate(start);
+	const e = toDate(end);
+	if (!s || !e) return '';
+	const last = new Date(Math.max(s.getTime(), e.getTime() - 1));
+	let fmt: Intl.DateTimeFormat;
+	try {
+		fmt = new Intl.DateTimeFormat('en', { ...RANGE_OPTS, timeZone });
+	} catch {
+		fmt = new Intl.DateTimeFormat('en', { ...RANGE_OPTS, timeZone: 'UTC' });
+	}
+	return fmt.formatRange(s, last);
+}
+
+/** "1 track", "12 tracks". */
+export function plural(n: number, one: string, many = `${one}s`): string {
+	return `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
+}
+
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'short' });
 
 export function relative(v: string | null | undefined, now: number = Date.now()): string {
