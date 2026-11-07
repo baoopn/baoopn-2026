@@ -264,9 +264,9 @@
 			width: 100%;
 			max-width: 15rem;
 			position: sticky;
-			top: 1.5rem;
+			top: calc(var(--header-h) + 1.5rem);
 			align-self: start;
-			max-height: calc(100dvh - 3rem);
+			max-height: calc(100dvh - var(--header-h) - 3rem);
 			overflow-y: auto;
 		}
 		.parts {

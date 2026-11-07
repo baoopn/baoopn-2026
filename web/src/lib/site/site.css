@@ -35,6 +35,19 @@
 	--code-hl-bg: #3d384c;
 }
 
+/* Sticky site header (Header.svelte). 44px brand row + 2*12px padding + 1px rule. */
+:root {
+	--header-h: 4.3125rem;
+}
+html {
+	scroll-padding-top: calc(var(--header-h) + 1rem);
+}
+@media print {
+	header {
+		position: static;
+	}
+}
+
 @layer components {
 	/* ---------- prose ---------- */
 	.prose {
@@ -54,7 +67,6 @@
 		font-weight: 600;
 		letter-spacing: -0.015em;
 		line-height: 1.2;
-		scroll-margin-top: 6rem;
 		text-wrap: balance;
 	}
 	.prose h2 {
@@ -425,6 +437,10 @@
 /* Page cross-fade (View Transitions, started in routes/(site)/+layout.svelte). */
 ::view-transition-old(root),
 ::view-transition-new(root) {
+	animation-duration: var(--motion-base);
+	animation-timing-function: var(--ease-soft);
+}
+::view-transition-group(site-header) {
 	animation-duration: var(--motion-base);
 	animation-timing-function: var(--ease-soft);
 }
