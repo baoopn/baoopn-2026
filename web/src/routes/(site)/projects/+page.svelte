@@ -3,6 +3,7 @@
 	import Seo from '#lib/site/components/Seo.svelte';
 	import ProjectCard from '#lib/site/components/ProjectCard.svelte';
 	import { pad2 } from '#lib/site/format.js';
+	import { fadeSoft, reveal } from '#lib/site/motion.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -77,7 +78,7 @@
 	{:else}
 		<ul class="mt-10 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3">
 			{#each shown as project, i (project.slug)}
-				<li><ProjectCard {project} index={i} /></li>
+				<li in:fadeSoft data-reveal {@attach reveal()}><ProjectCard {project} index={i} /></li>
 			{/each}
 		</ul>
 	{/if}

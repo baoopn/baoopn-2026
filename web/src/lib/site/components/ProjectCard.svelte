@@ -2,6 +2,7 @@
 	import Star from '@lucide/svelte/icons/star';
 	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
 	import SocialIcon from './SocialIcon.svelte';
+	import { imgIn } from '#lib/site/motion.js';
 	import { count, safeImage, safeUrl, spotFor } from '#lib/site/format.js';
 	import type { ProjectSummary } from '#lib/api/types.js';
 
@@ -30,7 +31,12 @@
 </script>
 
 <article class="card group">
-	<a href="/projects/{project.slug}" class="block rounded-brand" tabindex="-1" aria-hidden="true">
+	<a
+		href="/projects/{project.slug}"
+		class="sleeve relative isolate block rounded-brand"
+		tabindex="-1"
+		aria-hidden="true"
+	>
 		{#if showCover}
 			<img
 				src={cover}
@@ -40,6 +46,8 @@
 				loading="lazy"
 				decoding="async"
 				class="cover aspect-[8/5] w-full rounded-brand border border-ink bg-paper-2 object-cover"
+				data-img-in
+				{@attach imgIn()}
 				onerror={() => (coverFailed = cover)}
 			/>
 		{:else}
@@ -55,7 +63,9 @@
 						height="200"
 						loading="lazy"
 						decoding="async"
-						class="absolute inset-0 m-auto h-[56%] w-[72%] object-contain"
+						class="logo absolute inset-0 m-auto h-[56%] w-[72%] object-contain"
+						data-img-in
+						{@attach imgIn()}
 						onerror={() => (logoFailed = logo)}
 					/>
 				{:else}
@@ -126,15 +136,38 @@
 </article>
 
 <style>
-	.cover {
+	/* Hover lift: the cover rises and a flat print offset (a pseudo layer, so only
+	   transform and opacity move) shows behind it. Same look as a 4px offset shadow. */
+	.sleeve::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		z-index: -1;
+		border-radius: inherit;
+		background: var(--print-color);
+		opacity: 0;
 		transition:
-			transform 180ms ease-out,
-			box-shadow 180ms ease-out;
+			transform var(--motion-base) var(--ease-soft),
+			opacity var(--motion-base) var(--ease-soft);
+	}
+	.cover,
+	.logo {
+		transition:
+			transform var(--motion-base) var(--ease-soft),
+			opacity var(--motion-base) var(--ease-soft);
+	}
+	.card:hover .sleeve::before,
+	.card:focus-within .sleeve::before {
+		opacity: 1;
+		transform: translate(var(--lift), var(--lift));
 	}
 	.card:hover .cover,
 	.card:focus-within .cover {
-		transform: translate(-2px, -2px);
-		box-shadow: 4px 4px 0 var(--print-color);
+		transform: translate(calc(-1 * var(--lift)), calc(-1 * var(--lift)));
+	}
+	.card:hover .logo,
+	.card:focus-within .logo {
+		transform: scale(1.03);
 	}
 	.iconlink {
 		display: grid;
@@ -143,7 +176,7 @@
 		height: 2.75rem;
 		border-radius: 999px;
 		color: var(--ink);
-		transition: background-color 160ms ease-out;
+		transition: background-color var(--motion-fast) var(--ease-soft);
 	}
 	.iconlink:hover {
 		background: var(--paper-2);

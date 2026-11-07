@@ -112,7 +112,7 @@
 		text-decoration-color: transparent;
 		text-decoration-thickness: 1px;
 		text-underline-offset: 0.2em;
-		transition: text-decoration-color 180ms ease-out;
+		transition: text-decoration-color var(--motion-fast) var(--ease-soft);
 	}
 	.link:hover {
 		text-decoration-color: currentColor;
@@ -138,9 +138,9 @@
 		line-height: 1.2;
 		white-space: nowrap;
 		transition:
-			transform 160ms ease-out,
-			box-shadow 160ms ease-out,
-			background-color 160ms ease-out;
+			transform var(--motion-fast) var(--ease-soft),
+			box-shadow var(--motion-fast) var(--ease-soft),
+			background-color var(--motion-fast) var(--ease-soft);
 	}
 	.btn:active {
 		transform: translate(2px, 2px);

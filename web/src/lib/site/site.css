@@ -395,3 +395,43 @@
 		box-shadow: none;
 	}
 }
+
+/* ---------- motion (lib/site/motion.ts; tokens in tokens.css) ---------- */
+@layer components {
+	@media (prefers-reduced-motion: no-preference) {
+		/* Scroll reveal: only elements off-screen at hydration get .reveal-pending. */
+		[data-reveal] {
+			transition:
+				opacity var(--motion-slow) var(--ease-soft) var(--reveal-delay, 0ms),
+				transform var(--motion-slow) var(--ease-soft) var(--reveal-delay, 0ms);
+		}
+		[data-reveal].reveal-pending {
+			opacity: 0;
+			transform: translateY(var(--rise));
+		}
+		/* Lazy logos and covers fade in once loaded. */
+		img[data-img-in] {
+			transition:
+				opacity var(--motion-base) var(--ease-soft),
+				transform var(--motion-base) var(--ease-soft);
+		}
+		img.img-pending {
+			opacity: 0;
+			transform: scale(0.96);
+		}
+	}
+}
+
+/* Page cross-fade (View Transitions, started in routes/(site)/+layout.svelte). */
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation-duration: var(--motion-base);
+	animation-timing-function: var(--ease-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none;
+	}
+}

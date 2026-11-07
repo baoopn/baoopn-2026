@@ -11,6 +11,8 @@
  *   --spot-now / --spot-select / --spot-chart  which spot leads (set per palette;
  *                 palettes also tint --paper-2).
  *   --baoopn-* / --brand*  logo, favicon and the small brand badge ONLY.
+ *   --motion-* / --ease-*  durations and easings ("soft": short, gentle ease-out);
+ *                 --rise / --lift are the reveal and hover distances (0 under reduced motion).
  *   --logo-plate-dark  the navy plate behind light project logos (logo_bg='ink').
  *
  * Usage: <html data-palette="baoopn|lavender|mint|peach|sky|rose" data-theme="light|dark">
@@ -191,4 +193,22 @@
 	--series-a: var(--ink);
 	--series-a-fill: var(--spot-chart);
 	--series-b-fill: var(--spot-rose);
+}
+
+/* ---------- motion ("soft": short, gentle ease-out, small distances) ---------- */
+:root {
+	--motion-fast: 180ms; /* hover, colour, press */
+	--motion-base: 260ms; /* lift, chip state, page cross-fade, logo in */
+	--motion-slow: 420ms; /* reveal, hero intro */
+	--motion-stagger: 60ms;
+	--ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-soft-inout: cubic-bezier(0.65, 0, 0.35, 1); /* loops */
+	--rise: 8px; /* reveal distance */
+	--lift: 2px; /* hover lift */
+}
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--rise: 0px;
+		--lift: 0px;
+	}
 }
