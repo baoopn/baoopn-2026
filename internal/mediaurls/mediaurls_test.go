@@ -63,7 +63,7 @@ func TestRewriteDB(t *testing.T) {
 	q(`INSERT INTO posts (id, slug, title, cover_url) VALUES (1, 'p', 'P', $1), (2, 'q', 'Q', 'https://x.test/a.png')`, ref)
 	q(`INSERT INTO post_parts (post_id, part_no, content_md, content_html) VALUES
 		(1, 1, $1, 'old'), (2, 1, 'no media here', 'keep')`, "## Shot\n\n![shot]("+ref+")\n")
-	q(`INSERT INTO projects (slug, title, cover_url, body_md, body_html) VALUES ('x', 'X', $1, $2, 'old')`,
+	q(`INSERT INTO projects (slug, title, cover_url, logo_url, body_md, body_html) VALUES ('x', 'X', $1, $1, $2, 'old')`,
 		ref, "Body ![b]("+ref+")")
 	p := profile.Profile{Name: "Bao", AvatarURL: ref, CoverURL: ref, ResumeURL: "/media/0123456789abcdef01234567.pdf",
 		BioMD: "Hi ![me](" + ref + ")", SEO: profile.SEO{OGImage: ref},
@@ -76,7 +76,7 @@ func TestRewriteDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Parts != 1 || st.Posts != 1 || st.Projects != 2 || !st.Profile {
+	if st.Parts != 1 || st.Posts != 1 || st.Projects != 3 || !st.Profile {
 		t.Fatalf("stats %+v", st)
 	}
 	want := pub + "/" + file
@@ -91,10 +91,10 @@ func TestRewriteDB(t *testing.T) {
 	if keep != "keep" {
 		t.Fatal("untouched part re-rendered")
 	}
-	var pcover, pbody string
-	_ = pool.QueryRow(ctx, `SELECT cover_url, body_html FROM projects`).Scan(&pcover, &pbody)
-	if pcover != want || !strings.Contains(pbody, want) {
-		t.Fatalf("project: %q %q", pcover, pbody)
+	var pcover, plogo, pbody string
+	_ = pool.QueryRow(ctx, `SELECT cover_url, logo_url, body_html FROM projects`).Scan(&pcover, &plogo, &pbody)
+	if pcover != want || plogo != want || !strings.Contains(pbody, want) {
+		t.Fatalf("project: %q %q %q", pcover, plogo, pbody)
 	}
 	var got profile.Profile
 	_, _ = settings.Get(ctx, pool, profile.SettingsKey, &got)

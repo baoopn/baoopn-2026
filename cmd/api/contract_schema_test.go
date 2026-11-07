@@ -170,7 +170,7 @@ var (
 
 	projectSummaryFields = fields{
 		"slug": str, "title": str, "summary": str, "tech": arr(str), "period": str, "cover_url": str,
-		"demo_url": str, "repo_url": str, "language": str, "stars": num, "forks": num,
+		"logo_url": str, "logo_bg": enum("tile", "ink"), "demo_url": str, "repo_url": str, "language": str, "stars": num, "forks": num,
 		"archived": boolean, "featured": boolean, "pushed_at": null(ts), "post_slug": str,
 	}
 	projectSummary = obj(projectSummaryFields)
@@ -184,8 +184,8 @@ var (
 		"gh_topics": arr(str), "gh_stars": num, "gh_forks": num, "gh_archived": boolean,
 		"gh_fork": boolean, "gh_private": boolean, "gh_pushed_at": null(ts), "synced_at": null(ts),
 		"title": str, "summary": str, "body_md": str, "tech": arr(str), "period": str,
-		"cover_url": str, "demo_url": str, "post_slug": str, "visible": boolean, "featured": boolean,
-		"sort_order": num, "views_30d": num, "created_at": ts, "updated_at": ts,
+		"cover_url": str, "logo_url": str, "logo_bg": enum("tile", "ink"), "demo_url": str, "post_slug": str,
+		"visible": boolean, "featured": boolean, "sort_order": num, "views_30d": num, "created_at": ts, "updated_at": ts,
 	})
 	syncResult = obj(fields{"added": num, "updated": num, "total": num, "synced_at": ts})
 

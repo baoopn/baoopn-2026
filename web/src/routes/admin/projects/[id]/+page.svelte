@@ -2,11 +2,12 @@
 	import { ArrowLeft, ExternalLink, LoaderCircle, Save, Trash2 } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import type { AdminPost, AdminProject, ProjectPatch } from '#lib/api/types.js';
+	import type { AdminPost, AdminProject, ProjectLogoBg, ProjectPatch } from '#lib/api/types.js';
 	import MarkdownEditor from '#lib/admin/editor/MarkdownEditor.svelte';
 	import ChipInput from '#lib/admin/components/ChipInput.svelte';
 	import MediaField from '#lib/admin/components/MediaField.svelte';
 	import Switch from '#lib/admin/components/Switch.svelte';
+	import Segmented from '#lib/admin/components/Segmented.svelte';
 	import ErrorState from '#lib/admin/components/ErrorState.svelte';
 	import ConfirmDialog from '#lib/admin/components/ConfirmDialog.svelte';
 	import GithubPanel from '#lib/admin/projects/GithubPanel.svelte';
@@ -25,6 +26,8 @@
 		'tech',
 		'period',
 		'cover_url',
+		'logo_url',
+		'logo_bg',
 		'demo_url',
 		'post_slug',
 		'visible',
@@ -41,6 +44,8 @@
 			tech: [...p.tech],
 			period: p.period,
 			cover_url: p.cover_url,
+			logo_url: p.logo_url,
+			logo_bg: p.logo_bg,
 			demo_url: p.demo_url,
 			post_slug: p.post_slug,
 			visible: p.visible,
@@ -48,6 +53,11 @@
 			sort_order: p.sort_order
 		};
 	}
+
+	const logoBgOptions: { value: ProjectLogoBg; label: string }[] = [
+		{ value: 'tile', label: 'Tile color' },
+		{ value: 'ink', label: 'Dark' }
+	];
 
 	const pid = $derived(page.params.id ?? '');
 	let project = $state.raw<AdminProject | null>(null);
@@ -320,6 +330,20 @@
 				<input id="pj-order" class="input" type="number" step="1" bind:value={form.sort_order} />
 			</div>
 			<MediaField id="pj-cover" label="Cover image" aspect="16:9" bind:value={form.cover_url} />
+			<MediaField
+				id="pj-logo"
+				label="Logo"
+				aspect="free"
+				fit="contain"
+				hint="SVG or transparent PNG. Shown on the tile and banner when there is no cover."
+				bind:value={form.logo_url}
+			/>
+			{#if form.logo_url}
+				<div>
+					<p class="field-label">Logo backdrop</p>
+					<Segmented options={logoBgOptions} bind:value={form.logo_bg} label="Logo backdrop" size="sm" />
+				</div>
+			{/if}
 			<div>
 				<label class="field-label" for="pj-post">Related post</label>
 				<select id="pj-post" class="input" bind:value={form.post_slug}>

@@ -71,6 +71,8 @@ type project struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	GHDefaultBranch string
+	LogoURL         string
+	LogoBG          string
 }
 
 // ProjectSummary is the public list item (types.ts ProjectSummary).
@@ -81,6 +83,8 @@ type ProjectSummary struct {
 	Tech     []string   `json:"tech"`
 	Period   string     `json:"period"`
 	CoverURL string     `json:"cover_url"`
+	LogoURL  string     `json:"logo_url"`
+	LogoBG   string     `json:"logo_bg"`
 	DemoURL  string     `json:"demo_url"`
 	RepoURL  string     `json:"repo_url"`
 	Language string     `json:"language"`
@@ -127,6 +131,8 @@ type AdminProject struct {
 	Tech          []string         `json:"tech"`
 	Period        string           `json:"period"`
 	CoverURL      string           `json:"cover_url"`
+	LogoURL       string           `json:"logo_url"`
+	LogoBG        string           `json:"logo_bg"`
 	DemoURL       string           `json:"demo_url"`
 	PostSlug      string           `json:"post_slug"`
 	Visible       bool             `json:"visible"`
@@ -173,7 +179,7 @@ func (p *project) summary() ProjectSummary {
 	}
 	return ProjectSummary{
 		Slug: p.Slug, Title: p.Title, Summary: sum, Tech: tech, Period: p.Period, CoverURL: p.CoverURL,
-		DemoURL: demo, RepoURL: p.RepoURL, Language: p.GHLanguage, Stars: p.GHStars, Forks: p.GHForks,
+		LogoURL: p.LogoURL, LogoBG: p.LogoBG, DemoURL: demo, RepoURL: p.RepoURL, Language: p.GHLanguage, Stars: p.GHStars, Forks: p.GHForks,
 		Archived: p.GHArchived, Featured: p.Featured, PushedAt: utc(p.GHPushedAt), PostSlug: p.PostSlug,
 	}
 }
@@ -206,7 +212,7 @@ func (p *project) admin(views int64) AdminProject {
 		GHTopics: orEmpty(p.GHTopics), GHStars: p.GHStars, GHForks: p.GHForks, GHArchived: p.GHArchived,
 		GHFork: p.GHFork, GHPrivate: p.GHPrivate, GHPushedAt: utc(p.GHPushedAt), SyncedAt: utc(p.SyncedAt),
 		Title: p.Title, Summary: p.Summary, BodyMD: p.BodyMD, Tech: orEmpty(p.Tech), Period: p.Period,
-		CoverURL: p.CoverURL, DemoURL: p.DemoURL, PostSlug: p.PostSlug, Visible: p.Visible, Featured: p.Featured,
+		CoverURL: p.CoverURL, LogoURL: p.LogoURL, LogoBG: p.LogoBG, DemoURL: p.DemoURL, PostSlug: p.PostSlug, Visible: p.Visible, Featured: p.Featured,
 		SortOrder: p.SortOrder, Views30d: views, CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC(),
 	}
 }

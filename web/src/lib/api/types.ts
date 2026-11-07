@@ -62,6 +62,9 @@ export interface Profile {
 
 // ── Projects ────────────────────────────────────────────────────────────────
 
+/** Plate behind a project logo: the slug's pastel tile, or dark ink. Same in both themes. */
+export type ProjectLogoBg = 'tile' | 'ink';
+
 export interface ProjectSummary {
 	slug: string;
 	title: string;
@@ -69,6 +72,8 @@ export interface ProjectSummary {
 	tech: string[]; // admin tech list, else GitHub topics/language
 	period: string;
 	cover_url: string;
+	logo_url: string; // '' = none; shown when there is no cover
+	logo_bg: ProjectLogoBg;
 	demo_url: string;
 	repo_url: string;
 	language: string;
@@ -112,6 +117,8 @@ export interface AdminProject {
 	tech: string[];
 	period: string;
 	cover_url: string;
+	logo_url: string;
+	logo_bg: ProjectLogoBg;
 	demo_url: string;
 	post_slug: string;
 	visible: boolean;
@@ -133,6 +140,8 @@ export type ProjectPatch = Partial<
 		| 'tech'
 		| 'period'
 		| 'cover_url'
+		| 'logo_url'
+		| 'logo_bg'
 		| 'demo_url'
 		| 'post_slug'
 		| 'visible'

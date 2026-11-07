@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/color"
 	"os"
 	"testing"
 
@@ -178,5 +179,29 @@ func TestUndecodable(t *testing.T) {
 	}
 	if _, err := Convert([]byte("<svg/>"), "image/svg+xml", Options{}); !errors.Is(err, ErrDecode) {
 		t.Fatalf("svg: %v", err)
+	}
+}
+
+// Semi-transparent pixels keep straight (non-premultiplied) color: a white
+// logo edge at half alpha stays white, not grey. The downscale goes through
+// Fit, which yields *image.RGBA (premultiplied), the path that used to halo.
+func TestConvertKeepsStraightAlpha(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 64, 64))
+	for y := range 64 {
+		for x := 32; x < 64; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 128})
+		}
+	}
+	res, err := Convert(testimg.PNG(src), imagemeta.PNG, Options{MaxDimension: 32})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := decodeWebP(t, res)
+	if _, _, _, a := img.At(4, 16).RGBA(); a != 0 {
+		t.Fatalf("transparent pixel has alpha %d", a>>8)
+	}
+	half := color.NRGBAModel.Convert(img.At(26, 16)).(color.NRGBA)
+	if half.A < 116 || half.A > 140 || half.R < 235 || half.G < 235 || half.B < 235 {
+		t.Fatalf("half-alpha white pixel is %+v", half)
 	}
 }

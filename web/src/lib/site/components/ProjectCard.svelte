@@ -8,6 +8,7 @@
 	let { project, index }: { project: ProjectSummary; index?: number } = $props();
 
 	const cover = $derived(safeImage(project.cover_url));
+	const logo = $derived(safeImage(project.logo_url));
 	const demo = $derived(safeUrl(project.demo_url));
 	const repo = $derived(safeUrl(project.repo_url));
 	const initials = $derived(
@@ -18,12 +19,19 @@
 			.map((w) => w[0]?.toUpperCase())
 			.join('')
 	);
-	let failed = $state(false);
+	// The URL that failed to load, so a new URL gets a fresh try.
+	let coverFailed = $state<string>();
+	let logoFailed = $state<string>();
+	const showCover = $derived(!!cover && cover !== coverFailed);
+	const showLogo = $derived(!!logo && logo !== logoFailed);
+	// Ink plate for light logos; otherwise the slug's pastel tile. Both read
+	// the same in light and dark themes.
+	const ink = $derived(showLogo && project.logo_bg === 'ink');
 </script>
 
 <article class="card group">
 	<a href="/projects/{project.slug}" class="block rounded-brand" tabindex="-1" aria-hidden="true">
-		{#if cover && !failed}
+		{#if showCover}
 			<img
 				src={cover}
 				alt=""
@@ -32,19 +40,36 @@
 				loading="lazy"
 				decoding="async"
 				class="cover aspect-[8/5] w-full rounded-brand border border-ink bg-paper-2 object-cover"
-				onerror={() => (failed = true)}
+				onerror={() => (coverFailed = cover)}
 			/>
 		{:else}
 			<div
 				class="cover relative grid aspect-[8/5] w-full place-items-center overflow-hidden rounded-brand border border-ink text-on-spot"
-				style:background={spotFor(project.slug)}
+				style:background={ink ? 'var(--on-spot)' : spotFor(project.slug)}
 			>
-				<span class="font-display text-7xl font-semibold tracking-[-0.04em]">{initials}</span>
+				{#if showLogo}
+					<img
+						src={logo}
+						alt="{project.title} logo"
+						width="320"
+						height="200"
+						loading="lazy"
+						decoding="async"
+						class="absolute inset-0 m-auto h-[56%] w-[72%] object-contain"
+						onerror={() => (logoFailed = logo)}
+					/>
+				{:else}
+					<span class="font-display text-7xl font-semibold tracking-[-0.04em]">{initials}</span>
+				{/if}
 				{#if project.language}
-					<span class="label absolute bottom-3 left-3">{project.language}</span>
+					<span class={['label absolute bottom-3 left-3', ink && 'text-spot-butter']}
+						>{project.language}</span
+					>
 				{/if}
 				{#if index != null}
-					<span class="label absolute top-3 right-3">No. {String(index + 1).padStart(2, '0')}</span>
+					<span class={['label absolute top-3 right-3', ink && 'text-spot-butter']}
+						>No. {String(index + 1).padStart(2, '0')}</span
+					>
 				{/if}
 			</div>
 		{/if}
@@ -77,7 +102,7 @@
 				{count(project.stars)}<span class="sr-only"> stars</span>
 			</span>
 		{/if}
-		{#if project.language && cover}
+		{#if project.language && showCover}
 			<span class="font-mono text-ink-soft">{project.language}</span>
 		{/if}
 		{#if project.archived}

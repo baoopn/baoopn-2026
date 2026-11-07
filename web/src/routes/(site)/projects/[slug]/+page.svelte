@@ -13,6 +13,11 @@
 
 	const p = $derived(data.project);
 	const cover = $derived(safeImage(p.cover_url));
+	const logo = $derived(safeImage(p.logo_url));
+	// The URL that failed to load: the page is reused across projects, so a
+	// new URL gets a fresh try.
+	let coverFailed = $state<string>();
+	let logoFailed = $state<string>();
 	const demo = $derived(safeUrl(p.demo_url));
 	const repo = $derived(safeUrl(p.repo_url));
 
@@ -90,7 +95,7 @@
 		</div>
 	</header>
 
-	{#if cover}
+	{#if cover && cover !== coverFailed}
 		<img
 			src={cover}
 			alt=""
@@ -98,7 +103,24 @@
 			height="900"
 			fetchpriority="high"
 			class="print mt-10 aspect-[16/9] w-full rounded-brand bg-paper-2 object-cover [--print:var(--spot-now)]"
+			onerror={() => (coverFailed = cover)}
 		/>
+	{:else if logo && logo !== logoFailed}
+		<div
+			class="print relative mt-10 aspect-[8/5] w-full overflow-hidden rounded-brand sm:aspect-[16/7] [--print:var(--spot-now)]"
+			style:background={p.logo_bg === 'ink' ? 'var(--on-spot)' : spotFor(p.slug)}
+		>
+			<img
+				src={logo}
+				alt="{p.title} logo"
+				width="800"
+				height="350"
+				fetchpriority="high"
+				decoding="async"
+				class="absolute inset-0 m-auto h-1/2 w-2/3 object-contain"
+				onerror={() => (logoFailed = logo)}
+			/>
+		</div>
 	{/if}
 
 	<div class="mt-10 grid gap-12 lg:grid-cols-[minmax(0,1fr)_18rem]">
