@@ -140,7 +140,8 @@ func TestAdminLimitsAndValidation(t *testing.T) {
 		m["avatar_url"] = "javascript:alert(1)"
 		c.fail("PUT", "/api/admin/profile", m, 422, "validation")
 	}
-	c.fail("POST", "/api/admin/posts", map[string]any{"title": "x", "cover_url": "//evil.example/x.png", "status": "draft"},
+	c.fail("POST", "/api/admin/posts", map[string]any{"title": "x", "cover_url": "//evil.example/x.png", "status": "draft",
+		"parts": []map[string]string{{"title": "", "content_md": ""}}},
 		422, "validation")
 	c.fail("POST", "/api/admin/threads/1/messages", `{"body":"hi","request_id":"short"}`, 422, "validation")
 }
