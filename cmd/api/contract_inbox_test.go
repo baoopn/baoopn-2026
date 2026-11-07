@@ -230,7 +230,14 @@ func TestContractAnalyticsAndAdminMisc(t *testing.T) {
 	}
 	c.ok("GET", "/api/v1/listening/recent?limit=3", nil, 200, arr(recentPlay), false)
 	c.ok("GET", "/api/v1/listening/top-artists?range=7d&limit=5", nil, 200, arr(topArtist), false)
+	tp := c.ok("GET", "/api/v1/listening/top-playlists?limit=6", nil, 200, topPlaylists, false)
+	week := list(field(field(tp, "periods"), "week"))
+	if len(week) != 2 || field(week[0], "spotify_id") != "plWeek1" || field(week[1], "spotify_id") != "plWeek0" ||
+		len(list(field(week[0], "tracks"))) != 1 || len(list(field(week[1], "tracks"))) != 0 {
+		t.Errorf("top-playlists week = %v", week)
+	}
 	c.fail("GET", "/api/v1/listening/recent?limit=21", nil, 400, "bad_request")
+	c.fail("GET", "/api/v1/listening/top-playlists?limit=25", nil, 400, "bad_request")
 
 	c.fail("GET", "/api/v1/nope", nil, 404, "not_found")
 }
@@ -248,6 +255,11 @@ func TestContractEmptyStates(t *testing.T) {
 	c.ok("GET", "/api/admin/posts?q=nothing-here", nil, 200, arr(adminPost), false)
 	c.ok("GET", "/api/admin/analytics?range=24h", nil, 200, analyticsReport, false)
 	c.ok("GET", "/api/admin/overview", nil, 200, overviewShape, false)
+	// year: [] and older entries' tracks: [] stay arrays.
+	tp := c.ok("GET", "/api/v1/listening/top-playlists", nil, 200, topPlaylists, false)
+	if y := field(field(tp, "periods"), "year"); y == nil || len(list(y)) != 0 {
+		t.Errorf("top-playlists year = %v", y)
+	}
 	c.ok("POST", "/api/admin/posts/preview", map[string]string{"markdown": ""}, 200, previewResult, false)
 	c.ok("POST", "/api/admin/posts/preview", map[string]string{"markdown": "no headings"}, 200, previewResult, false)
 
