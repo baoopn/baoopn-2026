@@ -94,3 +94,7 @@ Coolify setup, DNS, the media bucket and the email worker.
 
 The HTTP contract is in [docs/api.md](docs/api.md), and the TypeScript types the web app uses are
 in [`web/src/lib/api/types.ts`](web/src/lib/api/types.ts).
+
+## License
+
+The code is MIT licensed; see [LICENSE](LICENSE). The blog posts, photos and profile text under `seed/` are not: they are all rights reserved.
