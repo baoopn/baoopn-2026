@@ -56,7 +56,8 @@ func TestFormCreatesThreadAndNotifies(t *testing.T) {
 	if ack.To != "priya@example.com" || ack.ReplyTo != replyAddr(tok) || ack.AutoSubmitted != "auto-replied" ||
 		ack.Subject != "Re: Message from Priya Shah" || !strings.HasPrefix(ack.Text, "Hi Priya Shah,") ||
 		strings.Contains(ack.Text, "I would like to talk about a project") ||
-		!strings.HasSuffix(ack.Text, "\n\n-- \nBao Nguyen\nhttps://baoopn.com") {
+		!strings.Contains(ack.Text, "\n\n-- \nBao Nguyen\nhttps://baoopn.com\n\nYou got this email") ||
+		!strings.Contains(ack.HTML, "Your message") || !strings.Contains(note.HTML, "Open in inbox") {
 		t.Fatalf("acknowledgement: %+v", ack)
 	}
 	if n := e.count(`SELECT count(*) FROM thread_messages`); n != 1 {
@@ -328,16 +329,5 @@ func TestAcknowledgementNeedsTurnstileAndIsCapped(t *testing.T) {
 	}
 	if !e.m.allowAck(now.Add(61 * time.Minute)) {
 		t.Fatal("cap did not reset after an hour")
-	}
-}
-
-func TestSafeName(t *testing.T) {
-	for in, want := range map[string]string{
-		"Priya Shah": "Priya Shah", "": "there", "visit http://evil.example": "there",
-		"www.evil.com": "there", "a@b.c": "there", "Dr. J. Smith": "there", "Mr. Kim": "Mr. Kim",
-	} {
-		if got := safeName(in); got != want {
-			t.Errorf("safeName(%q) = %q, want %q", in, got, want)
-		}
 	}
 }

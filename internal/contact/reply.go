@@ -168,8 +168,8 @@ func (m *Module) deliver(parent context.Context, t thread, msg ThreadMessage) Th
 		ReplyTo: m.replyTo(ctx, t.token),
 		Subject: replySubject(t.Subject),
 		Text:    text,
-		HTML:    bmail.TextToHTML(text),
 	}
+	_, out.HTML = m.render(replyDoc(m.brand(), out.Subject, msg.Body, site.Signature), text)
 	refs, err := m.threadingIDs(ctx, t.ID)
 	if err != nil {
 		m.d.Log.Warn("contact: threading ids unavailable", slog.Int64("thread_id", t.ID), logging.Err(err))
