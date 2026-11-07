@@ -211,7 +211,8 @@ var (
 	tagCount      = obj(fields{"tag": str, "count": num})
 
 	mediaShape = obj(fields{"id": num, "url": str, "filename": str, "original": str,
-		"content_type": str, "size_bytes": num, "created_at": ts})
+		"content_type": str, "size_bytes": num, "status": enum("ready", "processing", "failed"), "error": str,
+		"converted": boolean, "created_at": ts})
 
 	direction     = enum("inbound", "outbound")
 	threadSummary = obj(fields{

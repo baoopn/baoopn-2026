@@ -17,6 +17,7 @@ import (
 	"github.com/baoopn/baoopn-2026/internal/logging"
 	"github.com/baoopn/baoopn-2026/internal/mail"
 	"github.com/baoopn/baoopn-2026/internal/media"
+	"github.com/baoopn/baoopn-2026/internal/mediaurls"
 	"github.com/baoopn/baoopn-2026/internal/overview"
 	"github.com/baoopn/baoopn-2026/internal/platform/app"
 	"github.com/baoopn/baoopn-2026/internal/profile"
@@ -31,6 +32,7 @@ import (
 type modules struct {
 	list    []httpapi.Module
 	media   http.Handler // serves /media/*
+	store   *media.Store
 	rec     *analytics.Recorder
 	syncer  *projects.Syncer
 	contact *contact.Module
@@ -48,6 +50,9 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	site := sitesettings.New(sitesettings.Deps{DB: pool, Log: log, DefaultNotify: cfg.NotifyEmail, Mailer: mailer})
 
 	mediaStore, err := media.New(media.Deps{DB: pool, Log: log, Dir: cfg.MediaDir, MaxBytes: cfg.MaxUploadMB << 20,
+		MaxPixels: cfg.MediaMaxPixels, UploadWait: cfg.MediaUploadWait, JobLease: cfg.MediaJobLease,
+		MaxAttempts: cfg.MediaJobMaxAttempts, FallbackAfter: cfg.MediaFallbackAfter,
+		FailedRetention: cfg.MediaFailedRetention, OnRename: followRename(pool),
 		S3: mediaS3(cfg)})
 	if err != nil {
 		return nil, err
@@ -58,7 +63,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	if mediaStore.UsesBucket() {
 		log.Info("media stored in bucket", slog.String("bucket", cfg.S3Bucket),
 			slog.String("public_url", cfg.MediaPublicURL))
-		go migrateMedia(mediaStore, log)
+		go migrateMedia(mediaStore, pool, cfg.MediaPublicURL, log)
 	}
 
 	profileMod := profile.New(profile.Deps{DB: pool, Log: log, GitHubUser: cfg.GitHubUser,
@@ -90,6 +95,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		list: []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod,
 			contactMod, site, rec, ov},
 		media:   mediaStore.Handler(),
+		store:   mediaStore,
 		rec:     rec,
 		syncer:  syncer,
 		contact: contactMod,
@@ -102,9 +108,11 @@ func mediaS3(cfg config.Config) media.S3Config {
 		PathStyle: cfg.S3ForcePathStyle, PublicURL: cfg.MediaPublicURL}
 }
 
-// migrateMedia copies files still only in MEDIA_DIR to the bucket. It runs
-// in the background with a timeout and only logs: it never fails the boot.
-func migrateMedia(s *media.Store, log *slog.Logger) {
+// migrateMedia copies files still only in MEDIA_DIR to the bucket, then
+// (with a public media domain) rewrites stored /media/<file> links to it.
+// It runs in the background with a timeout and only logs: it never fails
+// the boot.
+func migrateMedia(s *media.Store, pool *pgxpool.Pool, publicURL string, log *slog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	st, err := s.MigrateToBucket(ctx)
@@ -112,9 +120,19 @@ func migrateMedia(s *media.Store, log *slog.Logger) {
 		slog.Int("not_on_disk", st.NoLocal), slog.Int("failed", st.Failed)}
 	if err != nil {
 		log.Warn("media migration stopped", append(attrs, logging.Err(err))...)
-		return
+	} else {
+		log.Info("media migration done", attrs...)
 	}
-	log.Info("media migration done", attrs...)
+	mediaurls.RunLegacyRewrite(ctx, pool, publicURL, log)
+}
+
+// followRename points stored references at a file the media fallback
+// published under a new name.
+func followRename(pool *pgxpool.Pool) func(ctx context.Context, oldURL, newURL string) error {
+	return func(ctx context.Context, oldURL, newURL string) error {
+		_, err := mediaurls.Rewrite(ctx, pool, mediaurls.Replace(oldURL, newURL))
+		return err
+	}
 }
 
 // adminConfig is AdminConfig in types.ts.

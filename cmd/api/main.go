@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,11 +20,15 @@ import (
 	// The distroless image has no zoneinfo; analytics loads IANA zones.
 	_ "time/tzdata"
 
+	"google.golang.org/grpc"
+
 	"github.com/baoopn/baoopn-2026/internal/auth"
 	"github.com/baoopn/baoopn-2026/internal/config"
 	"github.com/baoopn/baoopn-2026/internal/db"
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
 	"github.com/baoopn/baoopn-2026/internal/logging"
+	"github.com/baoopn/baoopn-2026/internal/media"
+	"github.com/baoopn/baoopn-2026/internal/mediagrpc"
 	"github.com/baoopn/baoopn-2026/internal/platform/app"
 )
 
@@ -95,6 +100,26 @@ func run() error {
 	if cfg.GitHubSyncInterval > 0 {
 		wg.Go(func() { mods.syncer.Run(jobCtx, cfg.GitHubSyncInterval) })
 	}
+	// Media queue upkeep: expired leases, fallbacks, original cleanup.
+	wg.Go(func() { mods.store.RunJanitor(jobCtx, media.JanitorInterval) })
+
+	// The media worker's gRPC API (private network only).
+	var grpcSrv *grpc.Server
+	if cfg.InternalToken != "" && cfg.GRPCAddr != "" {
+		lis, err := net.Listen("tcp", cfg.GRPCAddr)
+		if err != nil {
+			return fmt.Errorf("grpc listen: %w", err)
+		}
+		grpcSrv = mediagrpc.NewServer(mods.store, cfg.InternalToken, log)
+		go func() {
+			log.Info("grpc listening", slog.String("addr", cfg.GRPCAddr))
+			if err := grpcSrv.Serve(lis); err != nil {
+				log.Error("grpc server", logging.Err(err))
+			}
+		}()
+	} else {
+		log.Warn("INTERNAL_API_TOKEN is not set; the media worker API is off and uploads fall back to originals")
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -126,6 +151,9 @@ func run() error {
 		runErr = err
 	}
 	cancel()
+	if grpcSrv != nil {
+		stopGRPC(grpcSrv, 10*time.Second)
+	}
 	// Contact notifications are sent in the background; let them finish.
 	cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
 	mods.contact.Shutdown(cctx)
@@ -143,6 +171,17 @@ func waitTimeout(wg *sync.WaitGroup, d time.Duration, log *slog.Logger) {
 	case <-done:
 	case <-time.After(d):
 		log.Warn("background jobs did not stop in time")
+	}
+}
+
+// stopGRPC drains the gRPC server, forcing it closed after d.
+func stopGRPC(s *grpc.Server, d time.Duration) {
+	done := make(chan struct{})
+	go func() { s.GracefulStop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(d):
+		s.Stop()
 	}
 }
 

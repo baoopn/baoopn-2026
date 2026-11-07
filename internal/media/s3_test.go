@@ -28,6 +28,8 @@ type fakeS3 struct {
 	mu     sync.Mutex
 	objs   map[string]fakeObj
 	hosts  []string // Host header of every request
+	// failPuts makes the next PUTs answer 500 (storage outage).
+	failPuts int
 }
 
 type fakeObj struct {
@@ -66,6 +68,11 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPut:
+		if f.failPuts > 0 {
+			f.failPuts--
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if enc := r.Header.Get("Content-Encoding"); strings.Contains(enc, "aws-chunked") {
 			f.t.Errorf("unexpected aws-chunked upload")
 		}
@@ -387,4 +394,10 @@ func TestS3SaveDeleteMigrate(t *testing.T) {
 	if _, ok := fake.get(m.Filename); ok {
 		t.Fatal("object not deleted")
 	}
+}
+
+func (f *fakeS3) setFailPuts(n int) {
+	f.mu.Lock()
+	f.failPuts = n
+	f.mu.Unlock()
 }
