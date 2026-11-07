@@ -11,15 +11,9 @@
 		<span>{post.reading_minutes || 1} min read</span>
 	</div>
 	<div class="min-w-0">
-		{#if post.series}
-			<p class="-my-2">
-				<a href="/blog?series={encodeURIComponent(post.series)}" class="hit">
-					<span class="chip label [--chip:var(--spot-lilac)]">
-						Series · {post.series_title || post.series}{post.series_order
-							? ` · Pt. ${post.series_order}`
-							: ''}
-					</span>
-				</a>
+		{#if post.part_count > 1}
+			<p class="mb-1.5">
+				<span class="chip label [--chip:var(--spot-lilac)]">{post.part_count} parts</span>
 			</p>
 		{/if}
 		<h3 class={['font-display font-semibold tracking-[-0.015em] text-balance', compact ? 'text-xl' : 'text-2xl']}>

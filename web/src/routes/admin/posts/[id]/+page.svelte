@@ -2,10 +2,14 @@
 	import { ArrowLeft, ExternalLink, History, LoaderCircle, Save, Trash2 } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { api } from '#lib/api/client.js';
 	import type { AdminPost, PostInput, PreviewResult, TagCount } from '#lib/api/types.js';
 	import MarkdownEditor from '#lib/admin/editor/MarkdownEditor.svelte';
 	import PostMeta from '#lib/admin/posts/PostMeta.svelte';
+	import PostParts from '#lib/admin/posts/PostParts.svelte';
+	import { emptyPart, estimateMinutes, normalizeInput, partKey } from '#lib/admin/posts/parts.js';
+	import { partHref } from '#lib/site/post.js';
 	import StateChip from '#lib/admin/components/StateChip.svelte';
 	import ErrorState from '#lib/admin/components/ErrorState.svelte';
 	import ConfirmDialog from '#lib/admin/components/ConfirmDialog.svelte';
@@ -24,14 +28,11 @@
 			slug: '',
 			title: '',
 			excerpt: '',
-			content_md: '',
 			cover_url: '',
 			tags: [],
-			series: '',
-			series_title: '',
-			series_order: 0,
 			status: 'draft',
-			published_at: null
+			published_at: null,
+			parts: [emptyPart()]
 		};
 	}
 
@@ -40,14 +41,13 @@
 			slug: p.slug,
 			title: p.title,
 			excerpt: p.excerpt,
-			content_md: p.content_md,
 			cover_url: p.cover_url,
-			tags: [...p.tags],
-			series: p.series,
-			series_title: p.series_title,
-			series_order: p.series_order,
+			tags: [...(p.tags ?? [])],
 			status: p.status,
-			published_at: p.published_at
+			published_at: p.published_at,
+			parts: p.parts?.length
+				? p.parts.map((x) => ({ title: x.title, content_md: x.content_md }))
+				: [emptyPart()]
 		};
 	}
 
@@ -59,14 +59,36 @@
 	let slugTouched = $state(false);
 	let slugError = $state<string | null>(null);
 	let saving = $state(false);
-	let readingMinutes = $state<number | null>(null);
+	let keys = $state<number[]>([partKey()]);
+	let active = $state(0);
+	// Reading minutes known from the API, by Markdown text (saved parts + last preview).
+	const knownMinutes = new SvelteMap<string, number>();
+	let savedTexts = new SvelteSet<string>();
+	let lastPreviewed: string | null = null;
 	let restorable = $state.raw<LocalDraft<PostInput> | null>(null);
 	let confirmDelete = $state(false);
 
 	const snapshot = $derived(JSON.stringify(form));
 	const dirty = $derived(loadedFor === routeId && snapshot !== baseline);
-	const words = $derived(wordCount(form.content_md));
-	const minutes = $derived(readingMinutes ?? Math.max(1, Math.round(words / 220)));
+	const activePart = $derived(form.parts[active] ?? form.parts[0]);
+	const partWords = $derived(wordCount(activePart.content_md));
+	const totalWords = $derived(form.parts.reduce((n, p) => n + wordCount(p.content_md), 0));
+	const minutesFor = (md: string) => knownMinutes.get(md) ?? estimateMinutes(md);
+	const partMinutes = $derived(Math.max(1, minutesFor(activePart.content_md)));
+	const totalMinutes = $derived(
+		Math.max(1, form.parts.reduce((n, p) => n + minutesFor(p.content_md), 0))
+	);
+
+	function onpreview(r: PreviewResult, md: string) {
+		// Keep saved parts' values and only the latest preview of the open part.
+		if (lastPreviewed !== null && !savedTexts.has(lastPreviewed)) knownMinutes.delete(lastPreviewed);
+		knownMinutes.set(md, r.reading_minutes);
+		lastPreviewed = md;
+	}
+	function viewHref(i: number): string | undefined {
+		if (current?.state !== 'published' || i >= current.parts.length) return undefined;
+		return partHref(current.slug, i + 1);
+	}
 
 	function reset(f: PostInput, p: AdminPost | null) {
 		form = f;
@@ -74,7 +96,12 @@
 		current = p;
 		slugTouched = !!p;
 		slugError = null;
-		readingMinutes = p ? p.reading_minutes : null;
+		keys = f.parts.map(() => partKey());
+		active = 0;
+		knownMinutes.clear();
+		for (const x of p?.parts ?? []) knownMinutes.set(x.content_md, x.reading_minutes);
+		savedTexts = new SvelteSet(knownMinutes.keys());
+		lastPreviewed = null;
 	}
 
 	function offerDraft(key: string) {
@@ -180,7 +207,9 @@
 
 	function restore() {
 		if (!restorable) return;
-		form = { ...emptyForm(), ...restorable.value };
+		form = normalizeInput(restorable.value, emptyForm());
+		keys = form.parts.map(() => partKey());
+		active = 0;
 		slugTouched = true;
 		restorable = null;
 	}
@@ -212,7 +241,12 @@
 		<h1 class="font-display text-2xl font-semibold">{isNew ? 'New post' : 'Edit post'}</h1>
 		{#if current}<StateChip state={current.state} />{/if}
 		<span class="font-mono text-xs text-ink-soft" aria-live="polite">
-			{words.toLocaleString()} words · {minutes} min read
+			{#if form.parts.length > 1}
+				Part {active + 1}: {partWords.toLocaleString()} words · {partMinutes} min · Total: {totalWords.toLocaleString()}
+				words · {totalMinutes} min read
+			{:else}
+				{totalWords.toLocaleString()} words · {totalMinutes} min read
+			{/if}
 			{#if dirty}· <strong class="text-warn">unsaved</strong>{:else if current}· saved <RelTime
 					value={current.updated_at}
 				/>{/if}
@@ -290,12 +324,15 @@
 					autocomplete="off"
 				/>
 			</div>
-			<MarkdownEditor
-				bind:value={form.content_md}
-				label="Post content"
-				height="calc(100dvh - 16rem)"
-				onpreview={(r: PreviewResult) => (readingMinutes = r.reading_minutes)}
-			/>
+			<PostParts bind:parts={form.parts} bind:keys bind:active {viewHref} />
+			{#key keys[active]}
+				<MarkdownEditor
+					bind:value={activePart.content_md}
+					label="Part {active + 1} content"
+					height="calc(100dvh - 22rem)"
+					{onpreview}
+				/>
+			{/key}
 		</div>
 		<aside id="post-meta" aria-label="Post settings" class="xl:sticky xl:top-20 xl:self-start">
 			<PostMeta bind:form bind:slugTouched bind:slugError {tagSuggestions} />
