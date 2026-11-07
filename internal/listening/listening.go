@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,10 +34,12 @@ type Module struct {
 	http  *http.Client
 	cache *cache
 
-	hub        *hub // nil when BaseURL is empty
-	streams    atomic.Int64
-	maxStreams int
-	keepAlive  time.Duration
+	hub                 *hub // nil when BaseURL is empty
+	streams             streamSlots
+	maxStreams          int
+	maxStreamsPerClient int
+	keepAlive           time.Duration
+	writeTimeout        time.Duration
 }
 
 // New returns the listening module. An empty BaseURL serves empty results.
@@ -50,7 +51,8 @@ func New(d Deps) *Module {
 		d.HTTP = &http.Client{Timeout: 5 * time.Second}
 	}
 	m := &Module{base: strings.TrimRight(d.BaseURL, "/"), log: d.Log, http: d.HTTP, cache: newCache(time.Now),
-		maxStreams: maxStreams, keepAlive: streamKeepAlive}
+		maxStreams: maxStreams, maxStreamsPerClient: maxStreamsPerClient,
+		keepAlive: streamKeepAlive, writeTimeout: streamWriteTimeout}
 	if m.base != "" {
 		m.hub = newHub(m.base, d.StreamHTTP, d.Log)
 	}

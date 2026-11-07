@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -410,4 +411,107 @@ func TestStreamNoBaseURL(t *testing.T) {
 	readUntil(t, lines, "data: null")
 	time.Sleep(300 * time.Millisecond)
 	readUntil(t, lines, ": keep-alive")
+}
+
+func TestStreamPerClientCap(t *testing.T) {
+	m := New(Deps{Log: slog.New(slog.DiscardHandler)})
+	m.maxStreamsPerClient = 1
+	srv := streamServer(t, m)
+	resp1, lines := openStream(t, srv.URL)
+	readUntil(t, lines, "data: null")
+	resp, err := http.Get(srv.URL + "/api/v1/listening/now-playing/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("over per-client cap: %d", resp.StatusCode)
+	}
+	// Another client bucket still gets a slot.
+	if release, status := m.streams.acquire("192.0.2.1", m.maxStreams, m.maxStreamsPerClient); release == nil {
+		t.Fatalf("other client refused: %d", status)
+	} else {
+		release()
+		release() // idempotent
+	}
+	_ = resp1.Body.Close()
+	eventually(t, "slot released", func() bool { return m.streams.open() == 0 })
+}
+
+// A client that stops reading must be dropped by the per-write deadline,
+// releasing its slot and hub subscription.
+func TestStreamStuckClientDropped(t *testing.T) {
+	u := newSSEUpstream(np("a"))
+	up := httptest.NewServer(u)
+	t.Cleanup(up.Close)
+	m := New(Deps{BaseURL: up.URL, Log: slog.New(slog.DiscardHandler)})
+	m.hub.idleClose = 10 * time.Millisecond
+	srv := streamServer(t, m)
+	m.writeTimeout = 100 * time.Millisecond
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.(*net.TCPConn).SetReadBuffer(4096)
+	if _, err := fmt.Fprint(conn, "GET /api/v1/listening/now-playing/stream HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "stream open", func() bool { return m.streams.open() == 1 })
+
+	// Large events fill the socket buffers; the client never reads.
+	big := strings.Repeat("x", 256<<10)
+	ev := `{"is_playing":true,"progress_ms":1,"fetched_at":"2026-11-06T12:00:00Z","track":{"id":"t","name":"` + big + `","duration_ms":9,"explicit":false,"artists":[]}}`
+	deadline := time.Now().Add(10 * time.Second)
+	for m.streams.open() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("stuck client was not dropped")
+		}
+		select {
+		case u.events <- ev:
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	eventually(t, "hub unsubscribed and stopped", func() bool { return !m.hub.running() })
+}
+
+func TestHubNoStaleSnapshot(t *testing.T) {
+	u := newSSEUpstream(np("a"))
+	srv := httptest.NewServer(u)
+	defer srv.Close()
+	h := fastHub(srv.URL)
+	h.backoffMin, h.backoffMax = time.Second, time.Second // stay down for a while
+	s, un := h.subscribe()
+	defer un()
+	wantTrack(t, s, "a")
+	u.kill <- struct{}{}
+	eventually(t, "not live", func() bool { _, ok := h.snapshot(); return !ok })
+	s2, un2 := h.subscribe()
+	defer un2()
+	select {
+	case b := <-s2.ch:
+		t.Fatalf("new client got a stale snapshot while upstream is down: %s", b)
+	default:
+	}
+}
+
+func TestNilHubSnapshot(t *testing.T) {
+	var h *hub
+	if _, ok := h.snapshot(); ok {
+		t.Fatal("nil hub reported a snapshot")
+	}
+	m := New(Deps{Log: slog.New(slog.DiscardHandler)})
+	rec := httptest.NewRecorder()
+	m.nowPlaying(rec, httptest.NewRequest("GET", "/listening/now-playing", nil)) // must not panic
+}
+
+func TestSSEEventCap(t *testing.T) {
+	line := "data: " + strings.Repeat("y", 600<<10) + "\n"
+	in := line + line + "\n" + "data: ok\n\n"
+	p := newSSEReader(strings.NewReader(in), nil)
+	ev, err := p.Next()
+	if err != nil || ev.Data != "ok" {
+		t.Fatalf("oversized event not dropped: %q %v", ev.Data[:min(len(ev.Data), 10)], err)
+	}
 }

@@ -93,7 +93,10 @@ func (h *hub) subscribe() (*subscriber, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.subs[s] = struct{}{}
-	if h.latest != nil {
+	// Only a live snapshot is queued: while the upstream is down (reconnecting)
+	// latest may be stale, and a new client is better served by waiting for
+	// the reconnect snapshot or falling back to polling the REST endpoint.
+	if h.live && h.latest != nil {
 		s.offer(h.latest)
 	}
 	if h.idleTimer != nil {
@@ -132,7 +135,11 @@ func (h *hub) stopIfIdle() {
 }
 
 // snapshot returns the cached payload while the upstream stream is live.
+// It is safe on a nil hub (SPOTIFY_API_URL unset).
 func (h *hub) snapshot() ([]byte, bool) {
+	if h == nil {
+		return nil, false
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.latest, h.live && h.latest != nil

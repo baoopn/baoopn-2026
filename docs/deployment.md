@@ -155,7 +155,10 @@ that way: do not add a Cache Rule that caches `/api/*`, and a Worker placed in f
 of the site would have to stream the body rather than buffer it. Traefik does not buffer
 responses by default; `X-Accel-Buffering: no` covers an nginx in the path. The
 SvelteKit proxy (`hooks.server.ts`) streams the body through and aborts the upstream
-request when the browser disconnects.
+request when the browser disconnects. The API allows 8 streams per client IP, so it relies on
+the real client IP reaching it (`X-Client-IP` from the web server, with
+`INTERNAL_API_TOKEN` set); if every request showed the proxy's IP, all visitors would
+share those 8 and the rest would fall back to polling.
 
 ## Inbound email (Cloudflare Email Worker)
 

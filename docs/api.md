@@ -38,19 +38,25 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 ```
 
 - The current snapshot is sent right after connecting, then one `now-playing`
-  event per change; `: keep-alive` comments every 25 s.
+  event per change; `: keep-alive` comments every 25 s. While the upstream is
+  reconnecting, a new client gets no stale snapshot: its first event is the one the
+  reconnect brings.
 - The API keeps **one** upstream connection to spotify-tracker
   (`SPOTIFY_API_URL` + `/api/v1/now-playing/stream`) for all clients, opened on
   the first subscriber and closed 60 s after the last one leaves. It reconnects with
   exponential backoff and jitter (1 s → 30 s) and after 70 s without any data.
 - A slow client only misses intermediate updates; it always gets the latest.
 - At most 500 concurrent streams: above that `503 too_many_streams` with `Retry-After`.
+  At most 8 per client IP (IPv6 /64): above that `429 too_many_streams` with
+  `Retry-After`. Either way the site falls back to polling.
 - Mounted under `/api/v1` with the public rate limit but without the 20 s request
-  timeout; the handler clears the server's 2 min read/write deadlines for the connection.
+  timeout. The handler clears the server's 2 min read deadline and gives each write
+  its own 30 s deadline, so a client that stops reading is dropped.
 - `SPOTIFY_API_URL` unset: one `now-playing` event with `null`, then keep-alives only.
 - The site (`web/src/lib/site/listening.svelte.ts`) uses one `EventSource` per page.
   It falls back to polling `/listening/now-playing` every 15 s when EventSource is
-  missing, after 3 errors within a minute, or with no event 15 s after opening, and it
+  missing, when the browser gives up on the stream (e.g. a 429/503), after 3 errors
+  within a minute, or with no event 15 s after opening, and it
   retries the stream every 5 min. The stream closes after the tab has been hidden for 60 s.
 
 ## Admin — `/api/admin` (Bearer Clerk session token)

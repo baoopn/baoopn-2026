@@ -122,6 +122,9 @@ class Listening {
 		};
 
 		start();
+		// Opened in a background tab: no visibilitychange fires until it is
+		// shown, so start the hidden countdown now.
+		if (document.visibilityState === 'hidden') hiddenTimer = setTimeout(pause, HIDDEN_PAUSE_MS);
 		document.addEventListener('visibilitychange', onVisibility);
 		return () => {
 			clearTimeout(hiddenTimer);

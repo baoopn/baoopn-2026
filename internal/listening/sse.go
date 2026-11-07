@@ -30,9 +30,13 @@ type sseReader struct {
 	hasData bool
 	retry   time.Duration
 	started bool
+	tooBig  bool // data of the current event exceeded maxSSEEvent
 }
 
-const maxSSELine = 1 << 20
+const (
+	maxSSELine  = 1 << 20 // one line
+	maxSSEEvent = 1 << 20 // all data: lines of one event
+)
 
 func newSSEReader(r io.Reader, onLine func()) *sseReader {
 	sc := bufio.NewScanner(r)
@@ -99,6 +103,14 @@ func (p *sseReader) Next() (sseEvent, error) {
 		case "event":
 			p.typ = value
 		case "data":
+			if p.tooBig {
+				continue
+			}
+			if p.data.Len()+len(value)+1 > maxSSEEvent {
+				p.tooBig = true // the event is dropped at dispatch
+				p.data.Reset()
+				continue
+			}
 			if p.hasData {
 				p.data.WriteByte('\n')
 			}
@@ -125,8 +137,9 @@ func (p *sseReader) dispatch() (sseEvent, bool) {
 		p.typ = ""
 		p.data.Reset()
 		p.hasData = false
+		p.tooBig = false
 	}()
-	if !p.hasData {
+	if !p.hasData || p.tooBig {
 		return sseEvent{}, false
 	}
 	typ := p.typ
