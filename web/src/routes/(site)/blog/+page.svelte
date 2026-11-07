@@ -5,6 +5,7 @@
 	import Seo from '#lib/site/components/Seo.svelte';
 	import PostItem from '#lib/site/components/PostItem.svelte';
 	import { pad2 } from '#lib/site/format.js';
+	import { reveal } from '#lib/site/motion.js';
 	import { CATEGORIES, categoryLabel } from '#lib/site/post.js';
 	import type { PostCategory } from '#lib/api/types.js';
 	import type { PageProps } from './$types';
@@ -96,7 +97,7 @@
 			{:else}
 				<ul>
 					{#each data.posts as post (post.slug)}
-						<li><PostItem {post} /></li>
+						<li data-reveal {@attach reveal()}><PostItem {post} /></li>
 					{/each}
 				</ul>
 			{/if}

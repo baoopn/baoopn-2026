@@ -42,7 +42,7 @@
 			eager
 		/>
 		<div class="min-w-0">
-			<p class={['chip label', !playing && '[--chip:var(--spot-butter)]']}>
+			<p class={['chip label transition-colors', !playing && '[--chip:var(--spot-butter)]']}>
 				<EqBars {playing} />
 				{playing ? 'Now playing' : 'Paused'}
 			</p>
@@ -73,10 +73,18 @@
 						class="fill absolute top-1/2 left-0 h-0.5 w-full origin-left bg-ink"
 						style:transform="translateY(-50%) scaleX({ratio})"
 					></div>
-					<div
-						class="dot absolute top-1/2 size-3 -translate-y-1/2 rounded-full border-2 border-paper bg-ink"
-						style:left="calc({ratio * 100}% - 0.375rem)"
-					></div>
+					<!-- The dot rides a bar-wide layer moved by transform; the clip box (dot-wide
+					     margin each side) keeps that layer from widening the page. -->
+					<div class="pointer-events-none absolute -inset-x-1.5 inset-y-0 overflow-hidden">
+						<div
+							class="track absolute inset-x-1.5 inset-y-0"
+							style:transform="translateX({ratio * 100}%)"
+						>
+							<div
+								class="absolute top-1/2 -left-1.5 size-3 -translate-y-1/2 rounded-full border-2 border-paper bg-ink"
+							></div>
+						</div>
+					</div>
 				</div>
 				<div class="mt-1.5 flex justify-between font-mono text-xs text-ink-soft tabular-nums" aria-hidden="true">
 					<span>{duration(progressMs)}</span>
@@ -126,14 +134,16 @@
 		opacity: 0.92;
 	}
 	.fill,
-	.dot {
-		transition:
-			transform 1s linear,
-			left 1s linear;
+	.track {
+		transition: transform 1s linear;
+	}
+	.card :global(.chip) {
+		transition-duration: var(--motion-base);
+		transition-timing-function: var(--ease-soft);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.fill,
-		.dot {
+		.track {
 			transition: none;
 		}
 	}

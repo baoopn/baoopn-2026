@@ -1,11 +1,12 @@
 <script lang="ts">
 	import '#lib/site/site.css';
 	import { onMount } from 'svelte';
-	import { afterNavigate } from '$app/navigation';
+	import { afterNavigate, onNavigate } from '$app/navigation';
 	import Header from '#lib/site/components/Header.svelte';
 	import Footer from '#lib/site/components/Footer.svelte';
 	import { startEngagement, trackPageview } from '#lib/site/beacon.js';
 	import { theme } from '#lib/theme.svelte.js';
+	import { reducedMotion } from '#lib/site/motion.js';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
@@ -25,6 +26,24 @@
 		if (!to?.url) return;
 		const referrer = from?.url ? from.url.href : document.referrer;
 		trackPageview(to.url.pathname, referrer);
+	});
+
+	// Soft cross-fade between site pages. Skipped for same-path changes (?tech=
+	// filters, hash jumps), routes outside the site, reduced motion, and browsers
+	// without View Transitions (navigation is then instant).
+	onNavigate((nav) => {
+		// After the first client navigation the hero intro (home page) stays still.
+		// Set before the new page renders so its CSS animation never starts.
+		if (nav.from) document.documentElement.dataset.navigated = '';
+		if (!document.startViewTransition || reducedMotion()) return;
+		if (nav.from?.url.pathname === nav.to?.url.pathname) return;
+		if (!nav.to?.route.id?.startsWith('/(site)')) return;
+		return new Promise((resolve) => {
+			document.startViewTransition(async () => {
+				resolve();
+				await nav.complete;
+			});
+		});
 	});
 </script>
 

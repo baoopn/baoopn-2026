@@ -4,6 +4,7 @@
 	import SocialIcon from '#lib/site/components/SocialIcon.svelte';
 	import AlbumArt from '#lib/site/components/AlbumArt.svelte';
 	import { pad2, prettyUrl, safeImage, safeUrl, yearMonth } from '#lib/site/format.js';
+	import { reveal } from '#lib/site/motion.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -100,7 +101,7 @@
 			<ol class="timeline">
 				{#each profile.experience as job, i (i)}
 					{@const orgUrl = safeUrl(job.url)}
-					<li class="job">
+					<li class="job" data-reveal {@attach reveal()}>
 						<p class="label text-ink-soft">
 							<time datetime={job.start}>{yearMonth(job.start)}</time>
 							–
@@ -162,7 +163,7 @@
 			<ol class="mt-6 grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-3 lg:grid-cols-6">
 				{#each data.topArtists as a, i (a.artist.id)}
 					{@const href = safeUrl(a.artist.external_url)}
-					<li class="min-w-0">
+					<li class="min-w-0" data-reveal {@attach reveal()}>
 						<AlbumArt
 							src={a.artist.image_url}
 							alt=""

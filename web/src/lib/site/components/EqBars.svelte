@@ -14,20 +14,23 @@
 		align-items: flex-end;
 		gap: 2px;
 	}
+	/* Full-height bars scaled from the bottom: the level moves on the compositor. */
 	.bars span {
 		flex: 1;
-		height: 35%;
+		height: 100%;
 		background: currentColor;
 		border-radius: 1px;
+		transform-origin: bottom;
+		transform: scaleY(0.35);
 	}
 	.bars span:nth-child(2) {
-		height: 70%;
+		transform: scaleY(0.7);
 	}
 	.bars span:nth-child(3) {
-		height: 50%;
+		transform: scaleY(0.5);
 	}
 	.on span {
-		animation: level 900ms ease-in-out infinite alternate;
+		animation: level 900ms var(--ease-soft-inout) infinite alternate;
 	}
 	.on span:nth-child(2) {
 		animation-delay: -300ms;
@@ -37,10 +40,10 @@
 	}
 	@keyframes level {
 		from {
-			height: 25%;
+			transform: scaleY(0.25);
 		}
 		to {
-			height: 100%;
+			transform: scaleY(1);
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
