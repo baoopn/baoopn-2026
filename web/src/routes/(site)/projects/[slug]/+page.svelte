@@ -112,7 +112,7 @@
 		>
 			<img
 				src={logo}
-				alt="{p.title} logo"
+				alt=""
 				width="800"
 				height="350"
 				fetchpriority="high"

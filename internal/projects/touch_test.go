@@ -60,10 +60,13 @@ func TestProjectWritesTouchMedia(t *testing.T) {
 	if !fresh(oldStem) {
 		t.Fatal("patch did not touch the new logo")
 	}
+	age()
 	if _, _, err := m.patch(ctx, p.ID, Patch{LogoURL: &empty}); err != nil {
 		t.Fatal(err)
 	}
-	age()
+	if !fresh(oldStem) {
+		t.Fatal("clearing the logo did not touch the old logo")
+	}
 	age()
 	if ok, err := m.remove(ctx, p.ID); !ok || err != nil {
 		t.Fatalf("remove = %v, %v", ok, err)

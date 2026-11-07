@@ -50,7 +50,7 @@
 				{#if showLogo}
 					<img
 						src={logo}
-						alt="{project.title} logo"
+						alt=""
 						width="320"
 						height="200"
 						loading="lazy"
