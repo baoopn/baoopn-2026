@@ -76,8 +76,8 @@ func (r *Recorder) record(req *http.Request, ev beacon) {
 
 // excludedPath reports whether a (cleaned) path is not a public page we
 // count. Only known routes are accepted, so a script cannot fill the stats
-// tables with arbitrary unique paths: the fixed pages, plus one slug segment
-// under /blog and /projects, which the web app serves.
+// tables with arbitrary unique paths: the fixed pages, one slug segment
+// under /blog and /projects, and /blog/<slug>/<n> for a post's part n (1–20).
 func excludedPath(p string) bool {
 	switch p {
 	case "/", "/projects", "/blog", "/about", "/contact":
@@ -88,8 +88,15 @@ func excludedPath(p string) bool {
 			return false
 		}
 	}
+	if rest, ok := strings.CutPrefix(p, "/blog/"); ok {
+		slug, no, _ := strings.Cut(rest, "/")
+		return !slugPath.MatchString(slug) || !partNo.MatchString(no)
+	}
 	return true
 }
+
+// partNo is a post part number, 1–20, without leading zeros.
+var partNo = regexp.MustCompile(`^([1-9]|1[0-9]|20)$`)
 
 // slugPath is one URL slug segment as the API generates them.
 var slugPath = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,99}$`)

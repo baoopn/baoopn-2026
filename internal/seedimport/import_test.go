@@ -16,73 +16,151 @@ import (
 	"github.com/baoopn/baoopn-2026/seed"
 )
 
-func TestStripPartHeading(t *testing.T) {
-	cases := map[string]string{
-		"## Part 1: Overview\n\n### Intro\ntext": "### Intro\ntext",
-		"# Part 4: Integrating\r\n\r\nBody":      "Body",
-		"##Part 12: X\nBody":                     "Body",
-		"### Part 1: Too deep\nBody":             "### Part 1: Too deep\nBody",
-		"## Intro\n## Part 2: later":             "## Intro\n## Part 2: later",
-	}
-	for in, want := range cases {
-		if got := stripPartHeading(in); got != want {
-			t.Errorf("stripPartHeading(%q) = %q, want %q", in, got, want)
+func TestRewriteScreenshots(t *testing.T) {
+	md := "Intro\r\n\r\n![Dash](screenshot:dash \"Title\")\r\n" +
+		"Inline ![a](screenshot:gone) text and ![b](screenshot:dash).\n" +
+		"  ![only](screenshot:gone)  \n" +
+		"![ext](https://cdn.example.com/c.png) ![local](/media/x.png)\n" +
+		"End"
+	got := rewriteScreenshots(md, func(id string) (string, bool) {
+		if id == "dash" {
+			return "/media/abc.png", true
 		}
+		return "", false
+	})
+	want := "Intro\n\n![Dash](/media/abc.png \"Title\")\n" +
+		"Inline  text and ![b](/media/abc.png).\n" +
+		"![ext](https://cdn.example.com/c.png) ![local](/media/x.png)\n" +
+		"End"
+	if got != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
 	}
 }
 
-func TestRewriteImages(t *testing.T) {
-	md := `![a](/thumbs/a.png)
-![b](/blog-img/x/b.jpg "Title")
-![ext](https://cdn.example.com/c.png)
-<img class="w" src="/thumbs/a.png" alt="again">
-<img src="/missing.png">
-` + "```jsx\n<img src={track.cover} />\n```"
-	resolve := func(p string) (string, bool) {
-		if p == "/missing.png" {
-			return "", false
-		}
-		return "/media/" + strings.ReplaceAll(strings.TrimPrefix(p, "/"), "/", "_"), true
-	}
-	got := rewriteImages(md, resolve)
-	for _, want := range []string{
-		`![a](/media/thumbs_a.png)`,
-		`![b](/media/blog-img_x_b.jpg "Title")`,
-		`![ext](https://cdn.example.com/c.png)`,
-		`<img class="w" src="/media/thumbs_a.png" alt="again">`,
-		`<img src="/missing.png">`,
-		`<img src={track.cover} />`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in:\n%s", want, got)
-		}
-	}
-	if p := localPaths(md); strings.Join(p, ",") != "/thumbs/a.png,/blog-img/x/b.jpg,/missing.png" {
-		t.Errorf("localPaths %v", p)
+var png = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR placeholder")
+
+func fixture() fstest.MapFS {
+	return fstest.MapFS{
+		"posts/README.md": {Data: []byte("# Seed posts")},
+		"posts/two-parts/post.json": {Data: []byte(`{"slug":"two-parts","title":"Two Parts","excerpt":"",
+			"tags":["Go","Testing"],"parts":[{"title":"Setup","file":"part-1.md"},{"title":"","file":"part-2.md"}],
+			"screenshots":[{"id":"dash"},{"id":"named","file":"img/other-name.png"},{"id":"gone"}]}`)},
+		"posts/two-parts/part-1.md": {Data: []byte("First paragraph.\n\n![Dashboard](screenshot:dash)\n\n" +
+			"![Named](screenshot:named)\n\n![Missing](screenshot:gone)\n\nAfter.")},
+		"posts/two-parts/part-2.md":          {Data: []byte("## Second\n\n![Again](screenshot:dash)")},
+		"posts/two-parts/img/dash.png":       {Data: png},
+		"posts/two-parts/img/other-name.png": {Data: append([]byte{}, append(png, '2')...)},
+		// Skipped with a warning: a part file is missing.
+		"posts/broken/post.json": {Data: []byte(`{"title":"Broken","parts":[{"title":"x","file":"part-1.md"}]}`)},
+		// Skipped with a warning: a part path leaves the folder.
+		"posts/escape/post.json": {Data: []byte(`{"title":"Escape","parts":[{"file":"../two-parts/part-1.md"}]}`)},
 	}
 }
 
-func TestSlugsLegacyAndOrdering(t *testing.T) {
-	if s := postSlug("portfolio-app", "project-overview-tech-stack"); s != "portfolio-app-project-overview-tech-stack" {
-		t.Fatalf("slug %s", s)
-	}
-	if p := legacyPath("product-catalog-api", 7); p != "/blog/product-catalog-api/7" {
-		t.Fatalf("legacy %s", p)
-	}
-	a, err := publishedAt("2025-03-05", 1)
+func TestRunImportsSeedPostsOnce(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	log := slog.New(slog.DiscardHandler)
+	store, err := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir(), MaxBytes: 10 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := publishedAt("2025-03-05", 2)
-	if a.Format("2006-01-02T15:04:05Z07:00") != "2025-03-05T12:01:00Z" || !b.After(a) {
-		t.Fatalf("published_at %v %v", a, b)
+	b := blog.New(blog.Deps{DB: pool, Log: log})
+	fsys := fixture()
+	d := Deps{DB: pool, Log: log, Media: store, Blog: b, FS: fsys}
+	if err := Run(ctx, d); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := publishedAt("March 5", 1); err == nil {
-		t.Fatal("bad date accepted")
+
+	var posts, mediaRows int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM posts`).Scan(&posts)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM media`).Scan(&mediaRows)
+	if posts != 1 || mediaRows != 2 {
+		t.Fatalf("posts %d media %d", posts, mediaRows)
+	}
+	var status, excerpt string
+	var tags []string
+	var published *string
+	err = pool.QueryRow(ctx, `SELECT status, excerpt, tags, published_at::text FROM posts WHERE slug = 'two-parts'`).
+		Scan(&status, &excerpt, &tags, &published)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "draft" || published != nil || excerpt != "First paragraph." || strings.Join(tags, ",") != "go,testing" {
+		t.Fatalf("post %s %v %q %v", status, published, excerpt, tags)
+	}
+	rows, err := pool.Query(ctx, `SELECT pp.part_no, pp.title, pp.content_md FROM post_parts pp
+		JOIN posts p ON p.id = pp.post_id WHERE p.slug = 'two-parts' ORDER BY pp.part_no`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts []string
+	var titles []string
+	for rows.Next() {
+		var no int
+		var title, md string
+		if err := rows.Scan(&no, &title, &md); err != nil {
+			t.Fatal(err)
+		}
+		parts, titles = append(parts, md), append(titles, title)
+	}
+	if len(parts) != 2 || titles[0] != "Setup" || titles[1] != "" {
+		t.Fatalf("parts %v %v", titles, parts)
+	}
+	mediaURL := regexp.MustCompile(`!\[Dashboard\]\((/media/[0-9a-f]{24}\.png)\)`)
+	m := mediaURL.FindStringSubmatch(parts[0])
+	if m == nil || strings.Contains(parts[0], "screenshot:") || strings.Contains(parts[0], "Missing") ||
+		!regexp.MustCompile(`!\[Named\]\(/media/[0-9a-f]{24}\.png\)`).MatchString(parts[0]) ||
+		!strings.Contains(parts[0], "After.") {
+		t.Fatalf("part 1 not rewritten:\n%s", parts[0])
+	}
+	if !strings.Contains(parts[1], "![Again]("+m[1]+")") {
+		t.Fatalf("part 2 not rewritten:\n%s", parts[1])
+	}
+
+	var done []string
+	if _, err := settings.Get(ctx, pool, FlagKey, &done); err != nil || strings.Join(done, ",") != "two-parts" {
+		t.Fatalf("flag %v %v", done, err)
+	}
+
+	// Re-running is a no-op; a deleted post is not imported again; a folder
+	// added later is imported; an existing slug is skipped and recorded.
+	if err := Run(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM posts WHERE slug = 'two-parts'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Import(ctx, []blog.PostInput{{Slug: "taken", Title: "Mine", Status: "published",
+		Parts: []blog.PartInput{{ContentMD: "keep me"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	fsys["posts/later/post.json"] = &fstest.MapFile{Data: []byte(`{"title":"Later","parts":[{"title":"Only"}]}`)}
+	fsys["posts/later/part-1.md"] = &fstest.MapFile{Data: []byte("Later text")}
+	fsys["posts/taken/post.json"] = &fstest.MapFile{Data: []byte(`{"title":"Seed","parts":[{"file":"part-1.md"}]}`)}
+	fsys["posts/taken/part-1.md"] = &fstest.MapFile{Data: []byte("seed text")}
+	if err := Run(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	var slugs []string
+	_ = pool.QueryRow(ctx, `SELECT array_agg(slug ORDER BY slug) FROM posts`).Scan(&slugs)
+	if strings.Join(slugs, ",") != "later,taken" {
+		t.Fatalf("slugs after re-run %v", slugs)
+	}
+	var kept string
+	_ = pool.QueryRow(ctx, `SELECT pp.content_md FROM post_parts pp JOIN posts p ON p.id = pp.post_id
+		WHERE p.slug = 'taken'`).Scan(&kept)
+	if kept != "keep me" {
+		t.Fatalf("existing post overwritten: %q", kept)
+	}
+	done = nil
+	_, _ = settings.Get(ctx, pool, FlagKey, &done)
+	if strings.Join(done, ",") != "two-parts,later,taken" {
+		t.Fatalf("flag after re-run %v", done)
 	}
 }
 
-func TestRunImportsSeedOnce(t *testing.T) {
+func TestRunEmbeddedSeedAndProfile(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
@@ -94,43 +172,12 @@ func TestRunImportsSeedOnce(t *testing.T) {
 	if err := prof.EnsureSeeded(ctx); err != nil {
 		t.Fatal(err)
 	}
-	b := blog.New(blog.Deps{DB: pool, Log: log})
-	d := Deps{DB: pool, Log: log, Media: store, Blog: b, FS: seed.FS}
-	if err := Run(ctx, d); err != nil {
-		t.Fatal(err)
+	d := Deps{DB: pool, Log: log, Media: store, Blog: blog.New(blog.Deps{DB: pool, Log: log}), FS: seed.FS}
+	for range 2 {
+		if err := Run(ctx, d); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	var posts, legacy int
-	var mediaRows int
-	_ = pool.QueryRow(ctx, `SELECT count(*), count(legacy_path) FROM posts`).Scan(&posts, &legacy)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM media`).Scan(&mediaRows)
-	if posts != 11 || legacy != 11 {
-		t.Fatalf("posts %d legacy %d", posts, legacy)
-	}
-	// 3 thumbs + 4 blog images + avatar.
-	if mediaRows != 8 {
-		t.Fatalf("media rows %d", mediaRows)
-	}
-
-	var content, cover, title string
-	var order int
-	err = pool.QueryRow(ctx, `SELECT content_md, cover_url, title, series_order FROM posts
-		WHERE legacy_path = '/blog/portfolio-app/1'`).Scan(&content, &cover, &title, &order)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.HasPrefix(content, "## Part") || strings.Contains(content, "](/thumbs/") || strings.Contains(content, "](/blog-img/") {
-		t.Fatalf("content not rewritten:\n%.400s", content)
-	}
-	if !regexp.MustCompile(`^/media/[0-9a-f]{24}\.png$`).MatchString(cover) || title != "Project Overview and Tech Stack" || order != 1 {
-		t.Fatalf("cover %q title %q order %d", cover, title, order)
-	}
-	var tags []string
-	_ = pool.QueryRow(ctx, `SELECT tags FROM posts WHERE slug = 'product-catalog-api-caching-strategy'`).Scan(&tags)
-	if strings.Join(tags, ",") != "express,nodejs,mongodb,redis" {
-		t.Fatalf("tags %v", tags)
-	}
-
 	p, err := prof.Get(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -138,44 +185,9 @@ func TestRunImportsSeedOnce(t *testing.T) {
 	if !strings.HasPrefix(p.AvatarURL, "/media/") || p.CoverURL != "https://cdn.baoopn.com/data/img/Bao_cover.jpg" {
 		t.Fatalf("profile images %q %q", p.AvatarURL, p.CoverURL)
 	}
-
-	if ok, _ := settings.Flag(ctx, pool, FlagKey); !ok {
-		t.Fatal("flag not set")
-	}
-	// Second run is a no-op (flag); even without the flag, Import skips existing rows.
-	if err := Run(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM settings WHERE key = $1`, FlagKey); err != nil {
-		t.Fatal(err)
-	}
-	if err := Run(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM posts`).Scan(&posts)
+	var mediaRows int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM media`).Scan(&mediaRows)
-	if posts != 11 || mediaRows != 8 {
-		t.Fatalf("re-run duplicated: posts %d media %d", posts, mediaRows)
-	}
-}
-
-func TestRunMissingAssetLeftAsIs(t *testing.T) {
-	pool := testdb.New(t)
-	ctx := context.Background()
-	log := slog.New(slog.DiscardHandler)
-	store, _ := media.New(media.Deps{DB: pool, Log: log, Dir: t.TempDir()})
-	fsys := fstest.MapFS{
-		"blog/s/metadata.json": {Data: []byte(`{"name":"S","slug":"s","date":"2025-01-01","pages":[{"title":"One","slug":"one","no":1}]}`)},
-		"blog/s/page-1.md":     {Data: []byte("## Part 1: One\n\n![x](/nope.png)\n\n![up](/../../etc/passwd)")},
-	}
-	if err := Run(ctx, Deps{DB: pool, Log: log, Media: store, Blog: blog.New(blog.Deps{DB: pool, Log: log}), FS: fsys}); err != nil {
-		t.Fatal(err)
-	}
-	var content string
-	if err := pool.QueryRow(ctx, `SELECT content_md FROM posts WHERE slug = 's-one'`).Scan(&content); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(content, "![x](/nope.png)") || strings.HasPrefix(content, "## Part") {
-		t.Fatalf("content %q", content)
+	if mediaRows != 1 {
+		t.Fatalf("media rows %d", mediaRows)
 	}
 }

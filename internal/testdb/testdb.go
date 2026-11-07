@@ -22,6 +22,18 @@ import (
 // migrations applied. The schema is dropped when the test ends.
 func New(t testing.TB) *pgxpool.Pool {
 	t.Helper()
+	pool := Empty(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatalf("testdb: migrate: %v", err)
+	}
+	return pool
+}
+
+// Empty is New without migrations, for tests that migrate step by step.
+func Empty(t testing.TB) *pgxpool.Pool {
+	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL not set")
@@ -59,8 +71,5 @@ func New(t testing.TB) *pgxpool.Pool {
 		_, _ = admin.Exec(c, "DROP SCHEMA "+schema+" CASCADE")
 		admin.Close()
 	})
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatalf("testdb: migrate: %v", err)
-	}
 	return pool
 }
