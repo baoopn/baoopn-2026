@@ -69,6 +69,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck ./...
+
       - name: Test
         run: go test -race -count=1 ./...
 
@@ -93,6 +98,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm run --if-present test
       - run: pnpm build
 
   worker:

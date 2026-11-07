@@ -4,12 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
-	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
 	"github.com/baoopn/baoopn-2026/internal/logging"
@@ -22,6 +21,24 @@ const (
 	floodLimit = 50
 	// maxAttachments caps the count kept of what was not kept.
 	maxAttachments = 999
+
+	// inboundReads is how many request bodies are read at once. Past it the
+	// hook answers 503 without reading, and the worker tries again. A slot is
+	// only taken by a request whose size and signature headers pass, and is
+	// held for at most inboundReadTimeout (then 408, which the worker retries).
+	inboundReads       = 8
+	inboundReadTimeout = 20 * time.Second
+	// badSignaturesPerMinute is how many failed signature checks one client
+	// may make; past it the hook answers 429 before any other check. Signed
+	// calls never count.
+	badSignaturesPerMinute = 30
+	// inboundPerMinute caps signed deliveries site-wide (not per IP: every
+	// call comes from Cloudflare). Past it the hook answers 503.
+	inboundPerMinute = 300
+	// junkRejectsPerMinute caps the no_token and unknown_token rows written.
+	// Past it the row is skipped and the hook still answers 204, so junk is
+	// never retried.
+	junkRejectsPerMinute = 30
 )
 
 // reject is why an email was not stored, with what is kept of it for debugging.
@@ -34,21 +51,57 @@ func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "no such route")
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxInboundBytes+1))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "message too large")
-			return
-		}
+	now := m.d.Now()
+	client := httpapi.ClientBucket(r)
+	if m.failures.blocked(client, now) {
+		httpapi.Error(w, http.StatusTooManyRequests, "rate_limited", "too many bad requests")
+		return
+	}
+	// Cheap checks before a read slot is taken or the body read: the size the
+	// client announces, and signature headers that could be valid now.
+	if r.ContentLength > maxInboundBytes {
+		httpapi.Error(w, http.StatusRequestEntityTooLarge, "too_large", "message too large")
+		return
+	}
+	ts, sig := r.Header.Get("X-Timestamp"), r.Header.Get("X-Signature")
+	if _, _, ok := signedHeaders(ts, sig, now); !ok {
+		m.failures.fail(client, now)
+		httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
+		return
+	}
+	raw, status := m.readInbound(w, r)
+	switch status {
+	case 0:
+	case http.StatusServiceUnavailable:
+		httpapi.Error(w, status, "busy", "busy, try again later")
+		return
+	case http.StatusRequestEntityTooLarge:
+		httpapi.Error(w, status, "too_large", "message too large")
+		return
+	case http.StatusRequestTimeout:
+		httpapi.Error(w, status, "timeout", "the body took too long")
+		return
+	default:
 		httpapi.Error(w, http.StatusBadRequest, "bad_request", "could not read the body")
 		return
 	}
 	envTo := r.Header.Get("X-Envelope-To")
-	if !verify(m.d.InboundSecret, r.Header.Get("X-Timestamp"), envTo, r.Header.Get("X-Signature"), raw, m.d.Now()) {
+	if !verify(m.d.InboundSecret, ts, envTo, sig, raw, m.d.Now()) {
+		m.failures.fail(client, now)
 		httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
 		return
 	}
+	if !m.inboundRate.take(m.d.Now()) {
+		w.Header().Set("Retry-After", "60")
+		httpapi.Error(w, http.StatusServiceUnavailable, "rate_limited", "too many emails, try again later")
+		return
+	}
+	// The worker delivers again after a 503, so everything below must be safe
+	// to repeat. The message insert is: a known Message-ID is stored once, and
+	// a duplicate neither notifies nor counts. Only mail without a Message-ID
+	// could be stored twice, when a retry arrives with different bytes (new
+	// Received or ARC headers) and so a different sha256 id; that is rare and
+	// accepted. A repeated reject only adds a second debug row.
 	rej, err := m.receive(r.Context(), raw, envTo, r.Header.Get("X-Envelope-From"))
 	if err == nil && rej != nil {
 		err = m.storeReject(r.Context(), *rej)
@@ -63,30 +116,19 @@ func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 
 // receive stores one signed email. It returns a reject for mail that is not
 // stored, and an error only when trying again could help.
+//
+// The token comes from the signed envelope recipient only, never from the
+// message headers, and the message is parsed only once the token names a
+// live thread under its flood limit: junk sent to random addresses costs a
+// lookup, not a MIME parse.
 func (m *Module) receive(ctx context.Context, raw []byte, envTo, envFrom string) (*reject, error) {
-	in, perr := bmail.ParseInbound(raw)
 	rej := &reject{recipient: redact(envTo), sender: clip(bmail.BareAddress(envFrom), 254)}
-	if perr == nil {
-		rej.sender = clip(in.From, 254)
-		rej.subject = clip(strings.Join(strings.Fields(bmail.Tidy(in.Subject)), " "), 200)
-	}
-	token := findToken(envTo, in.Recipients, m.d.InboundDomain)
+	token := tokenOf(envTo, m.d.InboundDomain)
 	if token == "" {
 		rej.reason = "no_token"
 		return rej, nil
 	}
 	rej.recipient = "reply+…@" + strings.ToLower(m.d.InboundDomain)
-	switch {
-	case perr != nil, in.From == "":
-		rej.reason = "unparseable"
-		return rej, nil
-	case bmail.Automatic(in.Headers, in.From):
-		rej.reason = "automatic"
-		return rej, nil
-	case in.From == m.d.Mailer.FromAddress():
-		rej.reason = "self"
-		return rej, nil
-	}
 
 	t, found, err := threadWhere(ctx, m.d.DB, `reply_token = $1`, token)
 	if err != nil {
@@ -109,6 +151,23 @@ func (m *Module) receive(ctx context.Context, raw []byte, envTo, envFrom string)
 	}
 	if recent >= floodLimit {
 		rej.reason = "flood"
+		return rej, nil
+	}
+
+	in, perr := m.parse(raw)
+	if perr == nil {
+		rej.sender = clip(in.From, 254)
+		rej.subject = clip(strings.Join(strings.Fields(bmail.Tidy(in.Subject)), " "), 200)
+	}
+	switch {
+	case perr != nil, in.From == "":
+		rej.reason = "unparseable"
+		return rej, nil
+	case bmail.Automatic(in.Headers, in.From):
+		rej.reason = "automatic"
+		return rej, nil
+	case in.From == m.d.Mailer.FromAddress():
+		rej.reason = "self"
 		return rej, nil
 	}
 
@@ -194,7 +253,16 @@ func (m *Module) storeInbound(ctx context.Context, t thread, body, full, msgID, 
 	return true, tx.Commit(ctx)
 }
 
+// storeReject records r. Rows for mail to no live thread (no_token,
+// unknown_token) are capped site-wide by junkRejectsPerMinute; past the cap
+// the row is skipped, a sampled count is logged, and nil is returned.
 func (m *Module) storeReject(ctx context.Context, r reject) error {
+	if (r.reason == "no_token" || r.reason == "unknown_token") && !m.junkRate.take(m.d.Now()) {
+		if n := m.junkSkipped.Add(1); n == 1 || n%100 == 0 {
+			m.d.Log.Warn("contact: inbound rejects over the cap, not recorded", slog.Int64("skipped", n))
+		}
+		return nil
+	}
 	m.d.Log.Info("contact: inbound email rejected", slog.String("reason", r.reason))
 	if _, err := m.d.DB.Exec(ctx,
 		`INSERT INTO inbound_rejects (reason, recipient, sender, subject) VALUES ($1, $2, $3, $4)`,

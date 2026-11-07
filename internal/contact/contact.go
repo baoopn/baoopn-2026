@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -53,9 +54,18 @@ type Module struct {
 	mu       sync.Mutex
 	notified map[int64]time.Time
 
-	// acks holds the send times of visitor acknowledgements in the last hour.
-	ackMu sync.Mutex
-	acks  []time.Time
+	// Inbound hook limits (see inbound.go and limits.go): concurrent body
+	// reads and how long one may take, failed signatures per client, signed
+	// deliveries per minute, and junk reject rows per minute.
+	reads       chan struct{}
+	readTimeout time.Duration
+	failures    *failLimiter
+	inboundRate *bucket
+	junkRate    *bucket
+	junkSkipped atomic.Int64
+
+	// parse is bmail.ParseInbound; tests swap it to count calls.
+	parse func([]byte) (bmail.Inbound, error)
 }
 
 // New returns the module.
@@ -75,7 +85,15 @@ func New(d Deps) *Module {
 	if d.Settings == nil {
 		d.Settings = sitesettings.New(sitesettings.Deps{DB: d.DB, Log: d.Log, Mailer: d.Mailer})
 	}
-	return &Module{d: d, turnstileURL: turnstileURL, notified: map[int64]time.Time{}}
+	return &Module{
+		d: d, turnstileURL: turnstileURL, notified: map[int64]time.Time{},
+		reads:       make(chan struct{}, inboundReads),
+		readTimeout: inboundReadTimeout,
+		failures:    newFailLimiter(badSignaturesPerMinute),
+		inboundRate: newBucket(inboundPerMinute, time.Minute),
+		junkRate:    newBucket(junkRejectsPerMinute, time.Minute),
+		parse:       bmail.ParseInbound,
+	}
 }
 
 // Public mounts POST /contact (5 per hour per IP).

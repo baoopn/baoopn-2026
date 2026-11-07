@@ -78,8 +78,11 @@ func New(d Deps) http.Handler {
 		}
 	})
 
+	// Hooks carry no per-IP rate limit: every Email Worker call comes from
+	// Cloudflare's addresses, so a limit there would drop real replies. Each
+	// hook verifies its signature and limits itself.
 	r.Route("/api/hooks", func(r chi.Router) {
-		r.Use(middleware.Timeout(30*time.Second), RateLimit(120))
+		r.Use(middleware.Timeout(30 * time.Second))
 		for _, m := range d.Modules {
 			m.Hooks(r)
 		}

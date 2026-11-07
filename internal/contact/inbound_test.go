@@ -2,10 +2,14 @@ package contact
 
 import (
 	"context"
+	"fmt"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	bmail "github.com/baoopn/baoopn-2026/internal/mail"
 )
 
 func TestInboundHappyPathAndDuplicate(t *testing.T) {
@@ -111,7 +115,8 @@ func TestInboundRejects(t *testing.T) {
 		if strings.Contains(recipient, unknown) || strings.Contains(recipient, tok) || strings.Contains(recipient, spamTok) {
 			t.Fatalf("token not redacted: %q", recipient)
 		}
-		if reason == "unknown_token" && (recipient != "reply+…@"+testDomain || sender != "p@example.com" || subject != "Re: Hello") {
+		// Not parsed: the sender is the envelope's and there is no subject.
+		if reason == "unknown_token" && (recipient != "reply+…@"+testDomain || sender != "bounce@example.com" || subject != "") {
 			t.Fatalf("unknown token row: %q %q %q", recipient, sender, subject)
 		}
 		i++
@@ -193,5 +198,140 @@ func TestInboundSignatureAndLimits(t *testing.T) {
 	off.m.d.InboundSecret = ""
 	if code := off.hook(raw, replyAddr(tok)); code != 404 {
 		t.Fatalf("no secret: %d", code)
+	}
+}
+
+func TestInboundTokenOnlyFromEnvelopeAndParsedLast(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	_, tok := e.thread("priya@example.com")
+	parsed := 0
+	e.m.parse = func(raw []byte) (bmail.Inbound, error) {
+		parsed++
+		return bmail.ParseInbound(raw)
+	}
+	unknown := strings.Repeat("cd", 16)
+	garbage := "\x00\xff not a mail at all \r\n--\r\n\x01"
+	// A token in the headers only does not count: the envelope is what was signed.
+	if code := e.hook(email("p@example.com", replyAddr(tok), "<h1@x>", "via header"), "bao@"+testDomain); code != 204 {
+		t.Fatal(code)
+	}
+	if code := e.hook(garbage, replyAddr(unknown)); code != 204 {
+		t.Fatal(code)
+	}
+	if parsed != 0 {
+		t.Fatalf("parsed %d junk emails", parsed)
+	}
+	if e.count(`SELECT count(*) FROM inbound_rejects WHERE reason = 'no_token'`) != 1 ||
+		e.count(`SELECT count(*) FROM inbound_rejects WHERE reason = 'unknown_token'`) != 1 ||
+		e.count(`SELECT count(*) FROM thread_messages WHERE source = 'email'`) != 0 {
+		t.Fatal("rejects")
+	}
+	// A live thread: parsed once.
+	if code := e.hook(email("priya@example.com", replyAddr(tok), "<h2@x>", "real"), replyAddr(tok)); code != 204 || parsed != 1 {
+		t.Fatalf("live: %d, parsed %d", code, parsed)
+	}
+}
+
+func TestInboundRetriedDeliveryStoresAndNotifiesOnce(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	id, tok := e.thread("priya@example.com")
+	raw := email("priya@example.com", replyAddr(tok), "<again@x>", "Only once, please.")
+	for i := 0; i < 3; i++ {
+		if code := e.hook(raw, replyAddr(tok)); code != 204 {
+			t.Fatalf("delivery %d: %d", i, code)
+		}
+		// Past the ten-minute notification throttle: only the duplicate check holds.
+		e.m.mu.Lock()
+		clear(e.m.notified)
+		e.m.mu.Unlock()
+	}
+	e.wait()
+	if n := e.count(`SELECT count(*) FROM thread_messages WHERE thread_id = $1 AND source = 'email'`, id); n != 1 {
+		t.Fatalf("stored %d", n)
+	}
+	notes := 0
+	for _, m := range e.mailer.messages() {
+		if m.To == ownerAddr && strings.Contains(m.Subject, "New reply") {
+			notes++
+		}
+	}
+	if notes != 1 {
+		t.Fatalf("notifications: %d", notes)
+	}
+}
+
+func TestInboundJunkRejectsCapped(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	for i := 0; i < junkRejectsPerMinute+5; i++ {
+		unknown := fmt.Sprintf("%032x", i+1)
+		if code := e.hook("junk", replyAddr(unknown)); code != 204 {
+			t.Fatalf("junk %d: %d", i, code)
+		}
+	}
+	if n := e.count(`SELECT count(*) FROM inbound_rejects`); n != junkRejectsPerMinute {
+		t.Fatalf("rows: %d", n)
+	}
+	if e.m.junkSkipped.Load() != 5 {
+		t.Fatalf("skipped: %d", e.m.junkSkipped.Load())
+	}
+	// Other rejects are not capped.
+	_, tok := e.thread("priya@example.com")
+	if code := e.hook(email("p@example.com", replyAddr(tok), "<a1@x>", "away", "Auto-Submitted: auto-replied"), replyAddr(tok)); code != 204 ||
+		e.count(`SELECT count(*) FROM inbound_rejects WHERE reason = 'automatic'`) != 1 {
+		t.Fatal("automatic reject")
+	}
+}
+
+func TestInboundBusyAndRateLimited(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	_, tok := e.thread("priya@example.com")
+	raw := email("priya@example.com", replyAddr(tok), "<b1@x>", "hello")
+	post := func() *httptest.ResponseRecorder {
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		req := httptest.NewRequest("POST", "/inbound-email", strings.NewReader(raw))
+		req.Header.Set("X-Envelope-To", replyAddr(tok))
+		req.Header.Set("X-Timestamp", ts)
+		req.Header.Set("X-Signature", Sign(testSecret, ts, replyAddr(tok), []byte(raw)))
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		return rec
+	}
+	// Every read slot taken: 503 without reading.
+	for i := 0; i < inboundReads; i++ {
+		e.m.reads <- struct{}{}
+	}
+	if rec := post(); rec.Code != 503 || !strings.Contains(rec.Body.String(), "busy") {
+		t.Fatalf("busy: %d %s", rec.Code, rec.Body)
+	}
+	for i := 0; i < inboundReads; i++ {
+		<-e.m.reads
+	}
+	// Over the site-wide rate: 503 with Retry-After; a bad signature stays 401.
+	e.m.inboundRate = newBucket(1, time.Hour)
+	if rec := post(); rec.Code != 204 {
+		t.Fatalf("first: %d", rec.Code)
+	}
+	if rec := post(); rec.Code != 503 || rec.Header().Get("Retry-After") != "60" {
+		t.Fatalf("limited: %d %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	if code, _ := e.do("POST", "/inbound-email", raw, map[string]string{
+		"X-Envelope-To": replyAddr(tok), "X-Timestamp": ts, "X-Signature": Sign("wrong", ts, replyAddr(tok), []byte(raw)),
+	}); code != 401 {
+		t.Fatalf("bad signature: %d", code)
+	}
+}
+
+func TestBucket(t *testing.T) {
+	b := newBucket(2, time.Minute)
+	now := time.Unix(1_800_000_000, 0)
+	if !b.take(now) || !b.take(now) || b.take(now) {
+		t.Fatal("size")
+	}
+	if !b.take(now.Add(30*time.Second)) || b.take(now.Add(30*time.Second)) {
+		t.Fatal("refill half a window")
+	}
+	if !b.take(now.Add(time.Hour)) || !b.take(now.Add(time.Hour)) || b.take(now.Add(time.Hour)) {
+		t.Fatal("refill caps at size")
 	}
 }

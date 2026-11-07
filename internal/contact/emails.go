@@ -1,8 +1,6 @@
 package contact
 
 import (
-	"context"
-	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -81,35 +79,32 @@ func inboundDoc(b bmail.Brand, link string, t thread, body string) bmail.Doc {
 }
 
 // ackDoc is the visitor's acknowledgement and its Subject header. It goes to
-// an unverified address, so it shows only low-risk facts: never the message,
-// and the name and subject only when they pass safeName and safeSubject.
-func ackDoc(b bmail.Brand, id int64, s submission, template, signature string) (bmail.Doc, string) {
-	subject, ok := safeSubject(s.subject)
-	header := "Re: your message"
-	if ok {
-		header = replySubject(subject)
-	} else {
-		subject = "your message"
+// an unverified address, so it shows only fixed, low-risk facts: never the
+// message or its subject, and the name only when it passes safeName. owner is
+// the site owner's name (the mail sender name), or the brand when empty.
+func ackDoc(b bmail.Brand, owner string, id int64, s submission, template, signature string) (bmail.Doc, string) {
+	if owner = strings.TrimSpace(owner); owner == "" {
+		owner = b.Name
 	}
+	header := bmail.HeaderText("Re: your message to " + owner)
 	var blocks []bmail.Block
 	for _, p := range paragraphs(strings.ReplaceAll(template, "{name}", safeName(s.name))) {
 		blocks = append(blocks, bmail.Block{Kind: bmail.Para, Text: p})
 	}
 	blocks = append(blocks, bmail.Block{Kind: bmail.Fields, Label: "Your message", Fields: []bmail.Field{
 		{Label: "Reference", Value: ref(id), Mono: true},
-		{Label: "Subject", Value: subject},
 		{Label: "Sent", Value: s.at.UTC().Format(sentLayout)},
 	}})
 	return bmail.Doc{
 		Brand:     b,
-		Subject:   bmail.HeaderText(header),
+		Subject:   header,
 		Preheader: "Got your message. Reference " + ref(id) + ".",
 		Kicker:    "Message received",
 		Blocks:    blocks,
 		Signature: signature,
 		Footer: "You got this email because this address was entered on the contact form at " + b.Name +
 			". If that wasn't you, you can ignore it.",
-	}, bmail.HeaderText(header)
+	}, header
 }
 
 // replyDoc is an admin reply: a person's letter, so minimal chrome. Quoted
@@ -158,8 +153,8 @@ var (
 	domainLike = regexp.MustCompile(`(?i)[\p{L}\p{N}-][.．。｡]\p{L}{2,}`)
 	// blankLine separates paragraphs.
 	blankLine = regexp.MustCompile(`\n[ \t]*\n`)
-	// longDigits is a phone or account number.
-	longDigits = regexp.MustCompile(`\p{Nd}{5,}`)
+	// digitRun is digits with separators between them, as in a phone number.
+	digitRun = regexp.MustCompile(`\p{Nd}[\p{Nd}\s().\-–—_/·]{3,}\p{Nd}`)
 )
 
 // hidden reports whether s holds a control, format (bidi, zero-width) or
@@ -181,23 +176,37 @@ func linky(s string) bool {
 		domainLike.MatchString(s) || hidden(s)
 }
 
-// safeSubject returns the subject for the acknowledgement, or false when it
-// could carry relay/phishing content. The checks run on the NFKC form, which
-// is also what is shown.
-func safeSubject(subject string) (string, bool) {
-	s := strings.TrimSpace(norm.NFKC.String(subject))
-	if s == "" || utf8.RuneCountInString(s) > 80 || linky(s) || longDigits.MatchString(s) {
-		return "", false
-	}
-	return s, true
-}
-
 // safeName returns the visitor's name for the greeting, or "there" when it
-// looks like it carries a link or address (relay/phishing content).
+// looks like it carries a link, address or phone number (relay/phishing
+// content). The checks run on the NFKC form, which is also what is shown.
 func safeName(name string) string {
 	n := strings.TrimSpace(norm.NFKC.String(name))
-	if n == "" || utf8.RuneCountInString(n) > 40 || linky(n) || strings.Count(n, ".") > 1 || longDigits.MatchString(n) {
+	if n == "" || utf8.RuneCountInString(n) > 40 || linky(n) || strings.Count(n, ".") > 1 || phoneLike(n) {
 		return "there"
+	}
+	return n
+}
+
+// phoneLike reports a number in s: three or more digits in all, or a run of
+// five or more digits broken only by separators ("1 800 555 0199").
+func phoneLike(s string) bool {
+	if digits(s) >= 3 {
+		return true
+	}
+	for _, run := range digitRun.FindAllString(s, -1) {
+		if digits(run) >= 5 {
+			return true
+		}
+	}
+	return false
+}
+
+func digits(s string) int {
+	n := 0
+	for _, r := range s {
+		if unicode.Is(unicode.Nd, r) {
+			n++
+		}
 	}
 	return n
 }
@@ -209,36 +218,4 @@ func clipRunes(s string, n int) string {
 		return s
 	}
 	return strings.TrimSpace(string([]rune(s)[:n])) + "…"
-}
-
-// ackAllowed reports whether addr may get another acknowledgement: at most
-// ackPerAddress in 24 hours, by address in lower case without its +tag,
-// counting the thread just stored. A failed count refuses (fail closed).
-func (m *Module) ackAllowed(ctx context.Context, threadID int64, addr string) bool {
-	var n int
-	err := m.d.DB.QueryRow(ctx, `
-		SELECT count(*) FROM threads
-		WHERE lower(regexp_replace(email, '\+[^@]*@', '@')) = $1 AND created_at > now() - interval '24 hours'`,
-		normalAddress(addr)).Scan(&n)
-	if err != nil {
-		m.d.Log.Warn("contact: acknowledgement count failed, skipped", slog.Int64("thread_id", threadID), logging.Err(err))
-		return false
-	}
-	return n <= ackPerAddress
-}
-
-// ackPerAddress caps acknowledgements to one address per 24 hours.
-const ackPerAddress = 3
-
-// normalAddress is addr in lower case without a +tag: "A+x@b.co" → "a@b.co".
-func normalAddress(addr string) string {
-	addr = strings.ToLower(strings.TrimSpace(addr))
-	local, domain, ok := strings.Cut(addr, "@")
-	if !ok {
-		return addr
-	}
-	if i := strings.IndexByte(local, '+'); i >= 0 {
-		local = local[:i]
-	}
-	return local + "@" + domain
 }

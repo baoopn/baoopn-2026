@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jhillyerd/enmime/v2"
 )
@@ -340,5 +341,37 @@ func TestTextToHTMLEscapes(t *testing.T) {
 	got := TextToHTML("<script>x</script>\nline & two")
 	if strings.Contains(got, "<script>") || !strings.Contains(got, "&lt;script&gt;x&lt;/script&gt;<br>\nline &amp; two") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParseInboundLimits(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("From: a@example.com\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n")
+	for i := 0; i <= maxParts; i++ {
+		b.WriteString("--x\r\nContent-Type: text/plain\r\n\r\npart " + strconv.Itoa(i) + "\r\n")
+	}
+	b.WriteString("--x--\r\n")
+	if _, err := ParseInbound([]byte(b.String())); err == nil {
+		t.Fatal("too many parts parsed")
+	}
+	long := strings.Repeat("é", maxTextBytes) // 2 bytes each
+	in, err := ParseInbound([]byte("From: a@example.com\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + long))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Text) > maxTextBytes || !utf8.ValidString(in.Text) || len(in.Text) < maxTextBytes-1 {
+		t.Fatalf("text clipped to %d bytes", len(in.Text))
+	}
+}
+
+func TestClipUTF8(t *testing.T) {
+	for _, c := range []struct {
+		s    string
+		n    int
+		want string
+	}{{"abc", 5, "abc"}, {"abc", 2, "ab"}, {"aé", 2, "a"}, {"aé", 3, "aé"}, {"", 0, ""}} {
+		if got := clipUTF8(c.s, c.n); got != c.want {
+			t.Errorf("clipUTF8(%q, %d) = %q", c.s, c.n, got)
+		}
 	}
 }

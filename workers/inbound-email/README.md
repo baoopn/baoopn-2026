@@ -34,12 +34,22 @@ token and stores the reply with the quoted history stripped.
 
 - An address that is not `reply+<32 hex>@INBOUND_DOMAIN`, or a message over
   10 MiB, is refused with `setReject` (the sender gets a bounce).
-- API `2xx`: done. `413`: refused as too large. Other `4xx`: logged and dropped
-  (retrying cannot help; the API records its own rejects with `204`).
-- `5xx` or a network error: up to 3 attempts (0.5 s, then 2 s apart), re-signed
-  each time; after the last one the worker throws, so Cloudflare reports a
-  temporary failure and the sending server retries later. Mail is lost only if
-  the API stays down longer than the sender keeps retrying.
+- API `2xx`: done. `413`: refused as too large. `400`, `404` and `422`: logged
+  and dropped, because retrying cannot help (`404` means the API has no
+  `INBOUND_WEBHOOK_SECRET` or `INBOUND_MAIL_DOMAIN`, and is logged as an error).
+  The API records its own rejects with `204`.
+- Everything else is retried: `401`/`403` (clock skew, or the secret rotated on
+  one side first), `408`, `425`, `429`, `5xx` (the API answers `503` when it is
+  busy or over its site-wide limit) and network errors. There are up to 3
+  attempts (0.5 s, then 2 s apart), re-signed each time. After the last one the
+  worker throws, so Email Routing reports a failure to the sending server, which
+  keeps the message and retries later. Mail is lost only if the API stays
+  unavailable longer than the sender keeps retrying.
+- Retries are safe: the API stores a Message-ID once and notifies once.
+- That a throw becomes a temporary failure rather than a bounce is not stated in
+  the [Email Workers runtime API](https://developers.cloudflare.com/email-routing/email-workers/runtime-api/)
+  docs, which only say that `setReject` is permanent. Check it before relying on
+  long API outages.
 
 Nothing of a message (addresses, subject, body) is logged.
 

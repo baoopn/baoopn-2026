@@ -27,24 +27,36 @@ func mac(secret, ts, envTo string, body []byte) []byte {
 	return m.Sum(nil)
 }
 
-// verify reports whether sig signs (envTo, body) at ts with secret, and ts is
-// within five minutes of now. The comparison is constant-time.
+// signedHeaders checks the signature headers before the body is read: ts is
+// unix seconds within five minutes of now, and sig is the hex of one
+// HMAC-SHA256. It returns the trimmed ts and the decoded sig.
+func signedHeaders(ts, sig string, now time.Time) (string, []byte, bool) {
+	ts = strings.TrimSpace(ts)
+	unix, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return "", nil, false
+	}
+	if d := now.Sub(time.Unix(unix, 0)); d > maxSkew || d < -maxSkew {
+		return "", nil, false
+	}
+	got, err := hex.DecodeString(strings.TrimSpace(sig))
+	if err != nil || len(got) != sha256.Size {
+		return "", nil, false
+	}
+	return ts, got, true
+}
+
+// verify reports whether sig signs (envTo, body) at ts with secret, and the
+// headers pass signedHeaders. The comparison is constant-time.
 func verify(secret, ts, envTo, sig string, body []byte, now time.Time) bool {
 	if secret == "" {
 		return false
 	}
-	unix, err := strconv.ParseInt(strings.TrimSpace(ts), 10, 64)
-	if err != nil {
+	ts, got, ok := signedHeaders(ts, sig, now)
+	if !ok {
 		return false
 	}
-	if d := now.Sub(time.Unix(unix, 0)); d > maxSkew || d < -maxSkew {
-		return false
-	}
-	got, err := hex.DecodeString(strings.TrimSpace(sig))
-	if err != nil {
-		return false
-	}
-	return hmac.Equal(got, mac(secret, strings.TrimSpace(ts), envTo, body))
+	return hmac.Equal(got, mac(secret, ts, envTo, body))
 }
 
 // replyLocal is the local part of a reply address: reply+<32 hex characters>.
@@ -61,20 +73,6 @@ func tokenOf(addr, domain string) string {
 	}
 	if m := replyLocal.FindStringSubmatch(local); m != nil {
 		return m[1]
-	}
-	return ""
-}
-
-// findToken takes the token from the envelope recipient, or failing that
-// from the first header recipient that carries one.
-func findToken(envelopeTo string, recipients []string, domain string) string {
-	if t := tokenOf(envelopeTo, domain); t != "" {
-		return t
-	}
-	for _, r := range recipients {
-		if t := tokenOf(r, domain); t != "" {
-			return t
-		}
 	}
 	return ""
 }

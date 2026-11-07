@@ -28,13 +28,20 @@ export function rejectReason(to, size, domain) {
 }
 
 /**
+ * API answers that retrying cannot fix: 400 (unreadable request), 404 (the
+ * hook is not configured on the API: our misconfiguration) and 422.
+ */
+const PERMANENT = new Set([400, 404, 422]);
+
+/**
  * What to do with the API's answer:
- * "done" (2xx), "reject" (413: refuse the message), "drop" (other 4xx: log
- * and stop, retrying will not help) or "retry" (5xx and anything else).
+ * "done" (2xx), "reject" (413: refuse the message), "drop" (400, 404, 422:
+ * log and stop) or "retry" (everything else, including 401 and 403 for clock
+ * skew or a secret rotated on one side first, 408, 425, 429 and 5xx).
  */
 export function classify(status) {
 	if (status >= 200 && status < 300) return 'done';
 	if (status === 413) return 'reject';
-	if (status >= 400 && status < 500) return 'drop';
+	if (PERMANENT.has(status)) return 'drop';
 	return 'retry';
 }

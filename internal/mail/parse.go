@@ -3,12 +3,21 @@ package mail
 import (
 	"bytes"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jhillyerd/enmime/v2"
 )
 
 // maxRecipients bounds how many header recipients are read from one email.
 const maxRecipients = 50
+
+// Bounds on how much work one email can cause. A message with more than
+// maxParts MIME parts fails to parse; longer bodies are cut.
+const (
+	maxParts     = 100
+	maxHTMLBytes = 2 << 20
+	maxTextBytes = 1 << 20
+)
 
 // Inbound is a received email, reduced to what the inbox needs.
 type Inbound struct {
@@ -27,7 +36,7 @@ type Inbound struct {
 	Headers map[string]string
 }
 
-var parser = enmime.NewParser(enmime.DisableTextConversion(true))
+var parser = enmime.NewParser(enmime.DisableTextConversion(true), enmime.MaxMIMEParts(maxParts))
 
 // ParseInbound parses a raw RFC 822 message.
 func ParseInbound(raw []byte) (Inbound, error) {
@@ -38,8 +47,8 @@ func ParseInbound(raw []byte) (Inbound, error) {
 	in := Inbound{
 		MessageID: env.GetHeader("Message-ID"),
 		Subject:   env.GetHeader("Subject"),
-		Text:      env.Text,
-		HTML:      env.HTML,
+		Text:      clipUTF8(env.Text, maxTextBytes),
+		HTML:      clipUTF8(env.HTML, maxHTMLBytes),
 		Headers:   map[string]string{},
 	}
 	for _, k := range env.GetHeaderKeys() {
@@ -77,4 +86,15 @@ func ParseInbound(raw []byte) (Inbound, error) {
 		}
 	}
 	return in, nil
+}
+
+// clipUTF8 cuts s to at most n bytes without splitting a UTF-8 sequence.
+func clipUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

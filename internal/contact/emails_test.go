@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	bmail "github.com/baoopn/baoopn-2026/internal/mail"
 	"github.com/baoopn/baoopn-2026/internal/sitesettings"
@@ -20,6 +19,8 @@ var update = flag.Bool("update", false, "rewrite the golden emails in testdata/e
 
 var (
 	goldenBrand = bmail.BrandOf("https://example.test")
+	// goldenOwner is the sender name the acknowledgement subject names.
+	goldenOwner = "Sam Owner"
 	goldenAt    = time.Date(2026, 11, 7, 14, 5, 0, 0, time.UTC)
 )
 
@@ -52,8 +53,8 @@ func goldenSettings() sitesettings.Settings {
 
 func goldenDocs() map[string]bmail.Doc {
 	s := goldenSettings()
-	ack, _ := ackDoc(goldenBrand, 123, goldenSub(), s.AutoReplyText, s.Signature)
-	hostile, _ := ackDoc(goldenBrand, 123, hostileSub(), s.AutoReplyText, s.Signature)
+	ack, _ := ackDoc(goldenBrand, goldenOwner, 123, goldenSub(), s.AutoReplyText, s.Signature)
+	hostile, _ := ackDoc(goldenBrand, goldenOwner, 123, hostileSub(), s.AutoReplyText, s.Signature)
 	return map[string]bmail.Doc{
 		"new-thread":         newThreadDoc(goldenBrand, goldenLink, 123, goldenSub()),
 		"ack":                ack,
@@ -181,7 +182,7 @@ func TestReplyTextIsUnchanged(t *testing.T) {
 func TestAckShowsNoMessage(t *testing.T) {
 	s := sitesettings.Defaults()
 	for _, sub := range []submission{goldenSub(), hostileSub()} {
-		d, _ := ackDoc(goldenBrand, 123, sub, s.AutoReplyText, s.Signature)
+		d, _ := ackDoc(goldenBrand, goldenOwner, 123, sub, s.AutoReplyText, s.Signature)
 		text, html := renderDoc(t, d)
 		r := []rune(sub.message)
 		for i := 0; i+12 <= len(r); i++ {
@@ -197,19 +198,24 @@ func TestAckShowsNoMessage(t *testing.T) {
 			t.Fatal("footer missing")
 		}
 	}
-	d, header := ackDoc(goldenBrand, 123, hostileSub(), s.AutoReplyText, s.Signature)
+	d, header := ackDoc(goldenBrand, goldenOwner, 123, hostileSub(), s.AutoReplyText, s.Signature)
 	text, _ := renderDoc(t, d)
-	if header != "Re: your message" || !strings.Contains(text, "Subject: your message") || !strings.HasPrefix(text, "Hi there,") {
+	if header != "Re: your message to Sam Owner" || strings.Contains(text, "Subject") || !strings.HasPrefix(text, "Hi there,") {
 		t.Fatalf("hostile ack: %q %q", header, text)
 	}
-	_, header = ackDoc(goldenBrand, 123, goldenSub(), s.AutoReplyText, s.Signature)
-	if header != "Re: A new portfolio site" {
+	// The subject the visitor typed never appears, even a harmless one.
+	d, header = ackDoc(goldenBrand, goldenOwner, 123, goldenSub(), s.AutoReplyText, s.Signature)
+	text, html := renderDoc(t, d)
+	if header != "Re: your message to Sam Owner" || strings.Contains(text, goldenSub().subject) || strings.Contains(html, goldenSub().subject) {
 		t.Fatalf("header %q", header)
 	}
+	if _, header = ackDoc(goldenBrand, " ", 123, goldenSub(), s.AutoReplyText, s.Signature); header != "Re: your message to example.test" {
+		t.Fatalf("no owner name: %q", header)
+	}
 	want := strings.ReplaceAll(s.AutoReplyText, "{name}", "Priya Shah") +
-		"\n\nYour message\nReference: #123\nSubject: A new portfolio site\nSent: 7 Nov 2026, 14:05 UTC" +
+		"\n\nYour message\nReference: #123\nSent: 7 Nov 2026, 14:05 UTC" +
 		sigSep + s.Signature + "\n\nYou got this email because this address was entered on the contact form at example.test. If that wasn't you, you can ignore it."
-	if d, _ := ackDoc(goldenBrand, 123, goldenSub(), s.AutoReplyText, s.Signature); mustText(t, d) != want {
+	if d, _ := ackDoc(goldenBrand, goldenOwner, 123, goldenSub(), s.AutoReplyText, s.Signature); mustText(t, d) != want {
 		t.Fatalf("ack text:\n%q\nwant\n%q", mustText(t, d), want)
 	}
 }
@@ -219,43 +225,6 @@ func mustText(t *testing.T, d bmail.Doc) string {
 	return text
 }
 
-func TestSafeSubject(t *testing.T) {
-	for in, ok := range map[string]bool{
-		"Hello there":            true,
-		"A new portfolio site":   true,
-		"Mr. Kim asks":           true,
-		"example.com":            false,
-		"exa mple.com":           false,
-		"exam．com":               false,
-		"see example。com":        false,
-		"ехаmрlе.соm":            false, // Cyrillic lookalikes
-		"call 5551234567":        false,
-		"call 555 1234":          true,
-		"hello​world":            false, // zero-width space
-		"hello ‮gnp.exe":         false, // RLO
-		"ｈｔｔｐ stuff":             false, // full-width http
-		"ｅｘａｍｐｌｅ．ｃｏｍ":            false, // full-width domain
-		"me@x":                   false,
-		"a/b":                    false,
-		"WWW thing":              false,
-		"a\r\nBcc: x@example.co": false,
-		strings.Repeat("a", 81):  false,
-		strings.Repeat("a", 80):  true,
-		"":                       false,
-	} {
-		got, gotOK := safeSubject(in)
-		if gotOK != ok {
-			t.Errorf("safeSubject(%q) = %v, want %v", in, gotOK, ok)
-		}
-		if gotOK && (got == "" || !utf8.ValidString(got)) {
-			t.Errorf("safeSubject(%q) returned %q", in, got)
-		}
-	}
-	if got, _ := safeSubject("Ｈｅｌｌｏ"); got != "Hello" {
-		t.Errorf("the NFKC form is shown: %q", got)
-	}
-}
-
 func TestSafeName(t *testing.T) {
 	for in, want := range map[string]string{
 		"Priya Shah": "Priya Shah", "": "there", "visit http://evil.example": "there",
@@ -263,6 +232,9 @@ func TestSafeName(t *testing.T) {
 		"evil.com": "there", "exa mple.com": "there", "exam．com": "there", "ехаmрlе.соm": "there",
 		"call 5551234567": "there", "Pri​ya": "there", "Priya ‮Shah": "there", "ｈｔｔｐ": "there",
 		"ｅｘａｍｐｌｅ．ｃｏｍ": "there", "Ｐｒｉｙａ": "Priya", "<img src=x onerror=alert(1)>": "there",
+		// Phone numbers, whole or split by separators.
+		"1-800-555-0199": "there", "1 800 555 0199": "there", "(800) 555": "there", "Call 555": "there",
+		"Bao 2": "Bao 2", "Anne-Marie": "Anne-Marie", "Jo 12": "Jo 12", "J0hn 1 2": "there",
 	} {
 		if got := safeName(in); got != want {
 			t.Errorf("safeName(%q) = %q, want %q", in, got, want)
@@ -271,7 +243,10 @@ func TestSafeName(t *testing.T) {
 }
 
 func TestNormalAddress(t *testing.T) {
-	for in, want := range map[string]string{"A@X.com": "a@x.com", "a+tag@x.com": "a@x.com", " a+b+c@x.com ": "a@x.com", "nope": "nope"} {
+	for in, want := range map[string]string{
+		"A@X.com": "a@x.com", "a+tag@x.com": "a@x.com", " a+b+c@x.com ": "a@x.com", "nope": "nope",
+		"A.B@gmail.com": "ab@gmail.com", "a.b+x@GoogleMail.com": "ab@gmail.com", "a.b@example.com": "a.b@example.com",
+	} {
 		if got := normalAddress(in); got != want {
 			t.Errorf("normalAddress(%q) = %q, want %q", in, got, want)
 		}
@@ -290,9 +265,7 @@ func (e *env) acks(addr string) int {
 }
 
 func (e *env) globalAcks() int {
-	e.m.ackMu.Lock()
-	defer e.m.ackMu.Unlock()
-	return len(e.m.acks)
+	return e.count(`SELECT count(*) FROM contact_acks WHERE sent_at > now() - interval '1 hour'`)
 }
 
 func TestAckPerAddressCap(t *testing.T) {
@@ -332,7 +305,7 @@ func TestAckPerAddressCap(t *testing.T) {
 	if e.acks("other@x.com") != 1 {
 		t.Fatal("another address is capped too")
 	}
-	if _, err := e.db.Exec(t.Context(), `UPDATE threads SET created_at = now() - interval '25 hours' WHERE email LIKE 'a%@x.com'`); err != nil {
+	if _, err := e.db.Exec(t.Context(), `UPDATE contact_acks SET sent_at = now() - interval '25 hours' WHERE address_key = 'a@x.com'`); err != nil {
 		t.Fatal(err)
 	}
 	send("a@x.com")
@@ -345,7 +318,7 @@ func TestAckCapFailsClosed(t *testing.T) {
 	e := newEnv(t, true, testDomain)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if e.m.ackAllowed(ctx, 1, "a@x.com") {
+	if e.m.reserveAck(ctx, 1, "a@x.com") {
 		t.Fatal("a failed count allowed the ack")
 	}
 }
@@ -389,7 +362,8 @@ func TestAlertsHaveNoLiveLinks(t *testing.T) {
 			}
 		}
 		links := regexp.MustCompile(`<a [^>]*href="([^"]*)"`).FindAllStringSubmatch(html, -1)
-		if len(links) != 2 || links[0][1] != goldenLink || links[1][1] != goldenBrand.URL {
+		// The brand badge, the inbox button and the footer site link: ours only.
+		if len(links) != 3 || links[0][1] != goldenBrand.URL || links[1][1] != goldenLink || links[2][1] != goldenBrand.URL {
 			t.Errorf("%s: links %v", name, links)
 		}
 	}

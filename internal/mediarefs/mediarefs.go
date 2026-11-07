@@ -34,7 +34,7 @@ const StemLen = 24
 var Tables = []string{"posts", "post_parts", "projects", "settings", "thread_messages"}
 
 // Ignored are the tables that never hold content references.
-var Ignored = []string{"media", "media_jobs", "threads", "inbound_rejects",
+var Ignored = []string{"media", "media_jobs", "threads", "inbound_rejects", "contact_acks",
 	"page_view_stats", "page_visitors", "page_visitor_hours", "goose_db_version"}
 
 func isHex(c byte) bool { return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' }
