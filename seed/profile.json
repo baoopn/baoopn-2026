@@ -11,7 +11,7 @@
 	"socials": [
 		{ "label": "GitHub", "url": "https://github.com/baoopn", "icon": "github", "handle": "@baoopn" },
 		{ "label": "LinkedIn", "url": "https://www.linkedin.com/in/baoopn", "icon": "linkedin", "handle": "Bao Nguyen" },
-		{ "label": "Instagram", "url": "https://www.instagram.com/baoongisoo", "icon": "instagram", "handle": "@baoongisoo" },
+		{ "label": "Instagram", "url": "https://www.instagram.com/baoopn.me", "icon": "instagram", "handle": "@baoopn.me" },
 		{ "label": "Email", "url": "mailto:me@baoopn.com", "icon": "email", "handle": "me@baoopn.com" }
 	],
 	"skills": [
