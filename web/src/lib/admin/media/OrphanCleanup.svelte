@@ -18,6 +18,7 @@
 	let copies = $state<Record<string, boolean>>({});
 	let confirmOpen = $state(false);
 	let savingAuto = $state(false);
+	let cleaning = $state(false);
 
 	const kindLabel: Record<OrphanKind, string> = {
 		row: 'Media',
@@ -68,7 +69,8 @@
 	async function clean() {
 		// Never an empty list: the API reads that as "the whole plan".
 		const keys = chosen.map((c) => c.key);
-		if (keys.length === 0) return;
+		if (keys.length === 0 || cleaning) return;
+		cleaning = true;
 		try {
 			const r = await post<OrphanResult>('/media/orphans', { keys });
 			const d = r.deleted;
@@ -80,6 +82,8 @@
 			(r.errors ? toasts.error : toasts.success)('Cleanup done', parts.join(', ') + '.');
 		} catch (err) {
 			toasts.error('Cleanup failed', errorMessage(err));
+		} finally {
+			cleaning = false;
 		}
 		await load();
 	}
@@ -228,9 +232,9 @@
 				type="button"
 				class="btn btn-secondary"
 				onclick={() => (confirmOpen = true)}
-				disabled={!plan.enabled || chosen.length === 0}
+				disabled={!plan.enabled || chosen.length === 0 || cleaning}
 			>
-				{#if loading}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{:else}<Trash2
+				{#if cleaning}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{:else}<Trash2
 						class="size-4"
 						aria-hidden="true"
 					/>{/if}
@@ -247,7 +251,11 @@
 			{:else}
 				No cleanup has run yet.
 			{/if}
-			Files in this browser's unsaved drafts are kept.
+			"Clean up now" keeps files that this browser's unsaved drafts use.
+		</p>
+		<p class="hint">
+			The daily cleanup cannot see unsaved drafts in your browser. Save a draft post to keep its
+			images.
 		</p>
 	{/if}
 </section>

@@ -118,7 +118,21 @@ func TestOrphanRetryRace(t *testing.T) {
 		_, err := s.Retry(ctx, id)
 		done <- err
 	}()
-	time.Sleep(200 * time.Millisecond) // Retry passes its check and waits on the row lock
+	// Wait until Retry has passed its check and waits on the row lock.
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		var waiting bool
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock'
+			AND query LIKE 'UPDATE media SET status = ''processing''%')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Retry never waited on the row lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}

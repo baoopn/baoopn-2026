@@ -264,7 +264,8 @@ export interface Media {
 }
 
 // Orphan cleanup (GET/POST /api/admin/media/orphans). References are matched
-// by the file's 24-hex stem across posts, post parts, projects and settings.
+// by the file's 24-hex stem across posts, post parts, projects, settings and
+// thread messages (sent replies).
 export type OrphanKind = 'row' | 'object' | 'local' | 'local_copy' | 'original' | 'temp';
 
 export interface OrphanCandidate {

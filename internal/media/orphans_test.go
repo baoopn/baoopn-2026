@@ -333,3 +333,28 @@ func TestOrphanPercentEncodedReference(t *testing.T) {
 		t.Fatalf("percent-encoded reference not seen: %+v", c)
 	}
 }
+
+// A row whose name the store never gives can match no reference; it is left
+// alone rather than always deleted.
+func TestOrphanForeignRowName(t *testing.T) {
+	s := orphanStore(t, nil)
+	exec(t, s, `INSERT INTO media (filename, content_type, size_bytes, touched_at)
+		VALUES ('legacy-logo.png', 'image/png', 5, now() - interval '30 days')`)
+	p := mustPlan(t, s)
+	if len(p.Candidates) != 0 || p.Kept.Foreign != 1 {
+		t.Fatalf("candidates %v kept %+v", keys(p), p.Kept)
+	}
+}
+
+// Sent replies keep the files they link to.
+func TestOrphanThreadMessageReference(t *testing.T) {
+	s := orphanStore(t, nil)
+	id := addRow(t, s, 1, rowOpt{age: 30 * day})
+	exec(t, s, `INSERT INTO threads (id, reply_token, name, email, subject) VALUES (1, $1, 'V', 'v@example.com', 'Hi')`,
+		strings.Repeat("d", 32))
+	exec(t, s, `INSERT INTO thread_messages (thread_id, direction, source, body, status)
+		VALUES (1, 'outbound', 'admin', $1, 'sent')`, "See https://media.example.com/"+stemN(1)+".webp")
+	if c := candidate(mustPlan(t, s), rowKey(id)); c != nil {
+		t.Fatalf("row linked from a sent reply is a candidate: %+v", c)
+	}
+}

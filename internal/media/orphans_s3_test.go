@@ -141,3 +141,34 @@ func TestOrphanBucketRowIdempotent(t *testing.T) {
 		t.Fatalf("second clean = %+v, %v", res, err)
 	}
 }
+
+// A database that does not own the bucket (a fresh or staging database
+// pointed at the production bucket) sees every object as an orphan. The
+// automatic run must not delete them.
+func TestOrphanBrakeForeignBucket(t *testing.T) {
+	s, f := newOrphanS3Store(t)
+	ctx := context.Background()
+	for n := range 20 {
+		f.putObj(stemN(n)+".webp", []byte("x"), time.Now().Add(-30*day))
+	}
+	if p := mustPlan(t, s); p.Totals.Eligible != 20 {
+		t.Fatalf("eligible = %d", p.Totals.Eligible)
+	}
+	res, err := s.CleanOrphans(ctx, TriggerAuto, nil)
+	if err != nil || res.Reason != "brake" || res.Deleted.total() != 0 {
+		t.Fatalf("auto run = %+v, %v", res, err)
+	}
+	for n := range 20 {
+		if !f.has(stemN(n) + ".webp") {
+			t.Fatalf("object %d deleted", n)
+		}
+	}
+
+	// With rows present, deleting most of the stored files still brakes.
+	for n := range 3 {
+		addRow(t, s, 100+n, rowOpt{age: day})
+	}
+	if res, err := s.CleanOrphans(ctx, TriggerAuto, nil); err != nil || res.Reason != "brake" {
+		t.Fatalf("auto run with rows = %+v, %v", res, err)
+	}
+}

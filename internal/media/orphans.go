@@ -101,7 +101,9 @@ type OrphanPlan struct {
 	Totals       OrphanTotals      `json:"totals"`
 	LastRun      *OrphanRun        `json:"last_run"`
 
-	rows, readyRows, refs int // for the auto brake
+	// For the auto brake: media rows, ready rows, referenced stems, and
+	// stored-name files (bucket root objects plus MEDIA_DIR files).
+	rows, readyRows, refs, files int
 }
 
 type orphanRow struct {
@@ -200,10 +202,12 @@ func (s *Store) PlanOrphans(ctx context.Context) (OrphanPlan, error) {
 		st := stemOf(o.Key)
 		objByStem[st] = append(objByStem[st], o)
 		objByName[o.Key] = o
+		p.files++
 	}
 	localByStem := map[string][]localFile{}
 	for _, f := range locals {
 		localByStem[stemOf(f.name)] = append(localByStem[stemOf(f.name)], f)
+		p.files++
 	}
 
 	add := func(c OrphanCandidate, min time.Duration) {
@@ -212,6 +216,11 @@ func (s *Store) PlanOrphans(ctx context.Context) (OrphanPlan, error) {
 	}
 
 	for _, r := range rows {
+		if !fileRe.MatchString(r.filename) {
+			// Not a name the store gives: no reference could ever match it.
+			p.Kept.Foreign++
+			continue
+		}
 		switch {
 		case r.status == StatusProcessing || r.active():
 			p.Kept.Processing++

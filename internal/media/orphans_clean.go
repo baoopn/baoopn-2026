@@ -196,17 +196,27 @@ func (s *Store) selectWork(plan OrphanPlan, keys []string, res *OrphanResult) []
 	return work
 }
 
-// brake stops an automatic run that looks wrong: it would delete many rows,
-// or no reference was found although files are in use.
+// brake stops an automatic run that looks wrong: it would delete many rows
+// or files, files although the media table is empty (a bucket another
+// database owns), or no reference was found although files are in use.
 func brake(plan OrphanPlan, work []OrphanCandidate) string {
-	rows := 0
+	rows, files := 0, 0
 	for _, c := range work {
-		if c.Kind == KindRow {
+		switch c.Kind {
+		case KindRow:
 			rows++
+		case KindObject, KindLocal:
+			files++
 		}
 	}
 	if rows > max(10, plan.rows/2) {
 		return fmt.Sprintf("%d of %d media rows would be deleted", rows, plan.rows)
+	}
+	if files > 0 && plan.rows == 0 {
+		return fmt.Sprintf("%d files would be deleted but the media table is empty", files)
+	}
+	if files > max(10, plan.files/2) {
+		return fmt.Sprintf("%d of %d stored files would be deleted", files, plan.files)
 	}
 	if plan.refs == 0 && plan.readyRows >= 3 {
 		return "no media references found in any content"
@@ -268,6 +278,9 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, c OrphanCandidate, refs 
 		}
 		if err != nil {
 			return "", err
+		}
+		if len(stem) != mediarefs.StemLen || !fileRe.MatchString(c.Name) || stemOf(c.Name) != stem {
+			return "foreign", nil
 		}
 		r := orphanRow{status: status, jobStatus: job, originalDeleted: deleted}
 		switch {

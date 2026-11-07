@@ -146,8 +146,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 - **Dedupe:** the same uncropped original uploaded again returns the existing `Media`;
   `sha256` is computed on the stored bytes.
 - **Orphan cleanup** (Settings → Media storage):
-  - A file is in use when its 24-hex stem appears anywhere in `posts`, `post_parts`, `projects`
-    or `settings` (every column, every key; drafts included). Matching the stem, not the URL,
+  - A file is in use when its 24-hex stem appears anywhere in `posts`, `post_parts`, `projects`,
+    `settings` or `thread_messages` (every column, every key; drafts and sent replies included;
+    percent- and JSON-escaped links count too). Matching the stem, not the URL,
     keeps files whose extension changed in a fallback and links in any form (`/media/<file>`,
     `MEDIA_PUBLIC_URL/<file>`, absolute site URLs).
   - Unused files are deleted only after `MEDIA_ORPHAN_GRACE` (7 days) unused. The clock is
@@ -162,10 +163,16 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
   - Each run re-checks every candidate under a lock that content saves share, deletes at
     most `MEDIA_ORPHAN_MAX_PER_PASS` (50) and logs each deletion. The last run's counts are
     kept in the `media.orphans` setting.
-  - Local drafts live in the browser, so the server does not see them; the admin page leaves
-    out files its own drafts name.
-  - The daily run is off until turned on (`PUT /media/orphans/auto`). It refuses to run when
-    it would delete more than half the rows, or finds no references while files are in use.
+  - Local drafts live in the browser, so the server does not see them. "Clean up now" leaves
+    out files the browser's own drafts name; the daily run cannot, so save a draft post to keep
+    its images.
+  - The daily run is off until turned on (`PUT /media/orphans/auto`). It deletes nothing when
+    it would delete more than max(10, half) of the media rows, or more than max(10, half) of
+    the stored files (bucket root objects plus `MEDIA_DIR` files), or any file while the media
+    table is empty, or when it finds no references while 3 or more files are in use.
+  - The bucket and `MEDIA_DIR` must belong to this database only. Never point another
+    deployment (staging, a preview, a fresh database) at them: its cleanup would see every
+    file as unused.
 - **URLs:** with `MEDIA_PUBLIC_URL` set, media URLs are `MEDIA_PUBLIC_URL/<file>`. On startup,
   stored `/media/<file>` links (post parts, covers, project bodies, the profile) are rewritten
   to it once. `/media/<file>` still 301-redirects for old external links.
