@@ -34,7 +34,7 @@ func goldenSub() submission {
 // hostileSub is a form a relay or phishing attempt might send.
 func hostileSub() submission {
 	return submission{name: "<img src=x onerror=alert(1)>", email: "victim@example.test", subject: `"><script>x</script>`,
-		message: "QZXMARKERQZX unique words </td></table>{{.}} javascript:alert(1) visit evil.example now", at: goldenAt}
+		message: "QZXMARKERQZX unique words </td></table>{{.}} javascript:alert(1) visit evil.example now or https://evil.example/login?next=x, www.evil.example, mail admin@evil.example", at: goldenAt}
 }
 
 func goldenThread() thread {
@@ -55,10 +55,14 @@ func goldenDocs() map[string]bmail.Doc {
 	ack, _ := ackDoc(goldenBrand, 123, goldenSub(), s.AutoReplyText, s.Signature)
 	hostile, _ := ackDoc(goldenBrand, 123, hostileSub(), s.AutoReplyText, s.Signature)
 	return map[string]bmail.Doc{
-		"new-thread":  newThreadDoc(goldenBrand, goldenLink, 123, goldenSub()),
-		"ack":         ack,
-		"ack-hostile": hostile,
-		"inbound":     inboundDoc(goldenBrand, goldenLink, goldenThread(), "Sounds good. Tuesday works for me.\n\nPriya"),
+		"new-thread":         newThreadDoc(goldenBrand, goldenLink, 123, goldenSub()),
+		"ack":                ack,
+		"ack-hostile":        hostile,
+		"new-thread-hostile": newThreadDoc(goldenBrand, goldenLink, 123, hostileSub()),
+		"inbound-hostile": inboundDoc(goldenBrand, goldenLink, thread{ThreadSummary: ThreadSummary{ID: 123,
+			Name: "Support team support@evil.example", Email: "x@evil.example", Subject: "Reset at http://evil.example"}},
+			hostileSub().message),
+		"inbound": inboundDoc(goldenBrand, goldenLink, goldenThread(), "Sounds good. Tuesday works for me.\n\nPriya"),
 		"reply": replyDoc(goldenBrand, "Re: A new portfolio site",
 			"Hi Priya,\n\nTuesday at 10 works. I will send a link.\n\n> Could we have a call next week?\n> Thanks,\n\nTalk soon.", s.Signature),
 	}
@@ -366,5 +370,27 @@ func TestReplyWithQuoteKeepsThreading(t *testing.T) {
 	if m.To != "priya@example.com" || m.ReplyTo != replyAddr(tok) || m.Subject != "Re: Hello" || m.AutoSubmitted != "" ||
 		m.InReplyTo != "<in-1@mail.example>" || len(m.References) != 1 || m.References[0] != "<in-1@mail.example>" {
 		t.Fatalf("threading changed: %+v", m)
+	}
+}
+
+// TestAlertsHaveNoLiveLinks checks a stranger's URLs and addresses never form
+// one text run (which mail clients would turn into a link), and the only
+// links are the inbox button and the footer.
+func TestAlertsHaveNoLiveLinks(t *testing.T) {
+	email := regexp.MustCompile(`[^\s<>@]+@[^\s<>@]+\.[a-z]{2,}`)
+	for _, name := range []string{"new-thread-hostile", "inbound-hostile"} {
+		_, html := renderDoc(t, goldenDocs()[name])
+		body := html[strings.Index(html, "<body"):]
+		for _, run := range regexp.MustCompile(`<[^>]*>`).Split(body, -1) {
+			l := strings.ToLower(run)
+			if strings.Contains(l, "http://") || strings.Contains(l, "https://") || strings.Contains(l, "www.") ||
+				email.MatchString(l) || strings.Contains(l, "evil.example") {
+				t.Errorf("%s: live link text %q", name, run)
+			}
+		}
+		links := regexp.MustCompile(`<a [^>]*href="([^"]*)"`).FindAllStringSubmatch(html, -1)
+		if len(links) != 2 || links[0][1] != goldenLink || links[1][1] != goldenBrand.URL {
+			t.Errorf("%s: links %v", name, links)
+		}
 	}
 }

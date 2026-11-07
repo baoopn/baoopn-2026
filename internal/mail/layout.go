@@ -5,6 +5,7 @@ import (
 	"embed"
 	htmltemplate "html/template"
 	"net/url"
+	"regexp"
 	"strings"
 	texttemplate "text/template"
 )
@@ -78,6 +79,8 @@ const (
 	msoOpen      = `<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td><![endif]-->`
 	msoClose     = `<!--[if mso]></td></tr></table><![endif]-->`
 	preheaderPad = "&#847;&zwnj;&nbsp;"
+	// msoFonts keeps Outlook desktop off Times when a stack's fonts are missing.
+	msoFonts = `<!--[if mso]><style>body,table,td,div,a{font-family:Arial,Helvetica,sans-serif !important;}</style><![endif]-->`
 )
 
 var (
@@ -88,6 +91,8 @@ var (
 		"homeURL":      func(b Brand) string { return b.home() },
 		"msoOpen":      func() htmltemplate.HTML { return msoOpen },
 		"msoClose":     func() htmltemplate.HTML { return msoClose },
+		"msoFonts":     func() htmltemplate.HTML { return msoFonts },
+		"defang":       defang,
 		"preheaderPad": func() htmltemplate.HTML { return htmltemplate.HTML(strings.Repeat(preheaderPad, 40)) },
 	}).ParseFS(layoutFS, "templates/layout.html.tmpl"))
 
@@ -189,4 +194,63 @@ func textBlock(d Doc, b Block) string {
 		return b.Label + ": " + u
 	}
 	return b.Text
+}
+
+// Piece is part of a line of HTML text: Sep pieces ("." "@" ":") are shown in
+// their own span, which stops mail clients from turning a URL or address a
+// stranger typed into a live link. Copying the text still gives it whole.
+type Piece struct {
+	Text string
+	Sep  bool
+}
+
+// defang splits line into pieces, breaking up every URL-, domain- or
+// address-like word at its separators. Other words are one piece.
+func defang(line string) []Piece {
+	var out []Piece
+	add := func(text string, sep bool) {
+		if text == "" {
+			return
+		}
+		if n := len(out); n > 0 && !sep && !out[n-1].Sep {
+			out[n-1].Text += text
+			return
+		}
+		out = append(out, Piece{Text: text, Sep: sep})
+	}
+	start := 0
+	for i := 0; i <= len(line); i++ {
+		if i < len(line) && line[i] != ' ' && line[i] != '\t' {
+			continue
+		}
+		word := line[start:i]
+		if linkLike(word) {
+			from := 0
+			for j, r := range word {
+				if strings.ContainsRune(".@:．。｡＠", r) {
+					add(word[from:j], false)
+					add(string(r), true)
+					from = j + len(string(r))
+				}
+			}
+			add(word[from:], false)
+		} else {
+			add(word, false)
+		}
+		if i < len(line) {
+			add(line[i:i+1], false)
+		}
+		start = i + 1
+	}
+	return out
+}
+
+// domainish is a label, a dot (ASCII, full-width or ideographic) and two or
+// more letters.
+var domainish = regexp.MustCompile(`(?i)[\p{L}\p{N}-][.．。｡]\p{L}{2,}`)
+
+func linkLike(word string) bool {
+	l := strings.ToLower(word)
+	return strings.ContainsAny(word, "@＠") || strings.Contains(l, "://") || strings.Contains(l, "www") ||
+		strings.HasPrefix(l, "mailto:") || domainish.MatchString(word)
 }

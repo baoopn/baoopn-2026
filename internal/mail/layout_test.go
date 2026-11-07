@@ -182,3 +182,57 @@ func TestRenderedDocBuildsBothParts(t *testing.T) {
 		t.Fatal("both parts must be present")
 	}
 }
+
+func TestLongWordsWrap(t *testing.T) {
+	word := strings.Repeat("x", 3001)
+	url := "https://docs.google.com/document/d/" + strings.Repeat("A1b2C3d4", 13) + "/edit"
+	cells := map[string]string{"TITLE": "", "PARA": "", "EXCERPT": "", "QUOTE": "", "FIELD": "", "MONO": ""}
+	for k := range cells {
+		cells[k] = k + word + " " + url
+	}
+	_, html := render(t, Doc{Brand: testBrand, Title: cells["TITLE"], Blocks: []Block{
+		{Kind: Para, Text: cells["PARA"]}, {Kind: Excerpt, Text: cells["EXCERPT"]}, {Kind: Quote, Text: "> " + cells["QUOTE"]},
+		{Kind: Fields, Fields: []Field{{Label: "Name", Value: cells["FIELD"]}, {Label: "Email", Value: cells["MONO"], Mono: true}}},
+	}})
+	for k := range cells {
+		i := strings.Index(html, k+"xxx")
+		if i < 0 {
+			t.Fatalf("%s not rendered", k)
+		}
+		open := max(strings.LastIndex(html[:i], "<td "), strings.LastIndex(html[:i], "<div "))
+		if tag := html[open:i]; !strings.Contains(tag, "overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word") {
+			t.Errorf("%s cell does not wrap long words: %.200s", k, tag)
+		}
+	}
+	if strings.Count(html, "table-layout:fixed") < 2 {
+		t.Fatal("the fields and quote tables are not fixed")
+	}
+}
+
+func TestDefang(t *testing.T) {
+	join := func(ps []Piece) (string, string) {
+		var plain, marked strings.Builder
+		for _, p := range ps {
+			plain.WriteString(p.Text)
+			if p.Sep {
+				marked.WriteString("[" + p.Text + "]")
+			} else {
+				marked.WriteString(p.Text)
+			}
+		}
+		return plain.String(), marked.String()
+	}
+	for in, want := range map[string]string{
+		"Hello there. Mr. Kim":          "Hello there. Mr. Kim",
+		"see https://evil.example/x ok": "see https[:]//evil[.]example/x ok",
+		"mail a@b.co":                   "mail a[@]b[.]co",
+		"www.x.test":                    "www[.]x[.]test",
+		"exam．com":                      "exam[．]com",
+		"":                              "",
+	} {
+		plain, marked := join(defang(in))
+		if plain != in || marked != want {
+			t.Errorf("defang(%q) = %q, want %q", in, marked, want)
+		}
+	}
+}

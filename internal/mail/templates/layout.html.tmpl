@@ -25,6 +25,7 @@ a { color: inherit; }
   .quote { background-color: #353043 !important; }
   .btn { background-color: #f2ecf9 !important; }
   .btn-a { color: #24212e !important; }
+  .brand { background-color: #fff5eb !important; color: #0b0537 !important; }
 }
 [data-ogsc] .ink { color: #f2ecf9 !important; }
 [data-ogsc] .soft { color: #bdb5cf !important; }
@@ -34,17 +35,20 @@ a { color: inherit; }
 [data-ogsb] .card { background-color: #2d2939 !important; }
 [data-ogsb] .chip { background-color: #f0b8a3 !important; }
 [data-ogsb] .quote { background-color: #353043 !important; }
+[data-ogsc] .brand { color: #0b0537 !important; }
+[data-ogsb] .brand { background-color: #fff5eb !important; }
 [data-ogsb] .btn { background-color: #f2ecf9 !important; }
 </style>
+{{msoFonts}}
 </head>
 <body class="paper" style="margin:0;padding:0;background-color:#fbf7f2;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:transparent;opacity:0">{{.Preheader}}{{preheaderPad}}</div>
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:transparent;opacity:0">{{template "dl" .Preheader}}{{preheaderPad}}</div>
 <table role="presentation" class="paper" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#fbf7f2;">
 <tr><td align="center" style="padding:32px 12px;">
 {{msoOpen}}
 <table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fffaf5;border:1px solid #3b3552;border-right-width:3px;border-bottom-width:3px;border-radius:14px;">
 <tr><td class="pad" style="padding:{{if .Personal}}24px 32px 8px{{else}}28px 32px 4px{{end}};">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background-color:#0b0537;border-radius:6px;padding:{{if .Personal}}4px 8px{{else}}6px 10px{{end}};font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:{{if .Personal}}12px{{else}}13px{{end}};font-weight:700;line-height:1.2;color:#fff5eb;">{{.Brand.Name}}</td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td class="brand" style="background-color:#0b0537;border-radius:6px;padding:{{if .Personal}}4px 8px{{else}}6px 10px{{end}};font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:{{if .Personal}}12px{{else}}13px{{end}};font-weight:700;line-height:1.2;color:#fff5eb;">{{.Brand.Name}}</td></tr></table>
 </td></tr>
 {{- if and (not .Personal) (or .Kicker .Title)}}
 <tr><td class="pad" style="padding:20px 32px 0;">
@@ -52,23 +56,23 @@ a { color: inherit; }
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td class="chip" style="background-color:#ffd6c4;border-radius:999px;padding:3px 10px;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.08em;font-variant:small-caps;text-transform:lowercase;color:#3b3552;">{{.Kicker}}</td></tr></table>
 {{- end}}
 {{- if .Title}}
-<div class="ink" style="margin:12px 0 0;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;line-height:1.3;color:#3b3552;">{{.Title}}</div>
+<div class="ink" style="margin:12px 0 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;line-height:1.3;color:#3b3552;">{{template "dl" .Title}}</div>
 {{- end}}
 </td></tr>
 {{- end}}
-<tr><td class="pad" style="padding:20px 32px 8px;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3b3552;">
+<tr><td class="pad" style="padding:20px 32px 8px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3b3552;">
 {{- range .Blocks}}
 {{- if eq .Kind 0}}
-<div class="ink" style="margin:0 0 16px;color:#3b3552;">{{range $i, $l := lines .Text}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
+<div class="ink" style="margin:0 0 16px;color:#3b3552;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;">{{range $i, $l := lines .Text}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
 {{- else if or (eq .Kind 1) (eq .Kind 3)}}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 16px;"><tr><td class="quote{{if eq .Kind 1}} soft{{else}} ink{{end}}" style="background-color:#f4eefa;border-left:3px solid #e3d7fb;border-radius:4px;padding:12px 16px;font-size:{{if eq .Kind 1}}14px{{else}}15px{{end}};line-height:1.6;color:{{if eq .Kind 1}}#6b6585{{else}}#3b3552{{end}};">{{$ls := lines .Text}}{{if eq .Kind 1}}{{$ls = quoteLines .Text}}{{end}}{{range $i, $l := $ls}}{{if $i}}<br>{{end}}{{$l}}{{end}}</td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 16px;table-layout:fixed;"><tr><td class="quote{{if eq .Kind 1}} soft{{else}} ink{{end}}" style="background-color:#f4eefa;border-left:3px solid #e3d7fb;border-radius:4px;padding:12px 16px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-size:{{if eq .Kind 1}}14px{{else}}15px{{end}};line-height:1.6;color:{{if eq .Kind 1}}#6b6585{{else}}#3b3552{{end}};">{{$k := .Kind}}{{$ls := lines .Text}}{{if eq $k 1}}{{$ls = quoteLines .Text}}{{end}}{{range $i, $l := $ls}}{{if $i}}<br>{{end}}{{if eq $k 3}}{{template "dl" $l}}{{else}}{{$l}}{{end}}{{end}}</td></tr></table>
 {{- else if eq .Kind 2}}
 {{- if .Label}}
 <div class="ink" style="margin:0 0 8px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;color:#3b3552;">{{.Label}}</div>
 {{- end}}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 16px;table-layout:fixed;">
 {{- range .Fields}}
-<tr><td class="soft rule" width="110" valign="top" style="width:110px;padding:6px 12px 6px 0;border-bottom:1px solid #e0dcdc;font-size:13px;line-height:1.5;color:#6b6585;">{{.Label}}</td><td class="ink rule" valign="top" style="padding:6px 0;border-bottom:1px solid #e0dcdc;font-size:{{if .Mono}}13px{{else}}15px{{end}};line-height:1.5;color:#3b3552;{{if .Mono}}font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;{{end}}">{{.Value}}</td></tr>
+<tr><td class="soft rule" width="110" valign="top" style="width:110px;padding:6px 12px 6px 0;border-bottom:1px solid #e0dcdc;font-size:13px;line-height:1.5;color:#6b6585;">{{.Label}}</td><td class="ink rule" valign="top" style="padding:6px 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;border-bottom:1px solid #e0dcdc;font-size:{{if .Mono}}13px{{else}}15px{{end}};line-height:1.5;color:#3b3552;{{if .Mono}}font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;{{end}}">{{template "dl" .Value}}</td></tr>
 {{- end}}
 </table>
 {{- else if eq .Kind 4}}
@@ -81,13 +85,13 @@ a { color: inherit; }
 </td></tr>
 {{- if .Signature}}
 <tr><td class="pad" style="padding:0 32px 20px;">
-<div class="soft rule" style="border-top:1px solid #e0dcdc;padding-top:14px;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#6b6585;">{{range $i, $l := lines .Signature}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
+<div class="soft rule" style="border-top:1px solid #e0dcdc;padding-top:14px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#6b6585;">{{range $i, $l := lines .Signature}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
 </td></tr>
 {{- end}}
 </table>
 {{msoClose}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
-<tr><td class="soft" align="center" style="padding:16px 24px 0;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b6585;">
+<tr><td class="soft" align="center" style="padding:16px 24px 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b6585;">
 {{- if and .Footer (not .Personal)}}{{range $i, $l := lines .Footer}}{{if $i}}<br>{{end}}{{$l}}{{end}}{{end}}
 {{- with homeURL .Brand}}{{if and $.Footer (not $.Personal)}}<br>{{end}}<a class="soft" href="{{.}}" style="color:#6b6585;text-decoration:underline;">{{$.Brand.Name}}</a>{{end}}
 </td></tr>
@@ -96,3 +100,4 @@ a { color: inherit; }
 </table>
 </body>
 </html>
+{{- define "dl"}}{{range defang .}}{{if .Sep}}<span>{{.Text}}</span>{{else}}{{.Text}}{{end}}{{end}}{{end}}
