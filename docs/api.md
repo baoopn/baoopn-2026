@@ -13,9 +13,8 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/profile` | – | `Profile` |
 | GET | `/projects` | `featured=1` (optional) | `ProjectSummary[]` (visible only, ordered) |
 | GET | `/projects/{slug}` | – | `ProjectDetail` (404 if hidden) |
-| GET | `/posts` | `tag`, `series`, `q`, `page` (1+), `limit` (1–50, default 10) | `PostSummary[]` + `meta` |
-| GET | `/posts/{slug}` | – | `PostDetail` (published and `published_at <= now` only) |
-| GET | `/posts/legacy` | `path=/blog/<name>/<page>` | `{ slug }` — used to 301 old v3 URLs |
+| GET | `/posts` | `tag`, `q` (title, excerpt and part text), `page` (1+), `limit` (1–50, default 10) | `PostSummary[]` + `meta` (one entry per post) |
+| GET | `/posts/{slug}` | `part` (1+, default 1) | `PostDetail` with the requested part (published and `published_at <= now` only; 404 if the part does not exist) |
 | GET | `/tags` | – | `TagCount[]` |
 | POST | `/contact` | `ContactInput` | `201 { ok: true }`; 422 `validation` with message; 429 `rate_limited` (5/hour/IP) |
 | POST | `/events` | `BeaconEvent` (text/plain or JSON, max 2 KB) | `202` empty |

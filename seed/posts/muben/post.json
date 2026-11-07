@@ -1,0 +1,54 @@
+{
+  "slug": "muben",
+  "title": "MUBEN: a bilingual brand site with SvelteKit, Go and embedded SQLite",
+  "excerpt": "How I built a minimal, Japanese-inspired fashion brand site: a SvelteKit public site and admin CMS, a Go/Fiber API, and a SQLite file in place of a database server.",
+  "tags": [
+    "sveltekit",
+    "go",
+    "sqlite",
+    "cms",
+    "i18n"
+  ],
+  "parts": [
+    {
+      "title": "The brand, the brief and the architecture",
+      "file": "part-1.md"
+    },
+    {
+      "title": "The public site: design system, motion and SEO",
+      "file": "part-2.md"
+    },
+    {
+      "title": "The admin CMS and the content model",
+      "file": "part-3.md"
+    },
+    {
+      "title": "Go, Fiber and embedded SQLite",
+      "file": "part-4.md"
+    },
+    {
+      "title": "Lessons learned",
+      "file": "part-5.md"
+    }
+  ],
+  "screenshots": [
+    {
+      "id": "public-home",
+      "url": "https://muben.asia/en",
+      "what": "English home page, desktop viewport (about 1440x900), dark site (it has no light mode). Top of page: hero, logo lockup, nav and outline buttons. Wait about 1.5 s so the entrance animation has finished.",
+      "caption": "The home page: warm near-black, off-white type, outline buttons."
+    },
+    {
+      "id": "public-post",
+      "url": "https://muben.asia/en/blogs",
+      "what": "Open the first post from the blog list. Desktop viewport. Scroll down past the header so body paragraphs are on screen, ideally with one block still fading in. If the list is empty, skip this shot.",
+      "caption": "A journal post. Each block fades in on its own as you scroll."
+    },
+    {
+      "id": "public-shop",
+      "url": "https://muben.asia/en/shop",
+      "what": "Shop coming-soon page, desktop viewport, top of page, showing the silver ring accent behind the coming-soon text.",
+      "caption": "The Shop page is a placeholder for now."
+    }
+  ]
+}

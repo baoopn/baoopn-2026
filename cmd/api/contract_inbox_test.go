@@ -251,8 +251,8 @@ func TestContractEmptyStates(t *testing.T) {
 	c.ok("POST", "/api/admin/posts/preview", map[string]string{"markdown": ""}, 200, previewResult, false)
 	c.ok("POST", "/api/admin/posts/preview", map[string]string{"markdown": "no headings"}, 200, previewResult, false)
 
-	plain := map[string]any{"title": "No Headings", "excerpt": "", "content_md": "Just text.", "cover_url": "",
-		"tags": nil, "series": "", "series_title": "", "series_order": 0, "status": "published", "published_at": nil}
+	plain := map[string]any{"title": "No Headings", "excerpt": "", "cover_url": "", "tags": nil,
+		"status": "published", "published_at": nil, "parts": []map[string]string{{"title": "", "content_md": "Just text."}}}
 	p := c.ok("POST", "/api/admin/posts", plain, 201, adminPost, false)
 	c.ok("GET", "/api/v1/posts/"+fmt.Sprint(field(p, "slug")), nil, 200, postDetail, false)
 

@@ -58,7 +58,7 @@ func TestRouterMounts(t *testing.T) {
 		{"GET", "/api/v1/profile", "", http.StatusOK},
 		{"GET", "/api/v1/projects", "", http.StatusOK},
 		{"GET", "/api/v1/posts", "", http.StatusOK},
-		{"GET", "/api/v1/posts/legacy?path=/blog/portfolio-app/1", "", http.StatusOK},
+		{"GET", "/api/v1/posts/legacy?path=/blog/portfolio-app/1", "", http.StatusNotFound},
 		{"GET", "/api/v1/tags", "", http.StatusOK},
 		{"GET", "/api/admin/posts", "", http.StatusOK},
 		{"GET", "/api/admin/threads", "", http.StatusOK},

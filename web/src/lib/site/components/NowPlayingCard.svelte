@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import AlbumArt from './AlbumArt.svelte';
 	import EqBars from './EqBars.svelte';
+	import SpotifyGlyph from './SpotifyGlyph.svelte';
 	import { relativeClock, secondClock } from '#lib/site/clock.svelte.js';
 	import { activeTrack, listening, progressAt } from '#lib/site/listening.svelte.js';
 	import { artistNames, duration, safeUrl } from '#lib/site/format.js';
@@ -82,6 +83,12 @@
 					<span>{duration(durationMs)}</span>
 				</div>
 			</div>
+			{#if trackUrl}
+				<a href={trackUrl} target="_blank" rel="noopener noreferrer" class="btn btn-secondary mt-5">
+					<SpotifyGlyph class="size-5" /> Listen on Spotify
+					<span class="sr-only">(opens in a new tab)</span>
+				</a>
+			{/if}
 		</div>
 	{:else}
 		<div class="art grid aspect-square w-full place-items-center rounded-[10px] border border-ink bg-spot-lilac text-on-spot">

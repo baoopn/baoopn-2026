@@ -1,0 +1,52 @@
+{
+  "slug": "building-baoopn-2026",
+  "title": "Rebuilding baoopn.com in 2026",
+  "excerpt": "How I rebuilt my portfolio and blog as a Go API and a SvelteKit app: the admin dashboard, a contact form that becomes email threads, cookieless analytics, and how it ships.",
+  "tags": ["go", "sveltekit", "postgres", "email", "analytics", "devops"],
+  "parts": [
+    {"title": "Why I rebuilt it, and how it fits together", "file": "part-1.md"},
+    {"title": "The admin dashboard: Clerk auth, the Markdown editor, and GitHub sync", "file": "part-2.md"},
+    {"title": "From contact form to email thread", "file": "part-3.md"},
+    {"title": "Counting visits without cookies", "file": "part-4.md"},
+    {"title": "Shipping it: Docker, Coolify, and a deploy gate", "file": "part-5.md"},
+    {"title": "Lessons learned and what I would change", "file": "part-6.md"}
+  ],
+  "screenshots": [
+    {
+      "id": "public-home",
+      "url": "http://localhost:5173/",
+      "what": "The public home page, desktop viewport (about 1440x900), light mode, scrolled to the top so the hero and first section show.",
+      "caption": "The home page."
+    },
+    {
+      "id": "admin-editor-split",
+      "url": "http://localhost:5173/admin/posts",
+      "what": "Open any existing published post (one with headings and a fenced code block) in the editor and switch to Split mode. Desktop viewport, light mode. Show the Markdown on the left and the server-rendered preview with highlighted code on the right. Crop out anything that shows the signed-in account's email.",
+      "caption": "Split mode: Markdown on the left, the server-rendered preview on the right."
+    },
+    {
+      "id": "admin-projects",
+      "url": "http://localhost:5173/admin/projects",
+      "what": "The admin projects list after a GitHub sync, desktop viewport, light mode. Show several public repos with their visibility state. Crop out the account menu if it shows an email.",
+      "caption": "Synced repos arrive hidden until I turn them on."
+    },
+    {
+      "id": "public-contact",
+      "url": "http://localhost:5173/contact",
+      "what": "The public contact page with the empty form, desktop viewport, light mode. Do not type real personal data into the form.",
+      "caption": "The contact form. Each message becomes a thread."
+    },
+    {
+      "id": "admin-analytics",
+      "url": "http://localhost:5173/admin/analytics",
+      "what": "The admin analytics page on the 30-day range, desktop viewport, light mode, scrolled to show the views and visitors chart and the Pages breakdown. It shows aggregate counts only; if the local data is empty, seed some page views first or skip this shot.",
+      "caption": "Daily buckets follow my time zone on the 30 and 90 day ranges."
+    },
+    {
+      "id": "public-blog-post",
+      "url": "http://localhost:5173/blog",
+      "what": "Open a published post that has a table of contents and a highlighted code block. Desktop viewport, dark mode, scrolled so the table of contents and one code block are both visible.",
+      "caption": "A published post, rendered by the same code as the editor preview."
+    }
+  ]
+}

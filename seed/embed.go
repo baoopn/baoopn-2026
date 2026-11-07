@@ -1,10 +1,11 @@
-// Package seed embeds the first-run content: the profile, the v3 blog series
-// and the images they reference (paths under assets/ mirror v3's public/).
+// Package seed embeds the first-run content: the profile (with its local
+// images under assets/) and the seed posts imported as drafts.
 package seed
 
 import "embed"
 
-// FS holds profile.json, blog/<series>/{metadata.json,page-N.md} and assets/.
+// FS holds profile.json, assets/ and posts/<slug>/{post.json,part-N.md,img/}.
+// posts/README.md keeps the pattern matching while no post folders exist.
 //
-//go:embed profile.json blog assets
+//go:embed profile.json posts assets
 var FS embed.FS

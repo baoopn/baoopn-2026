@@ -2,6 +2,7 @@ import type { RequestHandler } from './$types';
 import type { PostSummary, ProjectSummary } from '#lib/api/types.js';
 import { safe, safeFull } from '#lib/site/data.js';
 import { escapeXml } from '#lib/site/format.js';
+import { partHref } from '#lib/site/post.js';
 
 const STATIC = ['/', '/projects', '/blog', '/about', '/contact'];
 const LIMIT = 50;
@@ -33,7 +34,11 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 
 	const lines = [
 		...STATIC.map((p) => entry(p, p === '/blog' ? day(posts[0]?.published_at) : null)),
-		...posts.map((p) => entry(`/blog/${encodeURIComponent(p.slug)}`, day(p.updated_at || p.published_at))),
+		...posts.flatMap((p) => {
+			const lastmod = day(p.updated_at || p.published_at);
+			const parts = Math.max(1, p.part_count || 1);
+			return Array.from({ length: parts }, (_, i) => entry(partHref(p.slug, i + 1), lastmod));
+		}),
 		...projects.map((p) => entry(`/projects/${encodeURIComponent(p.slug)}`, day(p.pushed_at)))
 	];
 

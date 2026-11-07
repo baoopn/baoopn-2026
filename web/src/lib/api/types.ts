@@ -149,6 +149,8 @@ export interface SyncResult {
 }
 
 // ── Blog ────────────────────────────────────────────────────────────────────
+// A post is one entry in the blog list and has 1–20 ordered parts. Readers
+// move through parts at /blog/<slug> (part 1) and /blog/<slug>/<n>.
 
 export interface TocItem {
 	id: string;
@@ -162,65 +164,69 @@ export interface PostSummary {
 	excerpt: string;
 	cover_url: string;
 	tags: string[];
-	series: string;
-	series_title: string;
-	series_order: number;
+	part_count: number;
 	published_at: string;
 	updated_at: string;
-	reading_minutes: number;
-	views: number;
+	reading_minutes: number; // all parts
+	views: number; // all parts
 }
 
-export interface PostLink {
-	slug: string;
+/** A part reference for navigation. Empty title = show "Part <no>". */
+export interface PostPartRef {
+	no: number; // 1-based
 	title: string;
-	series_order: number;
 }
 
-export interface PostDetail extends PostSummary {
+export interface PostPart extends PostPartRef {
 	content_html: string;
 	toc: TocItem[];
-	series_posts: PostLink[]; // whole series in order (empty if none)
-	prev: PostLink | null; // previous in series, else older post
-	next: PostLink | null;
+	reading_minutes: number;
+}
+
+/** GET /api/v1/posts/{slug}?part=N (default 1; 404 when N is out of range). */
+export interface PostDetail extends PostSummary {
+	parts: PostPartRef[]; // every part in order
+	part: PostPart; // the requested part
+	prev: PostPartRef | null; // previous part of this post
+	next: PostPartRef | null; // next part of this post
 }
 
 export type PostState = 'draft' | 'scheduled' | 'published';
+
+export interface AdminPostPart {
+	no: number;
+	title: string;
+	content_md: string;
+	reading_minutes: number;
+}
 
 export interface AdminPost {
 	id: number;
 	slug: string;
 	title: string;
 	excerpt: string;
-	content_md: string;
 	cover_url: string;
 	tags: string[];
-	series: string;
-	series_title: string;
-	series_order: number;
 	status: 'draft' | 'published';
 	state: PostState; // derived: published + future published_at = scheduled
 	published_at: string | null;
-	reading_minutes: number;
+	reading_minutes: number; // all parts
 	views: number;
-	legacy_path: string | null;
+	parts: AdminPostPart[]; // in order, no = 1..n
 	created_at: string;
 	updated_at: string;
 }
 
-/** POST/PUT /api/admin/posts body. */
+/** POST/PUT /api/admin/posts body. Parts are saved in array order. */
 export interface PostInput {
 	slug?: string; // generated from title when empty
 	title: string;
-	excerpt: string;
-	content_md: string;
+	excerpt: string; // empty = generated from part 1
 	cover_url: string;
 	tags: string[];
-	series: string;
-	series_title: string;
-	series_order: number;
 	status: 'draft' | 'published';
 	published_at: string | null; // null + published = now
+	parts: { title: string; content_md: string }[]; // 1–20 parts
 }
 
 export interface PreviewResult {
