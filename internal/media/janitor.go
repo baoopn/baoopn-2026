@@ -24,7 +24,7 @@ func (s *Store) RunJanitor(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		if err := s.Tick(ctx); err != nil && ctx.Err() == nil {
+		if err := s.safeTick(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("media janitor", logging.Err(err))
 		}
 		select {
@@ -33,6 +33,17 @@ func (s *Store) RunJanitor(ctx context.Context, interval time.Duration) {
 		case <-t.C:
 		}
 	}
+}
+
+// safeTick runs Tick and turns a panic into an error. publishOriginal parses
+// untrusted bytes in the api process; a bug there must not take the api down.
+func (s *Store) safeTick(ctx context.Context) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("janitor panic: %v", p)
+		}
+	}()
+	return s.Tick(ctx)
 }
 
 // Tick is one janitor pass:

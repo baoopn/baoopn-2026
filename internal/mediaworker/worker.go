@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,7 +77,14 @@ type Worker struct {
 	lastOK atomic.Int64 // unix nanos of the last successful API call
 	// convert is imageconv.Convert (replaceable in tests).
 	convert func([]byte, string, imageconv.Options) (imageconv.Result, error)
+	// exit is os.Exit (replaceable in tests). It runs when a conversion
+	// outlives its job timeout: the codecs ignore ctx, so the stuck goroutine
+	// can only be stopped by restarting the process.
+	exit func(code int)
 }
+
+// errOriginalTooLarge is permanent: the same original is too large on every attempt.
+var errOriginalTooLarge = errors.New("original too large")
 
 // New returns a worker using client.
 func New(client mediav1.MediaWorkerServiceClient, cfg Config, log *slog.Logger) *Worker {
@@ -95,7 +103,7 @@ func New(client mediav1.MediaWorkerServiceClient, cfg Config, log *slog.Logger) 
 	if cfg.ID == "" {
 		cfg.ID = "mediaworker"
 	}
-	w := &Worker{c: client, cfg: cfg, log: log, convert: imageconv.Convert}
+	w := &Worker{c: client, cfg: cfg, log: log, convert: imageconv.Convert, exit: os.Exit}
 	w.lastOK.Store(time.Now().UnixNano())
 	return w
 }
@@ -167,14 +175,25 @@ func (w *Worker) process(ctx context.Context, job *mediav1.Job) {
 			log.Info("lease lost before download")
 			return
 		}
-		w.fail(ctx, log, job, "download original: "+err.Error(), true)
+		w.fail(ctx, log, job, "download original: "+err.Error(), !errors.Is(err, errOriginalTooLarge))
 		return
 	}
 	opts := w.cfg.Convert
 	if c := job.GetCrop(); c != nil {
 		opts.Crop = &imageconv.Crop{X: int(c.GetX()), Y: int(c.GetY()), W: int(c.GetWidth()), H: int(c.GetHeight())}
 	}
-	res, err := w.safeConvert(data, job.GetOriginalContentType(), opts)
+	res, err := w.convertBounded(ctx, data, job.GetOriginalContentType(), opts)
+	if errors.Is(err, errConvertTimeout) {
+		// The codec goroutine cannot be stopped. Report the job as permanent
+		// (the same file would hang again), then exit so Docker restarts us.
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		w.fail(fctx, log, job, "conversion timed out", false)
+		cancel()
+		log.Error("conversion did not finish within the job timeout; exiting so the container restarts",
+			slog.Duration("timeout", w.cfg.JobTimeout))
+		w.exit(1)
+		return
+	}
 	if err != nil {
 		permanent := errors.Is(err, imageconv.ErrDecode) || errors.Is(err, imageconv.ErrTooLarge) ||
 			errors.Is(err, imageconv.ErrCrop)
@@ -197,6 +216,28 @@ func (w *Worker) process(ctx context.Context, job *mediav1.Job) {
 	w.lastOK.Store(time.Now().UnixNano())
 	log.Info("converted", slog.Int("in_bytes", len(data)), slog.Int("out_bytes", len(res.Data)),
 		slog.Int("width", res.Width), slog.Int("height", res.Height), slog.Duration("took", time.Since(start)))
+}
+
+var errConvertTimeout = errors.New("conversion timed out")
+
+// convertBounded runs the conversion in its own goroutine and gives up when
+// ctx ends. The goroutine keeps running after a timeout; the caller exits.
+func (w *Worker) convertBounded(ctx context.Context, data []byte, ctype string, o imageconv.Options) (imageconv.Result, error) {
+	type out struct {
+		res imageconv.Result
+		err error
+	}
+	ch := make(chan out, 1)
+	go func() {
+		res, err := w.safeConvert(data, ctype, o)
+		ch <- out{res, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.res, r.err
+	case <-ctx.Done():
+		return imageconv.Result{}, errConvertTimeout
+	}
 }
 
 func (w *Worker) safeConvert(data []byte, ctype string, o imageconv.Options) (res imageconv.Result, err error) {
@@ -226,7 +267,7 @@ func (w *Worker) download(ctx context.Context, job *mediav1.Job) ([]byte, error)
 			return nil, err
 		}
 		if int64(buf.Len()+len(msg.GetChunk())) > w.cfg.MaxOriginal {
-			return nil, errors.New("original too large")
+			return nil, errOriginalTooLarge
 		}
 		buf.Write(msg.GetChunk())
 	}

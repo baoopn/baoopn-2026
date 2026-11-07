@@ -123,15 +123,21 @@ services:
 
   # Converts uploaded images to WebP (same image as the api, other binary).
   mediaworker:
+    # Built and tagged by the api service; never pulled from a registry.
     image: baoopn-api:latest
+    pull_policy: never
     command: ["/usr/local/bin/mediaworker"]
+    restart: unless-stopped
+    mem_limit: ${MEDIAWORKER_MEM_LIMIT:-1g}
     environment:
+      - GOMEMLIMIT=${MEDIAWORKER_GOMEMLIMIT:-768MiB}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=json
       - API_GRPC_ADDR=api:9100
       - INTERNAL_API_TOKEN=${SERVICE_PASSWORD_64_INTERNAL}
       - MEDIAWORKER_CONCURRENCY=${MEDIAWORKER_CONCURRENCY:-2}
       - MEDIAWORKER_JOB_TIMEOUT=${MEDIAWORKER_JOB_TIMEOUT:-4m}
+      - MEDIAWORKER_POLL_INTERVAL=${MEDIAWORKER_POLL_INTERVAL:-2s}
       - MEDIAWORKER_HEALTH_ADDR=127.0.0.1:8081
       - MEDIA_MAX_DIMENSION=${MEDIA_MAX_DIMENSION:-2400}
       - MEDIA_WEBP_QUALITY=${MEDIA_WEBP_QUALITY:-82}

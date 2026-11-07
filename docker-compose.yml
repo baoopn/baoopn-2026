@@ -91,6 +91,7 @@ services:
       context: .
       dockerfile: deploy/docker/api.Dockerfile
     command: ["/usr/local/bin/mediaworker"]
+    restart: unless-stopped
     env_file:
       - path: .env
         required: false

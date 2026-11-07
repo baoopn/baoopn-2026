@@ -229,12 +229,14 @@ type jobRow struct {
 }
 
 // withJob locks job id (if cond, with extra args from $2, holds) and runs fn
-// in a transaction. A missing or locked row is ErrLeaseLost.
+// in a transaction. It waits for a row another transaction holds (the lock is
+// short) and re-checks cond afterwards, so a Complete racing the janitor is
+// not thrown away. A missing row, or one cond no longer matches, is ErrLeaseLost.
 func (s *Store) withJob(ctx context.Context, id int64, cond string, args []any, fn func(pgx.Tx, jobRow) error) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		var j jobRow
 		err := tx.QueryRow(ctx, `SELECT id, media_id, phase, original_content_type, attempts, max_attempts
-			FROM media_jobs WHERE id = $1 AND `+cond+` FOR UPDATE SKIP LOCKED`, append([]any{id}, args...)...).
+			FROM media_jobs WHERE id = $1 AND `+cond+` FOR UPDATE`, append([]any{id}, args...)...).
 			Scan(&j.id, &j.mediaID, &j.phase, &j.ctype, &j.attempts, &j.maxAttempts)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrLeaseLost

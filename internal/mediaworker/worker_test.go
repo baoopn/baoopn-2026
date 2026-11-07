@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"golang.org/x/image/webp"
 	"google.golang.org/grpc"
@@ -174,5 +175,62 @@ func TestCompleteNeedsLease(t *testing.T) {
 	_ = stream.Send(&mediav1.CompleteJobRequest{Payload: &mediav1.CompleteJobRequest_Chunk{Chunk: []byte("x")}})
 	if _, err := stream.CloseAndRecv(); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("complete without lease: %v", err)
+	}
+}
+
+// A codec that never returns must not pin the worker: the job fails as
+// permanent and the worker exits so the container restarts.
+func TestConversionTimeoutExits(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	m, err := e.store.Save(ctx, "p.png", bytes.NewReader(testimg.PNG(testimg.Halves(8, 8))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := New(e.client(t, token), Config{ID: "test", JobTimeout: 200 * time.Millisecond,
+		Convert: imageconv.Options{MaxDimension: 32}}, slog.New(slog.DiscardHandler))
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	w.convert = func([]byte, string, imageconv.Options) (imageconv.Result, error) {
+		<-release
+		return imageconv.Result{}, errors.New("unreachable")
+	}
+	code := -1
+	w.exit = func(c int) { code = c }
+	if worked, err := w.Once(ctx, "t"); err != nil || !worked {
+		t.Fatalf("once: %v %v", worked, err)
+	}
+	if code != 1 {
+		t.Fatalf("exit code %d, want 1", code)
+	}
+	if err := e.store.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Permanent failure: the PNG falls back to the original at once.
+	got, _ := e.store.Get(ctx, m.ID)
+	if got.Status != media.StatusReady || got.Converted {
+		t.Fatalf("after timeout %+v", got)
+	}
+}
+
+// An original over MaxOriginal is too large on every attempt: no retries.
+func TestOriginalTooLargeIsPermanent(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	m, err := e.store.Save(ctx, "p.png", bytes.NewReader(testimg.PNG(testimg.Halves(64, 64))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := New(e.client(t, token), Config{ID: "test", MaxOriginal: 16,
+		Convert: imageconv.Options{MaxDimension: 32}}, slog.New(slog.DiscardHandler))
+	if worked, err := w.Once(ctx, "t"); err != nil || !worked {
+		t.Fatalf("once: %v %v", worked, err)
+	}
+	if err := e.store.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := e.store.Get(ctx, m.ID)
+	if got.Status != media.StatusReady || got.Converted {
+		t.Fatalf("after too-large original %+v", got)
 	}
 }
