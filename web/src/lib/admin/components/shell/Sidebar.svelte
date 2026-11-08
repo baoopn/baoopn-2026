@@ -50,7 +50,7 @@
 <aside
 	id="admin-sidebar"
 	class={[
-		'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-rule bg-paper transition-transform duration-200 lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0',
+		'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-rule bg-paper pt-[env(safe-area-inset-top,0px)] transition-transform duration-200 lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0',
 		open ? 'translate-x-0' : '-translate-x-full'
 	]}
 	aria-label="Admin navigation"

@@ -21,7 +21,7 @@
 	const year = new Date().getFullYear();
 </script>
 
-<footer class="mt-24 border-t border-ink">
+<footer class="site-footer mt-24 border-t border-ink">
 	<div class="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-[1fr_auto]">
 		<div class="min-w-0 space-y-5">
 			<p class="font-display text-2xl font-semibold tracking-tight text-balance">
