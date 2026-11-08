@@ -278,7 +278,7 @@ func (s *Store) internal(w http.ResponseWriter, r *http.Request, msg string, err
 
 var fileRe = regexp.MustCompile(`^[0-9a-f]{24}\.(png|jpg|gif|webp|avif|svg|pdf)$`)
 
-// Handler serves GET/HEAD /media/{name}: from disk, streamed from the
+// Handler serves GET/HEAD /media/{name} (and /media/brand/<key>): from disk, streamed from the
 // bucket, or (bucket with a public domain) as a 301 to that domain so old
 // /media links keep working. Only valid media filenames are accepted, so the
 // redirect can never point anywhere else.
@@ -290,7 +290,7 @@ func (s *Store) Handler() http.Handler {
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, "/media/")
-		if !fileRe.MatchString(name) {
+		if !fileRe.MatchString(name) && !BrandKeyRe.MatchString(name) {
 			httpapi.Error(w, http.StatusNotFound, "not_found", "no such file")
 			return
 		}
@@ -306,9 +306,14 @@ func (s *Store) Handler() http.Handler {
 	})
 }
 
-// setFileHeaders sets the headers every served media file gets.
-func setFileHeaders(h http.Header, ext string) {
-	h.Set("Content-Type", typeByExt[ext])
+// setFileHeaders sets the headers every served media or brand file gets.
+func setFileHeaders(h http.Header, name string) {
+	ext := filepath.Ext(name)
+	ctype := typeByExt[ext]
+	if BrandKeyRe.MatchString(name) {
+		ctype = brandTypeByExt[ext]
+	}
+	h.Set("Content-Type", ctype)
 	h.Set("Cache-Control", immutableCache)
 	h.Set("X-Content-Type-Options", "nosniff")
 	switch ext {
@@ -320,7 +325,7 @@ func setFileHeaders(h http.Header, ext string) {
 }
 
 func (s *Store) serveFile(w http.ResponseWriter, r *http.Request, name string) {
-	f, err := os.Open(filepath.Join(s.dir, name))
+	f, err := os.Open(filepath.Join(s.dir, filepath.FromSlash(name)))
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			s.log.ErrorContext(r.Context(), "media: open", logging.Err(err))
@@ -334,7 +339,7 @@ func (s *Store) serveFile(w http.ResponseWriter, r *http.Request, name string) {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "no such file")
 		return
 	}
-	setFileHeaders(w.Header(), filepath.Ext(name))
+	setFileHeaders(w.Header(), name)
 	http.ServeContent(w, r, name, st.ModTime(), f)
 }
 
@@ -362,7 +367,7 @@ func (s *Store) serveObject(w http.ResponseWriter, r *http.Request, name string)
 		defer func() { _ = obj.Body.Close() }()
 	}
 	h := w.Header()
-	setFileHeaders(h, filepath.Ext(name))
+	setFileHeaders(h, name)
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Length", strconv.FormatInt(obj.ContentLength, 10))
 	if obj.ETag != "" {

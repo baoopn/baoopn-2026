@@ -5,8 +5,11 @@
 	import { afterNavigate } from '$app/navigation';
 	import ThemeToggle from './ThemeToggle.svelte';
 	import { NAV } from '#lib/site/defaults.js';
+	import { brandSize, brandSrc } from '#lib/brand.js';
 
 	let { name }: { name: string } = $props();
+
+	const wordmark = $derived(brandSize(page.data.brand, 'wordmark_primary', 78, 32));
 
 	let open = $state(false);
 	afterNavigate(() => (open = false));
@@ -22,7 +25,13 @@
 <header class="site-header sticky top-0 z-40 border-b border-ink bg-paper">
 	<div class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
 		<a href="/" class="flex min-h-11 shrink-0 items-center gap-3 rounded-[8px]" aria-label="{name}, home">
-			<img src="/logo/baoopn-wordmark-primary.svg" alt="" width="78" height="32" class="h-8 w-auto" />
+			<img
+				src={brandSrc(page.data.brand, 'wordmark_primary')}
+				alt=""
+				width={wordmark.width}
+				height={wordmark.height}
+				class="h-8 w-auto"
+			/>
 			<span class="hidden font-display text-lg font-semibold tracking-tight sm:inline">{name}</span>
 		</a>
 

@@ -558,3 +558,43 @@ export interface TopPlaylists {
 	/** Newest first, always arrays. */
 	periods: { week: TopPlaylist[]; month: TopPlaylist[]; year: TopPlaylist[] };
 }
+
+// Brand assets (GET /api/v1/brand, /api/admin/brand). Files live in the media
+// bucket under brand/<stem>.<hash16>.<ext>; the admin can replace each slot.
+export type BrandSlot =
+	| 'favicon_ico'
+	| 'favicon_svg'
+	| 'apple_touch_icon'
+	| 'wordmark_primary'
+	| 'monogram_primary'
+	| 'monogram_inverse';
+
+export interface BrandAsset {
+	slot: BrandSlot;
+	url: string;
+	content_type: string;
+	width: number;
+	height: number;
+	custom: boolean;
+}
+
+export interface Brand {
+	assets: Record<BrandSlot, BrandAsset>;
+}
+
+export interface AdminBrandAsset extends BrandAsset {
+	label: string;
+	kind: 'icon' | 'logo';
+	size_bytes: number;
+	/** Uploaded filename; "" for the default. */
+	original: string;
+	/** RFC 3339 UTC; null for the default. */
+	updated_at: string | null;
+	default_url: string;
+	/** Values for <input type=file accept>. */
+	accept: string[];
+	/** "PNG, exactly 180×180 px" */
+	rule: string;
+	/** Which backgrounds to preview it on. */
+	preview: 'light' | 'dark' | 'both';
+}
