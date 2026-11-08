@@ -155,7 +155,7 @@ func TestSVGReject(t *testing.T) {
 		"external href":  {sq, svgHead + `<image href="https://evil.example/x.png"/></svg>`, "external resource"},
 		"xlink external": {sq, svgHead + `<use xlink:href="other.svg#a"/></svg>`, "external resource"},
 		"data svg href":  {sq, svgHead + `<image href="data:image/svg+xml;base64,AAAA"/></svg>`, "external resource"},
-		"javascript":     {sq, svgHead + `<a href="#x"><set attributeName="href" to="java&#x09;script:alert(1)"/></a></svg>`, "javascript:"},
+		"javascript":     {sq, svgHead + `<a href="#x"><set attributeName="fill" to="java&#x09;script:alert(1)"/></a></svg>`, "javascript:"},
 		"doctype":        {sq, `<!DOCTYPE svg [<!ENTITY x "y">]>` + svgHead + `</svg>`, "DOCTYPE"},
 		"stylesheet pi":  {sq, `<?xml-stylesheet href="https://evil.example/x.css"?>` + svgHead + `</svg>`, "processing instruction"},
 		"@import":        {sq, svgHead + `<style>@import "https://evil.example/x.css";</style></svg>`, "@import"},
@@ -167,6 +167,22 @@ func TestSVGReject(t *testing.T) {
 		"non-square":     {sq, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 132"/>`, "square"},
 		"not svg root":   {sq, `<html><svg viewBox="0 0 1 1"/></html>`, "root element"},
 		"malformed":      {sq, svgHead + `<g></svg>`, "well-formed"},
+		"split comment":  {sq, svgHead + `<style>rect{fill:ur<!-- -->l(https://evil/x)}</style></svg>`, "url("},
+		"split cdata":    {sq, svgHead + `<style>u<![CDATA[rl(https://evil/x)]]></style></svg>`, "url("},
+		"split import":   {sq, svgHead + `<style>@im<!---->port "https://evil/x.css";</style></svg>`, "@import"},
+		"escape attr":    {sq, svgHead + `<rect style="fill:u\72l(https://evil/x)"/></svg>`, "CSS escape"},
+		"escape import":  {sq, svgHead + `<style>@\69mport "https://evil/x.css";</style></svg>`, "CSS escape"},
+		"image-set":      {sq, svgHead + `<rect style="fill:image-set(&quot;https://evil/x.png&quot; 1x)"/></svg>`, "image-set("},
+		"image()":        {sq, svgHead + `<style>rect{fill:image("https://evil/x.png")}</style></svg>`, "image("},
+		"set href":       {sq, svgHead + `<a><set attributeName="href" to="https://evil/"/></a></svg>`, "animates a link"},
+		"animate xlink":  {sq, svgHead + `<image><animate attributeName="xlink:href" values="https://evil/x.png"/></image></svg>`, "animates a link"},
+		"animate caps":   {sq, svgHead + `<a><animate attributeName=" HREF " values="#a;#b"/></a></svg>`, "animates a link"},
+		"xhtml root": {sq, `<svg xmlns="http://www.w3.org/1999/xhtml" viewBox="0 0 1 1"><form action="https://evil/"/>` +
+			`<meta http-equiv="refresh" content="0;url=https://evil/"/></svg>`, "SVG namespace"},
+		"no namespace": {sq, `<svg viewBox="0 0 1 1"/>`, "SVG namespace"},
+		"xhtml child": {sq, svgHead + `<h:meta xmlns:h="http://www.w3.org/1999/xhtml" http-equiv="refresh" content="0"/></svg>`,
+			"another namespace"},
+		"xml:base": {sq, svgHead + `<g xml:base="https://evil/"><use href="#a"/></g></svg>`, "xml:base"},
 	} {
 		_, err := validate(c.d, []byte(c.body))
 		if err == nil {
@@ -189,6 +205,9 @@ func TestSVGAccept(t *testing.T) {
 		"id href":   svgHead + `<defs><linearGradient id="g"/></defs><rect fill="url(#g)"/><use href="#g"/><use xlink:href="#g"/></svg>`,
 		"url quote": svgHead + `<style>rect{fill:url('#g')}</style></svg>`,
 		"data png":  svgHead + `<image href="data:image/png;base64,iVBORw0KGgo="/></svg>`,
+		"rdf metadata": svgHead + `<metadata><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" ` +
+			`xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/"><cc:Work><dc:title>x</dc:title>` +
+			`</cc:Work></rdf:RDF></metadata><style>/* c */ rect{fill:url(#g)}</style><animate attributeName="opacity" values="0;1"/></svg>`,
 		"inkscape": `<?xml version="1.0" encoding="UTF-8"?><!-- Inkscape -->` +
 			`<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" ` +
 			`xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" viewBox="0,0,64,64" inkscape:version="1.4" ` +

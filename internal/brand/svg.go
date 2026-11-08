@@ -20,6 +20,22 @@ var badElements = map[string]bool{
 
 var dataImageRe = regexp.MustCompile(`^data:image/(png|jpeg|webp|gif);base64,`)
 
+const (
+	svgNS = "http://www.w3.org/2000/svg"
+	xmlNS = "http://www.w3.org/XML/1998/namespace"
+)
+
+// Namespaces elements may use besides SVG: editor and metadata only.
+var okNamespaces = map[string]bool{
+	svgNS: true,
+	"http://www.inkscape.org/namespaces/inkscape":        true,
+	"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd": true,
+	"http://www.w3.org/1999/02/22-rdf-syntax-ns#":        true,
+	"http://creativecommons.org/ns#":                     true,
+	"http://web.resource.org/cc/":                        true,
+	"http://purl.org/dc/elements/1.1/":                   true,
+}
+
 // validateSVG rejects (never rewrites) an SVG that could run script or load
 // anything: see the SVG rules in docs/api.md.
 func validateSVG(d slotDef, data []byte) (Info, error) {
@@ -28,6 +44,7 @@ func validateSVG(d slotDef, data []byte) (Info, error) {
 	var info Info
 	depth, roots := 0, 0
 	inStyle := 0
+	var style strings.Builder // all text of the open <style>, across comments and CDATA
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
@@ -47,8 +64,8 @@ func validateSVG(d slotDef, data []byte) (Info, error) {
 			local := strings.ToLower(t.Name.Local)
 			if depth == 0 {
 				roots++
-				if roots > 1 || t.Name.Local != "svg" {
-					return Info{}, invalid("%s: the root element must be <svg>", d.Slot)
+				if roots > 1 || t.Name.Local != "svg" || t.Name.Space != svgNS {
+					return Info{}, invalid("%s: the root element must be <svg> in the SVG namespace", d.Slot)
 				}
 				vb, ok := viewBox(t.Attr)
 				if !ok {
@@ -59,6 +76,9 @@ func validateSVG(d slotDef, data []byte) (Info, error) {
 				}
 				info = Info{Width: max(1, int(math.Round(vb[2]))), Height: max(1, int(math.Round(vb[3])))}
 			}
+			if !okNamespaces[t.Name.Space] {
+				return Info{}, invalid("SVG contains an element from another namespace (<%s>)", t.Name.Local)
+			}
 			if badElements[local] {
 				return Info{}, invalid("SVG contains a <%s> element", t.Name.Local)
 			}
@@ -68,6 +88,9 @@ func validateSVG(d slotDef, data []byte) (Info, error) {
 				}
 			}
 			if local == "style" {
+				if inStyle == 0 {
+					style.Reset()
+				}
 				inStyle++
 			}
 			depth++
@@ -75,12 +98,15 @@ func validateSVG(d slotDef, data []byte) (Info, error) {
 			depth--
 			if strings.ToLower(t.Name.Local) == "style" && inStyle > 0 {
 				inStyle--
+				if inStyle == 0 {
+					if msg := dangerousCSS(style.String()); msg != "" {
+						return Info{}, invalid("SVG style %s", msg)
+					}
+				}
 			}
 		case xml.CharData:
 			if inStyle > 0 {
-				if msg := dangerous(string(t)); msg != "" {
-					return Info{}, invalid("SVG style %s", msg)
-				}
+				style.Write(t)
 			}
 		}
 	}
@@ -95,16 +121,38 @@ func checkAttr(a xml.Attr) error {
 	if strings.HasPrefix(local, "on") {
 		return invalid("SVG contains an event handler attribute (%s)", a.Name.Local)
 	}
+	if local == "base" && (a.Name.Space == xmlNS || a.Name.Space == "xml") {
+		return invalid("SVG contains an xml:base attribute")
+	}
 	if local == "href" {
 		v := strings.TrimSpace(a.Value)
 		if !strings.HasPrefix(v, "#") && !dataImageRe.MatchString(v) {
 			return invalid("SVG links to an external resource (href)")
 		}
 	}
-	if msg := dangerous(a.Value); msg != "" {
+	if local == "attributename" {
+		// set/animate* could rewrite a link after the checks above.
+		v := strings.ToLower(strings.TrimSpace(a.Value))
+		if v == "href" || strings.HasSuffix(v, ":href") {
+			return invalid("SVG animates a link (attributeName=%q)", a.Value)
+		}
+	}
+	msg := dangerous(a.Value)
+	if local == "style" && a.Name.Space == "" {
+		msg = dangerousCSS(a.Value)
+	}
+	if msg != "" {
 		return invalid("SVG attribute %s %s", a.Name.Local, msg)
 	}
 	return nil
+}
+
+// dangerousCSS is dangerous plus no CSS escapes, which could hide the rest.
+func dangerousCSS(s string) string {
+	if strings.Contains(s, "\\") {
+		return "contains a CSS escape (backslash)"
+	}
+	return dangerous(s)
 }
 
 // dangerous returns why a CSS or attribute text is refused, or "".
@@ -121,17 +169,19 @@ func dangerous(s string) string {
 	case strings.Contains(t, "@import"):
 		return "contains @import"
 	}
-	for rest := t; ; {
-		i := strings.Index(rest, "url(")
-		if i < 0 {
-			return ""
-		}
-		rest = rest[i+4:]
-		u := strings.TrimLeft(rest, `"'`)
-		if !strings.HasPrefix(u, "#") {
-			return "references an external resource (url())"
+	for _, fn := range []string{"url(", "image(", "image-set("} {
+		for rest := t; ; {
+			i := strings.Index(rest, fn)
+			if i < 0 {
+				break
+			}
+			rest = rest[i+len(fn):]
+			if u := strings.TrimLeft(rest, `"'`); !strings.HasPrefix(u, "#") {
+				return "references an external resource (" + fn + ")"
+			}
 		}
 	}
+	return ""
 }
 
 // viewBox parses the root's viewBox: four numbers, width and height > 0.
