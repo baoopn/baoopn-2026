@@ -60,7 +60,7 @@
 <style>
 	.skip {
 		position: fixed;
-		top: 0.75rem;
+		top: calc(0.75rem + env(safe-area-inset-top, 0px));
 		left: 0.75rem;
 		z-index: 60;
 		padding: 0.75rem 1rem;

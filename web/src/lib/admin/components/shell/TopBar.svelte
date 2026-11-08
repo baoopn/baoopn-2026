@@ -24,7 +24,7 @@
 </script>
 
 <header
-	class="sticky top-0 z-20 flex h-[calc(4rem+env(safe-area-inset-top,0px))] items-center pt-[env(safe-area-inset-top,0px)] gap-2 border-b border-rule bg-paper px-4 sm:px-6 lg:px-8"
+	class="sticky top-0 z-20 flex h-[calc(4rem+env(safe-area-inset-top,0px))] pt-[env(safe-area-inset-top,0px)] items-center gap-2 border-b border-rule bg-paper px-4 sm:px-6 lg:px-8"
 >
 	<button
 		type="button"
