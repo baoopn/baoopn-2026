@@ -53,14 +53,24 @@
 	}
 
 	body {
+		/* Containing block for the grain below. */
+		position: relative;
 		min-height: 100dvh;
 		background: var(--paper);
+		/* app.html sets viewport-fit=cover so sticky headers can paint under the
+		   iOS status bar. Keep content out of the landscape notch; env() is 0
+		   everywhere else. */
+		padding-left: env(safe-area-inset-left, 0px);
+		padding-right: env(safe-area-inset-right, 0px);
 	}
 
-	/* Subtle paper grain (SVG noise, ~4%), never intercepts input. */
+	/* Subtle paper grain (SVG noise, ~4%), never intercepts input. Absolute, not
+	   fixed: it spans the whole document and scrolls with it, so no fixed layer
+	   sits at the top edge in front of the sticky header (Safari tints the
+	   status bar from that element). */
 	body::before {
 		content: '';
-		position: fixed;
+		position: absolute;
 		inset: 0;
 		z-index: 50;
 		pointer-events: none;

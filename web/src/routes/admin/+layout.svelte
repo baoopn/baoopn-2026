@@ -39,7 +39,7 @@
 <div class="admin">
 	<a
 		href="#main"
-		class="sr-only z-50 rounded-lg bg-ink px-3 py-2 text-paper focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+		class="sr-only z-50 rounded-lg bg-ink px-3 py-2 text-paper focus:not-sr-only focus:fixed focus:top-[calc(0.75rem+env(safe-area-inset-top,0px))] focus:left-3"
 		>Skip to content</a
 	>
 
