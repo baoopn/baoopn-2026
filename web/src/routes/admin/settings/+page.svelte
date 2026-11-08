@@ -5,6 +5,7 @@
 	import ErrorState from '#lib/admin/components/ErrorState.svelte';
 	import Switch from '#lib/admin/components/Switch.svelte';
 	import OrphanCleanup from '#lib/admin/media/OrphanCleanup.svelte';
+	import BrandAssets from '#lib/admin/brand/BrandAssets.svelte';
 	import { get, post, put } from '#lib/admin/api.js';
 	import { guardUnsaved } from '#lib/admin/guard.svelte.js';
 	import { auth } from '#lib/admin/auth.svelte.js';
@@ -73,7 +74,7 @@
 	const cfg = $derived(auth.config);
 </script>
 
-<PageHeader title="Settings" eyebrow="Site" description="Contact form, mail, replies and media storage.">
+<PageHeader title="Settings" eyebrow="Site" description="Contact form, mail, replies, brand assets and media storage.">
 	{#snippet actions()}
 		<button type="submit" form="settings-form" class="btn btn-primary" disabled={!dirty || saving}>
 			{#if saving}<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />{:else}<Save
@@ -193,6 +194,10 @@
 			<p>GitHub user <span class="text-ink">{cfg?.github_user || '–'}</span></p>
 		</section>
 	</aside>
+</div>
+
+<div class="mt-10">
+	<BrandAssets />
 </div>
 
 <div class="mt-10">

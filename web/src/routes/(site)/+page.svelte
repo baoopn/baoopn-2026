@@ -11,6 +11,7 @@
 	import { absolute, safeImage, safeUrl } from '#lib/site/format.js';
 	import { LISTENING_URL } from '#lib/links.js';
 	import { reveal } from '#lib/site/motion.js';
+	import { brandSize, brandSrc } from '#lib/brand.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -19,6 +20,7 @@
 	const avatar = $derived(safeImage(profile.avatar_url));
 	const resume = $derived(safeUrl(profile.resume_url));
 	let avatarFailed = $state(false);
+	const monogram = $derived(brandSize(data.brand, 'monogram_primary', 640, 640));
 
 	const person = $derived({
 		'@context': 'https://schema.org',
@@ -119,10 +121,10 @@
 				/>
 			{:else}
 				<img
-					src="/logo/baoopn-monogram-primary.svg"
+					src={brandSrc(data.brand, 'monogram_primary')}
 					alt=""
-					width="640"
-					height="640"
+					width={monogram.width}
+					height={monogram.height}
 					class="print aspect-square w-full rounded-brand [--print:var(--spot-now)]"
 				/>
 			{/if}
