@@ -52,8 +52,8 @@ COPY --chown=node:node web/package.json ./
 USER node
 EXPOSE 3000
 
-# A static asset, so the probe does not depend on the API being up.
+# robots.txt is built in the web server, so the probe does not depend on the API being up.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:3000/favicon.svg || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:3000/robots.txt || exit 1
 
 CMD ["node", "build"]
