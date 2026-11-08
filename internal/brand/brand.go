@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -99,10 +100,13 @@ type Store struct {
 	now      func() time.Time
 	defaults map[string]defaultAsset
 
-	mu     sync.Mutex // serializes writes; guards cached
-	cached *State
-	load   func(ctx context.Context) (State, error)
-	save   func(ctx context.Context, st State) error
+	// mu serializes writers (Replace, Reset, Ensure, prune). Readers never
+	// take it: they read snap, an immutable copy published after each
+	// successful database write (copy-on-write).
+	mu   sync.Mutex
+	snap atomic.Pointer[State]
+	load func(ctx context.Context) (State, error)
+	save func(ctx context.Context, st State) error
 }
 
 // New returns the store.
@@ -134,45 +138,61 @@ func New(d Deps) *Store {
 	return s
 }
 
-// stateLocked returns a copy of the state; s.mu must be held.
-func (s *Store) stateLocked(ctx context.Context) (State, error) {
-	if s.cached != nil {
-		return s.cached.clone(), nil
-	}
+// loadState reads the document from the database, dropping anything a
+// hand edit broke.
+func (s *Store) loadState(ctx context.Context) (State, error) {
 	st, err := s.load(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	st = st.clone()
-	for slot, c := range st.Custom { // ignore anything a hand edit broke
+	for slot, c := range st.Custom {
 		if def, ok := slotByName(slot); !ok || !media.BrandKeyRe.MatchString(c.Key) || c.ContentType != def.Type {
 			delete(st.Custom, slot)
 		}
 	}
-	s.cached = &st
+	return st, nil
+}
+
+// stateLocked returns a mutable copy of the state; s.mu must be held.
+func (s *Store) stateLocked(ctx context.Context) (State, error) {
+	if p := s.snap.Load(); p != nil {
+		return p.clone(), nil
+	}
+	st, err := s.loadState(ctx)
+	if err != nil {
+		return State{}, err
+	}
+	s.snap.Store(&st)
 	return st.clone(), nil
 }
 
-// putLocked saves st and caches it; s.mu must be held.
+// putLocked saves st and publishes it; s.mu must be held. A failed save
+// (one transaction) leaves the database and the snapshot as they were.
 func (s *Store) putLocked(ctx context.Context, st State) error {
 	if err := s.save(ctx, st); err != nil {
-		s.cached = nil
 		return err
 	}
-	s.cached = &st
+	pub := st.clone()
+	s.snap.Store(&pub)
 	return nil
 }
 
-// state returns the current state; on a database error the defaults (an
-// empty state) and the error.
+// state returns the current state without waiting for writers; on a
+// database error the defaults (an empty state) and the error. The result
+// must not be modified.
 func (s *Store) state(ctx context.Context) (State, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st, err := s.stateLocked(ctx)
+	if p := s.snap.Load(); p != nil {
+		return *p, nil
+	}
+	st, err := s.loadState(ctx)
 	if err != nil {
 		return State{Custom: map[string]Custom{}}, err
 	}
-	return st, nil
+	// Only fill an empty snapshot: a writer's newer one always wins, and a
+	// writer publishes only states it saved.
+	s.snap.CompareAndSwap(nil, &st)
+	return *s.snap.Load(), nil
 }
 
 // protected reports whether key is a slot's current file or a default.
@@ -208,6 +228,9 @@ func (s *Store) Replace(ctx context.Context, slot, original string, data []byte)
 		return AdminAsset{}, err
 	}
 	key := keyFor(def, data)
+	if key == s.defaults[slot].key {
+		return s.Reset(ctx, slot) // the default's own bytes: back to the default
+	}
 
 	s.mu.Lock()
 	st, err := s.stateLocked(ctx)
@@ -272,23 +295,33 @@ func (s *Store) Reset(ctx context.Context, slot string) (AdminAsset, error) {
 	return out, nil
 }
 
-// Ensure uploads missing default files and drops overrides whose file is
-// gone, then prunes. Errors are logged; the caller never fails on them.
+// Ensure uploads missing default files, then drops overrides whose file is
+// gone (moving their keys to retired), then prunes. Overrides are only
+// dropped when every default was found or uploaded in this run: that proves
+// the storage is reachable and is the right one, so a "not found" from a
+// wrong or broken bucket cannot wipe them. Errors are logged; the caller
+// never fails on them.
 func (s *Store) Ensure(ctx context.Context) {
+	storageOK := true
 	for _, def := range slots {
 		d := s.defaults[def.Slot]
 		ok, err := s.files.BrandFileExists(ctx, d.key)
 		if err != nil {
 			s.log.Warn("brand: check default", slog.String("key", d.key), logging.Err(err))
+			storageOK = false
 			continue
 		}
 		if !ok {
 			if err := s.files.PutBrandFile(ctx, d.key, def.Type, d.data); err != nil {
 				s.log.Warn("brand: upload default", slog.String("key", d.key), logging.Err(err))
+				storageOK = false
 			} else {
 				s.log.Info("brand: uploaded default", slog.String("key", d.key))
 			}
 		}
+	}
+	if !storageOK {
+		s.log.Warn("brand: storage not confirmed; overrides left as they are")
 	}
 	s.mu.Lock()
 	st, err := s.stateLocked(ctx)
@@ -300,7 +333,7 @@ func (s *Store) Ensure(ctx context.Context) {
 	next, changed := st.clone(), false
 	for _, def := range slots {
 		c, ok := st.Custom[def.Slot]
-		if !ok {
+		if !ok || !storageOK {
 			continue
 		}
 		exists, err := s.files.BrandFileExists(ctx, c.Key)
@@ -311,7 +344,7 @@ func (s *Store) Ensure(ctx context.Context) {
 		if !exists {
 			s.log.Warn("brand: custom file missing, using the default", slog.String("slot", def.Slot),
 				slog.String("key", c.Key))
-			delete(next.Custom, def.Slot)
+			s.retire(&next, def.Slot, s.now())
 			changed = true
 		}
 	}

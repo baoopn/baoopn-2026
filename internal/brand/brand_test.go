@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,10 @@ type fakeFiles struct {
 	failHas map[string]error
 	failDel map[string]error
 	deleted []string
+	// allMissing makes every Exists answer "not found" (a wrong bucket).
+	allMissing bool
+	// putHook runs at the start of every put, outside the lock.
+	putHook func()
 }
 
 func newFakeFiles() *fakeFiles {
@@ -25,6 +30,9 @@ func newFakeFiles() *fakeFiles {
 }
 
 func (f *fakeFiles) PutBrandFile(_ context.Context, key, _ string, data []byte) error {
+	if f.putHook != nil {
+		f.putHook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failPut != nil {
@@ -40,6 +48,9 @@ func (f *fakeFiles) BrandFileExists(_ context.Context, key string) (bool, error)
 	defer f.mu.Unlock()
 	if err := f.failHas[key]; err != nil {
 		return false, err
+	}
+	if f.allMissing {
+		return false, nil
 	}
 	_, ok := f.objs[key]
 	return ok, nil
@@ -128,6 +139,82 @@ func TestEnsureCustomMissingOrError(t *testing.T) {
 	if doc.st.Custom[MonogramPrimary].Key != flaky {
 		t.Error("override dropped on a storage error")
 	}
+	if len(doc.st.Retired) != 1 || doc.st.Retired[0].Key != gone {
+		t.Errorf("dropped key not retired: %+v", doc.st.Retired)
+	}
+}
+
+// A bucket that answers "not found" for everything (wrong bucket, broken
+// credentials behind a 404) must not wipe the overrides.
+func TestEnsureKeepsOverridesWhenStorageUnconfirmed(t *testing.T) {
+	custom := map[string]Custom{AppleTouchIcon: {Key: "brand/apple-touch-icon.0123456789abcdef.png", ContentType: typePNG}}
+	for name, edit := range map[string]func(*fakeFiles, *Store){
+		"404 and put fails": func(f *fakeFiles, _ *Store) { f.allMissing, f.failPut = true, errors.New("403") },
+		"default check fails": func(f *fakeFiles, s *Store) {
+			f.failHas[s.defaults[FaviconSVG].key] = errors.New("timeout")
+		},
+	} {
+		s, f, doc, _ := newTestStore(t)
+		doc.st = State{Custom: maps.Clone(custom)}
+		edit(f, s)
+		s.Ensure(context.Background())
+		if doc.st.Custom[AppleTouchIcon].Key != custom[AppleTouchIcon].Key || doc.saves != 0 {
+			t.Errorf("%s: overrides %+v, saves %d", name, doc.st.Custom, doc.saves)
+		}
+	}
+}
+
+func TestReplaceWithDefaultBytesResets(t *testing.T) {
+	s, f, doc, _ := newTestStore(t)
+	ctx := context.Background()
+	s.Ensure(ctx)
+	if _, err := s.Replace(ctx, AppleTouchIcon, "a.png", pngN(180)); err != nil {
+		t.Fatal(err)
+	}
+	k := doc.st.Custom[AppleTouchIcon].Key
+	data, _ := defaultFile(mustSlot(t, AppleTouchIcon))
+	a, err := s.Replace(ctx, AppleTouchIcon, "default.png", data)
+	if err != nil || a.Custom || a.URL != f.URL(s.defaults[AppleTouchIcon].key) || a.UpdatedAt != nil {
+		t.Fatalf("replace with default bytes = %+v %v", a, err)
+	}
+	if _, ok := doc.st.Custom[AppleTouchIcon]; ok || len(doc.st.Retired) != 1 || doc.st.Retired[0].Key != k {
+		t.Fatalf("state = %+v", doc.st)
+	}
+}
+
+// Public reads use the snapshot and never wait for a writer.
+func TestReadsDoNotWaitForWriters(t *testing.T) {
+	s, f, _, _ := newTestStore(t)
+	ctx := context.Background()
+	s.Ensure(ctx)
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.putHook = func() { close(entered); <-release }
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Replace(ctx, AppleTouchIcon, "a.png", pngN(180))
+		done <- err
+	}()
+	<-entered
+	read := make(chan Brand, 1)
+	go func() {
+		st, _ := s.state(ctx)
+		read <- s.Brand(st)
+	}()
+	select {
+	case b := <-read:
+		if b.Assets[AppleTouchIcon].Custom {
+			t.Error("read saw the unsaved upload")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("public read waited for the writer")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.state(ctx); !s.Brand(st).Assets[AppleTouchIcon].Custom {
+		t.Error("snapshot not published after the write")
+	}
 }
 
 func TestReplaceResetRetire(t *testing.T) {
@@ -210,7 +297,8 @@ func TestPruneNeverDeletesCurrentOrDefault(t *testing.T) {
 	st := doc.st.clone()
 	st.Custom[MonogramPrimary] = Custom{Key: defKey, ContentType: typeSVG, SizeBytes: int64(len(defData)), UpdatedAt: c.t}
 	st.Retired = append(st.Retired, Retired{Key: cur, RetiredAt: c.t.Add(-30 * 24 * time.Hour)})
-	doc.st, s.cached = st, nil
+	doc.st = st
+	s.snap.Store(nil)
 	s.mu.Unlock()
 	if _, err := s.Reset(ctx, MonogramPrimary); err != nil {
 		t.Fatal(err)
@@ -243,7 +331,7 @@ func TestReplaceDBFailureRemovesUpload(t *testing.T) {
 	data, _ := defaultFile(mustSlot(t, MonogramInverse))
 	s.mu.Lock()
 	doc.st.Custom = map[string]Custom{MonogramInverse: {Key: "brand/monogram-inverse.0123456789abcdef.svg", ContentType: typeSVG}}
-	s.cached = nil
+	s.snap.Store(nil)
 	s.mu.Unlock()
 	f.deleted = nil
 	if _, err := s.Replace(ctx, MonogramInverse, "d.svg", data); err == nil {
