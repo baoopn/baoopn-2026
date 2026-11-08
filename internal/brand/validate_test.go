@@ -182,7 +182,11 @@ func TestSVGReject(t *testing.T) {
 		"no namespace": {sq, `<svg viewBox="0 0 1 1"/>`, "SVG namespace"},
 		"xhtml child": {sq, svgHead + `<h:meta xmlns:h="http://www.w3.org/1999/xhtml" http-equiv="refresh" content="0"/></svg>`,
 			"another namespace"},
-		"xml:base": {sq, svgHead + `<g xml:base="https://evil/"><use href="#a"/></g></svg>`, "xml:base"},
+		"element in style url":    {sq, svgHead + `<style>rect{fill:ur<g>x</g>l(https://evil/x)}</style></svg>`, "only text"},
+		"element in style import": {sq, svgHead + `<style>@im<g>x</g>port "https://evil/x.css";</style></svg>`, "only text"},
+		"escape fill":             {sq, svgHead + `<rect fill="u\72l(https://evil/x)"/></svg>`, "CSS escape"},
+		"escape set to":           {sq, svgHead + `<rect><set attributeName="fill" to="u\72l(https://evil/x)"/></rect></svg>`, "CSS escape"},
+		"xml:base":                {sq, svgHead + `<g xml:base="https://evil/"><use href="#a"/></g></svg>`, "xml:base"},
 	} {
 		_, err := validate(c.d, []byte(c.body))
 		if err == nil {
@@ -211,7 +215,7 @@ func TestSVGAccept(t *testing.T) {
 		"inkscape": `<?xml version="1.0" encoding="UTF-8"?><!-- Inkscape -->` +
 			`<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" ` +
 			`xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" viewBox="0,0,64,64" inkscape:version="1.4" ` +
-			`sodipodi:docname="x.svg"><sodipodi:namedview inkscape:zoom="1"/><path style="-inkscape-stroke:hairline" d="M0 0"/></svg>`,
+			`sodipodi:docname="x.svg" inkscape:export-filename="C:\Users\me\icon.png"><sodipodi:namedview inkscape:zoom="1"/><path style="-inkscape-stroke:hairline" d="M0 0"/></svg>`,
 	} {
 		info, err := validate(sq, []byte(body))
 		if err != nil {
