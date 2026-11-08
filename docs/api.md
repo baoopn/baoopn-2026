@@ -22,6 +22,8 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/now-playing/stream` | – | Server-Sent Events, see below |
 | GET | `/listening/recent` | `limit` (1–20, default 6) | `RecentPlay[]` (cached 60 s) |
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
+| GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`; the defaults when the database is unreachable) |
+| GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
 | GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
 
 ### Now-playing stream — `GET /api/v1/listening/now-playing/stream`
@@ -105,6 +107,42 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/settings` | – | `SiteSettings` |
 | PUT | `/settings` | `SiteSettings` | `SiteSettings` |
 | POST | `/settings/test-email` | – | `{ sent_to }` |
+| GET | `/brand` | – | `AdminBrandAsset[]` (slot order) |
+| PUT | `/brand/{slot}` | multipart `file` (request ≤ 1 MiB) — see *Brand assets* | `AdminBrandAsset` (`custom: true`; the same bytes as the current file change nothing) |
+| DELETE | `/brand/{slot}` | – | `AdminBrandAsset` (`custom: false`, back to the default; idempotent); 404 `not_found` for an unknown slot |
+
+### Brand assets
+
+- **Slots** (fixed order), with what each accepts (type sniffed from the bytes, never the name):
+
+  | slot | type | rule | max |
+  |---|---|---|---|
+  | `favicon_ico` | ICO | 1–16 images, each inside the file; must contain 16×16, 32×32 and 48×48 | 256 KiB |
+  | `favicon_svg` | SVG | square viewBox | 256 KiB |
+  | `apple_touch_icon` | PNG | exactly 180×180 | 512 KiB |
+  | `wordmark_primary` | SVG | viewBox | 256 KiB |
+  | `monogram_primary` | SVG | square viewBox | 256 KiB |
+  | `monogram_inverse` | SVG | square viewBox | 256 KiB |
+
+- **Errors:** 400 `bad_request` (not multipart, no `file` field), 404 `not_found` (unknown
+  slot), 413 `too_large`, 415 `unsupported_type` (e.g. "favicon_ico needs an ICO file"),
+  422 `validation` with the reason (e.g. "apple_touch_icon must be 180×180 (got 192×192)"),
+  503 `storage_unavailable`.
+- **SVG rules** (rejected, never rewritten): well-formed XML with an `<svg>` root and a valid
+  viewBox; no DOCTYPE/ENTITY and no processing instruction other than `<?xml …?>`; no
+  `script`, `foreignObject`, `iframe`, `embed`, `object`, `audio`, `video`, `canvas`,
+  `handler` or `listener` elements; no `on*` attributes; `href`/`xlink:href` only `#id` or
+  `data:image/(png|jpeg|webp|gif);base64,`; no `javascript:`, `@import` or `url(` other than
+  `url(#id)` in any attribute or `<style>`. Editor attributes (Inkscape, Sodipodi) are fine.
+- **Storage:** files are stored byte for byte (never converted, no `media` row) under
+  `brand/<stem>.<16 hex of sha256>.<ext>` in the bucket (or `MEDIA_DIR/brand/`), so each
+  version has its own immutable URL (`MEDIA_PUBLIC_URL/brand/…`, else `/media/brand/…`).
+  The defaults are embedded in the API (`internal/brand/defaults/`) and uploaded on startup
+  when missing; an override whose file is gone falls back to the default. The `brand`
+  setting holds only overrides and replaced files. A replaced file is deleted 7 days later;
+  a current or default file never is. The orphan cleanup ignores `brand/`.
+- The web app reads `GET /api/v1/brand` (cached 60 s) and redirects `/favicon.ico`,
+  `/favicon.svg` and `/apple-touch-icon.png` to the current files.
 
 ### Media uploads
 

@@ -22,6 +22,7 @@ import (
 
 	"github.com/baoopn/baoopn-2026/internal/analytics"
 	"github.com/baoopn/baoopn-2026/internal/blog"
+	"github.com/baoopn/baoopn-2026/internal/brand"
 	"github.com/baoopn/baoopn-2026/internal/config"
 	"github.com/baoopn/baoopn-2026/internal/contact"
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
@@ -195,11 +196,13 @@ func newHarness(t *testing.T, opts ...func(*httpapi.Deps)) *harness {
 	rec := analytics.New(analytics.Deps{DB: pool, Log: log, Salt: analytics.DeriveSalt("k"),
 		SiteHost: analytics.HostOf(cfg.PublicURL)})
 	ov := overview.New(overview.Deps{DB: pool, Log: log, Analytics: rec})
+	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
+	brandMod.Ensure(ctx)
 
 	pass := func(next http.Handler) http.Handler { return next }
 	deps := httpapi.Deps{Log: log, DB: pool, AdminAuth: pass, Media: mediaStore.Handler(),
 		ClientIP:    httpapi.TrustedClientIP(""),
-		Modules:     []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod, contactMod, site, rec, ov},
+		Modules:     []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod, contactMod, site, brandMod, rec, ov},
 		AdminConfig: adminConfigHandler(cfg)}
 	for _, o := range opts {
 		o(&deps)

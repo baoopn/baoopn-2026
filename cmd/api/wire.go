@@ -10,6 +10,7 @@ import (
 
 	"github.com/baoopn/baoopn-2026/internal/analytics"
 	"github.com/baoopn/baoopn-2026/internal/blog"
+	"github.com/baoopn/baoopn-2026/internal/brand"
 	"github.com/baoopn/baoopn-2026/internal/config"
 	"github.com/baoopn/baoopn-2026/internal/contact"
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
@@ -67,6 +68,9 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		go migrateMedia(mediaStore, pool, cfg.MediaPublicURL, log)
 	}
 
+	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
+	ensureBrand(ctx, brandMod)
+
 	profileMod := profile.New(profile.Deps{DB: pool, Log: log, GitHubUser: cfg.GitHubUser,
 		GitHubToken: cfg.GitHubToken, HTTP: httpClient, Seed: seed.FS})
 	if err := profileMod.EnsureSeeded(ctx); err != nil {
@@ -94,13 +98,21 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 
 	return &modules{
 		list: []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod,
-			contactMod, site, rec, ov},
+			contactMod, site, brandMod, rec, ov},
 		media:   mediaStore.Handler(),
 		store:   mediaStore,
 		rec:     rec,
 		syncer:  syncer,
 		contact: contactMod,
 	}, nil
+}
+
+// ensureBrand uploads the default brand files (30 s at most). It only logs:
+// a storage outage must not stop the boot.
+func ensureBrand(ctx context.Context, b *brand.Store) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	b.Ensure(ctx)
 }
 
 // orphanGrace maps MEDIA_ORPHAN_GRACE=0 (cleanup off) to the store's
