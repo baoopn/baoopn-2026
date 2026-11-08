@@ -61,6 +61,11 @@ func validateSVG(d slotDef, data []byte) (Info, error) {
 		case xml.Directive:
 			return Info{}, invalid("SVG contains a DOCTYPE or ENTITY declaration")
 		case xml.StartElement:
+			if inStyle > 0 {
+				// Browsers build the sheet from the direct text only, so an
+				// element inside could split a token the check must see whole.
+				return Info{}, invalid("SVG <style> must contain only text")
+			}
 			local := strings.ToLower(t.Name.Local)
 			if depth == 0 {
 				roots++
@@ -137,8 +142,11 @@ func checkAttr(a xml.Attr) error {
 			return invalid("SVG animates a link (attributeName=%q)", a.Value)
 		}
 	}
+	// Unprefixed attributes may be CSS (style, fill, mask, filter, values,
+	// to, …): no escapes. Namespaced editor attributes (inkscape:export-
+	// filename="C:\…") only get the plain checks.
 	msg := dangerous(a.Value)
-	if local == "style" && a.Name.Space == "" {
+	if a.Name.Space == "" {
 		msg = dangerousCSS(a.Value)
 	}
 	if msg != "" {

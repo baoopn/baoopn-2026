@@ -169,6 +169,8 @@ func (s *Store) stateLocked(ctx context.Context) (State, error) {
 
 // putLocked saves st and publishes it; s.mu must be held. A failed save
 // (one transaction) leaves the database and the snapshot as they were.
+// If the commit succeeded but its ack was lost, the snapshot is stale until
+// the next successful write or a restart reloads it from the database.
 func (s *Store) putLocked(ctx context.Context, st State) error {
 	if err := s.save(ctx, st); err != nil {
 		return err

@@ -137,14 +137,15 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
   `data:image/(png|jpeg|webp|gif);base64,`; no `attributeName` of `href`/`xlink:href`
   (animations cannot change links); no `javascript:`, `@import`, or `url(`/`image(`/`image-set(`
   other than `#id` in any attribute or `<style>` (the whole `<style>` text is checked at once,
-  across comments and CDATA); no backslash (CSS escape) in `<style>` or `style` attributes.
+  across comments and CDATA, and it may hold only text, no elements); no backslash (CSS escape) in
+  `<style>` or in any attribute without a namespace prefix.
   Editor attributes (Inkscape, Sodipodi) are fine.
 - **Storage:** files are stored byte for byte (never converted, no `media` row) under
   `brand/<stem>.<16 hex of sha256>.<ext>` in the bucket (or `MEDIA_DIR/brand/`), so each
   version has its own immutable URL (`MEDIA_PUBLIC_URL/brand/…`, else `/media/brand/…`).
   The defaults are embedded in the API (`internal/brand/defaults/`) and uploaded on startup
   when missing; an override whose file is gone falls back to the default (only when every
-  default was found or uploaded, so a wrong bucket cannot wipe the overrides). Uploading a
+  default was found or uploaded, so an unreachable or read-only bucket cannot wipe the overrides). Uploading a
   slot's default bytes is a reset. The `brand`
   setting holds only overrides and replaced files. A replaced file is deleted 7 days later;
   a current or default file never is. The orphan cleanup ignores `brand/`.
