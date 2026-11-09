@@ -99,6 +99,7 @@ func (m *Module) handleReply(w http.ResponseWriter, r *http.Request) {
 		m.internal(w, "reply commit", err)
 		return
 	}
+	m.events.publish(Event{Type: evMessageCreated, ThreadID: id, MessageID: msg.ID, Direction: "outbound", RequestID: in.RequestID})
 	httpapi.JSON(w, http.StatusCreated, m.deliver(ctx, t, msg))
 }
 
@@ -208,6 +209,7 @@ func (m *Module) deliver(parent context.Context, t thread, msg ThreadMessage) Th
 	if err != nil {
 		m.d.Log.Error("contact: recording the send outcome failed", slog.Int64("message_id", msg.ID), logging.Err(err))
 	}
+	m.events.publish(Event{Type: evMessageUpdated, ThreadID: t.ID, MessageID: msg.ID, Status: msg.Status})
 	return msg
 }
 

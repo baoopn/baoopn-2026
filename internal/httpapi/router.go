@@ -26,6 +26,13 @@ type Streamer interface {
 	Streams(r chi.Router)
 }
 
+// AdminStreamer is implemented by modules with long-lived admin routes (SSE):
+// mounted under /api/admin behind AdminAuth, without the request timeout.
+// They must clear their own connection deadlines.
+type AdminStreamer interface {
+	AdminStreams(r chi.Router)
+}
+
 // Deps are the shared dependencies of the router.
 type Deps struct {
 	Log       *slog.Logger
@@ -89,9 +96,9 @@ func New(d Deps) http.Handler {
 	})
 
 	r.Route("/api/admin", func(r chi.Router) {
-		r.Use(noCache, RateLimit(600), middleware.Timeout(60*time.Second))
+		r.Use(noCache, RateLimit(600))
 		if d.AdminConfig != nil {
-			r.Get("/config", d.AdminConfig)
+			r.With(middleware.Timeout(60*time.Second)).Get("/config", d.AdminConfig)
 		}
 		r.Group(func(r chi.Router) {
 			if d.AdminAuth == nil {
@@ -103,8 +110,16 @@ func New(d Deps) http.Handler {
 			} else {
 				r.Use(d.AdminAuth)
 			}
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.Timeout(60 * time.Second))
+				for _, m := range d.Modules {
+					m.Admin(r)
+				}
+			})
 			for _, m := range d.Modules {
-				m.Admin(r)
+				if s, ok := m.(AdminStreamer); ok {
+					s.AdminStreams(r)
+				}
 			}
 		})
 	})

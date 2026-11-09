@@ -21,7 +21,7 @@ var adminEndpoints = []struct{ method, path string }{
 	{"POST", "/media"}, {"GET", "/media/1"}, {"POST", "/media/1/retry"}, {"DELETE", "/media/1"}, {"GET", "/threads"}, {"GET", "/threads/unread-count"},
 	{"GET", "/threads/1"}, {"POST", "/threads/1/read"}, {"POST", "/threads/1/unread"},
 	{"PATCH", "/threads/1"}, {"DELETE", "/threads/1"}, {"POST", "/threads/1/messages"},
-	{"POST", "/threads/1/messages/1/retry"}, {"GET", "/analytics"}, {"GET", "/settings"},
+	{"POST", "/threads/1/messages/1/retry"}, {"GET", "/inbox/events"}, {"GET", "/analytics"}, {"GET", "/settings"},
 	{"PUT", "/settings"}, {"POST", "/settings/test-email"},
 	{"GET", "/brand"}, {"PUT", "/brand/favicon_ico"}, {"DELETE", "/brand/favicon_ico"},
 }
