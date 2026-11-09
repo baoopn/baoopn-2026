@@ -137,9 +137,23 @@ set logs a warning and keeps the volume. With it on:
   next start. Unsetting `MEDIA_PUBLIC_URL` later does not undo a rewrite, so take a
   `pg_dump` before the first deploy with `MEDIA_PUBLIC_URL` set.
 
-No bucket CORS rule is needed: images are loaded with plain `<img>` tags and
-uploads go through the api. Add one (GET from `https://baoopn.com`) only if the
-site ever fetches media with `fetch()` or `crossorigin`.
+The bucket has one read-only CORS rule, `site-read`, because other baoopn.com apps
+(such as `listening.baoopn.com`) load the brand files with `fetch()` or `crossorigin`:
+
+| Field | Value |
+| --- | --- |
+| Origins | `https://baoopn.com`, `https://www.baoopn.com`, `https://listening.baoopn.com` |
+| Methods | `GET`, `HEAD` |
+| Allowed headers | `*` |
+| Exposed headers | `ETag`, `Content-Length`, `Content-Type` |
+| Max age | 86400 seconds |
+
+Uploads go through the api, so the rule never allows writes. To let another app
+read media, add its origin to the rule in the Cloudflare dashboard (R2, the bucket,
+Settings, CORS Policy). Then check it:
+`curl -sI -H "Origin: https://<app>" https://media.baoopn.com/<file>` should
+return `Access-Control-Allow-Origin` with that origin. Cached copies may lack the
+header until they expire or you purge the cache.
 
 ## Image conversion (media worker)
 
