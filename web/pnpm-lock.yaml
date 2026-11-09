@@ -14,6 +14,9 @@ importers:
       '@clerk/ui':
         specifier: 1.42.4
         version: 1.42.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@tanstack/svelte-query':
+        specifier: ^6.4.1
+        version: 6.4.1(svelte@5.57.3)
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -701,6 +704,14 @@ packages:
 
   '@tanstack/query-core@5.106.1':
     resolution: {integrity: sha512-erYv/UACddcdgjOL2ixmFdK6tO/AVBeUcTCOtX2N51yZpDQ2U7KJ+xgB/bCNfsF3uoCDTqGHEEbDiFsIO9YUmQ==}
+
+  '@tanstack/query-core@5.107.1':
+    resolution: {integrity: sha512-PSyAik11oQBEVOiVy5hjZWHmoUqOXqK1WYy4v55mcxozEfKaQgpUMsgnXhWjuESzSht8JfzqMS1m6M/9CpNgvg==}
+
+  '@tanstack/svelte-query@6.4.1':
+    resolution: {integrity: sha512-5j0PrXJOx8Ay6s13UamdLL6oc4stG84kVv0/WwFN74y5mkWDR20wNs9idYD4wb3etAI/slmKzPQzNkAzumKkMg==}
+    peerDependencies:
+      svelte: ^5.25.0
 
   '@types/estree@1.0.10':
     resolution: {integrity: sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==}
@@ -2190,6 +2201,13 @@ snapshots:
       vite: 8.3.6(@types/node@26.6.6)(jiti@2.7.0)
 
   '@tanstack/query-core@5.106.1': {}
+
+  '@tanstack/query-core@5.107.1': {}
+
+  '@tanstack/svelte-query@6.4.1(svelte@5.57.3)':
+    dependencies:
+      '@tanstack/query-core': 5.107.1
+      svelte: 5.57.3
 
   '@types/estree@1.0.10': {}
 
