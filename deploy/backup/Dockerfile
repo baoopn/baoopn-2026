@@ -16,6 +16,7 @@ ARG ALPINE_VERSION=3.24
 FROM alpine:${ALPINE_VERSION}
 
 ARG VERSION=dev
+ENV BACKUP_VERSION=${VERSION}
 LABEL org.opencontainers.image.title="baoopn-backup" \
       org.opencontainers.image.description="Encrypted off-site PostgreSQL backups (pg_dump + age + rclone) for baoopn-2026" \
       org.opencontainers.image.source="https://github.com/baoopn/baoopn-2026" \
