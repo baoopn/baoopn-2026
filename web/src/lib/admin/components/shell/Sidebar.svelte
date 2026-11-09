@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		ChartLine,
+		DatabaseBackup,
 		ExternalLink,
 		FolderGit2,
 		Headphones,
@@ -33,6 +34,7 @@
 		{ href: '/admin/projects', label: 'Projects', icon: FolderGit2, exact: false },
 		{ href: '/admin/analytics', label: 'Analytics', icon: ChartLine, exact: false },
 		{ href: '/admin/profile', label: 'Profile', icon: UserRound, exact: false },
+		{ href: '/admin/backups', label: 'Backups', icon: DatabaseBackup, exact: false },
 		{ href: '/admin/settings', label: 'Settings', icon: Settings, exact: false }
 	];
 
