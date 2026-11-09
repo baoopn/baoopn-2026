@@ -30,7 +30,8 @@
           { "context": "Public-safety check" },
           { "context": "Validate compose files" },
           { "context": "Docker build (api, no push)" },
-          { "context": "Docker build (web, no push)" }
+          { "context": "Docker build (web, no push)" },
+          { "context": "Backup — shellcheck, build, roundtrip" }
         ]
       }
     }

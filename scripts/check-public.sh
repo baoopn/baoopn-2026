@@ -24,6 +24,7 @@ check "useSend API keys" '\bus_[A-Za-z0-9]{24,}'
 check "webhook secrets" 'whsec_[A-Za-z0-9+/=]{16,}'
 check "GitHub tokens" '\b(ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}'
 check "private key blocks" '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+check "age private keys" 'AGE-SECRET-KEY-1[0-9A-Z]{50,}'
 
 if git ls-files | grep -E '(^|/)\.env$|(^|/)\.secrets/' >/dev/null; then
 	echo "::error::.env or .secrets/ is tracked"

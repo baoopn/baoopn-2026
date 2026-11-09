@@ -63,6 +63,10 @@ docker: ## Build both Docker images
 	docker build -f deploy/docker/api.Dockerfile --build-arg VERSION=$(VERSION) -t baoopn-api:dev .
 	docker build -f deploy/docker/web.Dockerfile -t baoopn-web:dev .
 
+.PHONY: backup-test
+backup-test: ## Backup image roundtrip test (Docker)
+	sh deploy/backup/test/roundtrip.sh
+
 .PHONY: lint
 lint: ## go vet + svelte-check
 	$(GO) vet ./...

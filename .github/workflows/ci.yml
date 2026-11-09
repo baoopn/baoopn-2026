@@ -132,6 +132,7 @@ jobs:
           export S3_SECRET_ACCESS_KEY=ci-only-placeholder
           docker compose -f docker-compose.yml config -q
           docker compose -f docker-compose.yml --profile full config -q
+          docker compose -f docker-compose.yml --profile backup config -q
           SERVICE_USER_POSTGRES=u SERVICE_PASSWORD_POSTGRES=p SERVICE_PASSWORD_64_INTERNAL=i \
             SERVICE_PASSWORD_64_SECRETS=s SERVICE_URL_WEB=https://example.com \
             docker compose -f docker-compose.coolify.yml config -q
@@ -154,3 +155,23 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  backup:
+    name: Backup — shellcheck, build, roundtrip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -x deploy/backup/bin/* deploy/backup/test/*.sh
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/backup
+          file: deploy/backup/Dockerfile
+          push: false
+          load: true
+          tags: baoopn-backup:test
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,mode=max,scope=backup
+      - name: Backup/restore roundtrip (local containers, no cloud)
+        run: SKIP_BUILD=1 sh deploy/backup/test/roundtrip.sh
