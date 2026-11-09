@@ -1,6 +1,6 @@
 # Coolify deployment ("Docker Compose" build pack, Git source). See docs/deployment.md.
 #
-# Coolify builds both images from the repository on the target server, so no
+# Coolify builds every image from the repository on the target server, so no
 # container-registry credentials are needed.
 #
 # In Coolify: New Resource → Public/Private Repository → Build Pack "Docker
@@ -31,6 +31,9 @@
 #   MEDIA_UPLOAD_WAIT, MEDIA_JOB_*, MEDIA_FALLBACK_AFTER, MEDIA_FAILED_RETENTION
 #                                                  image conversion (defaults are fine)
 #   MEDIA_ORPHAN_GRACE, MEDIA_ORPHAN_MAX_PER_PASS  unused-media cleanup (0 grace = off)
+#   BACKUP_AGE_RECIPIENT, BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY_ID,
+#   BACKUP_S3_SECRET_ACCESS_KEY      encrypted off-site DB backups (docs/backup.md; idles until set)
+#   BACKUP_TIME, BACKUP_KEEP_DAYS, BACKUP_KEEP_MIN, BACKUP_* ...   schedule/retention (defaults are fine)
 #
 # Do not add custom networks or published ports: Coolify manages networking.
 
@@ -184,6 +187,50 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 5
+
+  # Encrypted off-site Postgres backups to R2 (docs/backup.md). Idles with a
+  # WARN, and stays healthy, until BACKUP_AGE_RECIPIENT and BACKUP_S3_* are set.
+  backup:
+    build:
+      context: deploy/backup
+      args:
+        VERSION: ${SOURCE_COMMIT:-coolify}
+    image: baoopn-backup:latest
+    command: ["run"]
+    restart: unless-stopped
+    stop_grace_period: 2m
+    environment:
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=${SERVICE_USER_POSTGRES}
+      - PGPASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - PGDATABASE=${POSTGRES_DB:-baoopn}
+      - BACKUP_AGE_RECIPIENT=${BACKUP_AGE_RECIPIENT:-}
+      - BACKUP_S3_ENDPOINT=${BACKUP_S3_ENDPOINT:-}
+      - BACKUP_S3_BUCKET=${BACKUP_S3_BUCKET:-}
+      - BACKUP_S3_ACCESS_KEY_ID=${BACKUP_S3_ACCESS_KEY_ID:-}
+      - BACKUP_S3_SECRET_ACCESS_KEY=${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      - BACKUP_S3_REGION=${BACKUP_S3_REGION:-auto}
+      - BACKUP_S3_PROVIDER=${BACKUP_S3_PROVIDER:-Cloudflare}
+      - BACKUP_REMOTE=${BACKUP_REMOTE:-}
+      - BACKUP_PREFIX=${BACKUP_PREFIX:-baoopn}
+      - BACKUP_TIME=${BACKUP_TIME:-03:00}
+      - BACKUP_ON_START=${BACKUP_ON_START:-false}
+      - BACKUP_RETRY_MINUTES=${BACKUP_RETRY_MINUTES:-30}
+      - BACKUP_KEEP_DAYS=${BACKUP_KEEP_DAYS:-30}
+      - BACKUP_KEEP_MIN=${BACKUP_KEEP_MIN:-7}
+      - BACKUP_MAX_AGE_HOURS=${BACKUP_MAX_AGE_HOURS:-26}
+      - BACKUP_PING_URL=${BACKUP_PING_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/backupctl", "health"]
+      interval: 5m
+      timeout: 10s
+      start_period: 1m
+      start_interval: 5s
+      retries: 2
 
 volumes:
   baoopn-postgres-data:
