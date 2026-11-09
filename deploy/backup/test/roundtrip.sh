@@ -8,10 +8,14 @@
 # repo's migrations plus seed data into the first, backs it up to a local
 # rclone remote (a Docker volume) with a generated test key, restores into the
 # second and compares row counts and checksums of every table and the goose
-# version. Also checks: refusals (no or invalid recipient, wrong or missing
-# key, tampered file, non-empty target), --force, --to-file, DATABASE_URL
-# with an encoded password, prune rules, the idle mode, the scheduler, the
-# healthcheck and that no plaintext dump lands on disk.
+# version. The seed holds a few MB of random bytes, so verify and restore
+# stream a file larger than a pipe buffer. Also checks: refusals (no or
+# invalid recipient, wrong or missing key, CRLF key, tampered file, non-empty
+# target), --force, --to-file (existing PATH kept), DATABASE_URL with an
+# encoded password, table counts in the logs, prune rules (foreign names and
+# nested prefixes untouched), the idle mode, partial settings, the scheduler,
+# docker stop during a running backup, the healthcheck and that no
+# plaintext dump lands on disk.
 #
 # Env: BACKUP_TEST_IMAGE (default baoopn-backup:test), SKIP_BUILD=1 to reuse
 # an existing image, KEEP_ON_FAIL=1 to leave the containers.
@@ -436,7 +440,8 @@ grep -q 'decrypting' "$TMP/out" && bad "tampered file was decrypted" || ok "tamp
 
 echo "== prune"
 # Ten complete, old (2020) backups, an old orphan dump and an old orphan
-# manifest, plus a foreign object pair that prune must never touch or count.
+# manifest, plus a foreign object pair and a valid-named pair under a nested
+# prefix (another deployment) that prune must never touch or count.
 # shellcheck disable=SC2016 # expands in the container
 on_vol '
 	d=/backups/baoopn/2020/01; mkdir -p $d
@@ -448,13 +453,18 @@ on_vol '
 	echo orphan >/backups/baoopn/2019/12/baoopn-20191231T030000Z.dump.age
 	echo "{}" >/backups/baoopn/2019/12/baoopn-20191230T030000Z.dump.age.json
 	echo foreign >/backups/baoopn/2030/01/other-20300101T000000Z.dump.age
-	echo "{}" >/backups/baoopn/2030/01/other-20300101T000000Z.dump.age.json'
-count() { on_vol "find /backups -name '$1' | wc -l" | tr -d ' '; }
+	echo "{}" >/backups/baoopn/2030/01/other-20300101T000000Z.dump.age.json
+	d=/backups/baoopn/staging/2026/01; mkdir -p $d
+	echo nested >$d/baoopn-20260101T000000Z.dump.age; echo "{}" >$d/baoopn-20260101T000000Z.dump.age.json'
+bk "$SRC" list 2>&1 | grep -q 20260101T000000Z && bad "list shows a backup under a nested prefix" ||
+	ok "list ignores backups under a nested prefix"
+# count PATTERN: objects outside the nested prefix.
+count() { on_vol "find /backups -path /backups/baoopn/staging -prune -o -name '$1' -print | wc -l" | tr -d ' '; }
 KEEP_DAYS=0 bk "$SRC" prune >/dev/null 2>&1
 [ "$(count '*.dump.age')" -eq $((REAL + 12)) ] && ok "BACKUP_KEEP_DAYS=0 keeps everything" ||
 	bad "KEEP_DAYS=0 left $(count '*.dump.age')"
 KEEP_DAYS=30 KEEP_MIN=7 bk "$SRC" prune >"$TMP/out" 2>&1 || bad "prune exited non-zero"
-left=$(on_vol 'find /backups -name "baoopn-*.dump.age" | sed "s#.*/##" | sort')
+left=$(on_vol 'find /backups -path /backups/baoopn/staging -prune -o -name "baoopn-*.dump.age" -print | sed "s#.*/##" | sort')
 old_kept=$((7 - REAL))
 oldest_kept=$(printf '202001%02d' $((11 - old_kept)))
 dropped=$(printf '202001%02d' $((10 - old_kept)))
@@ -476,6 +486,8 @@ else
 	bad "KEEP_MIN=0 left: $(on_vol 'find /backups -type f')"
 	cat "$TMP/out"
 fi
+n=$(on_vol 'find /backups/baoopn/staging -type f | wc -l' | tr -d ' ')
+[ "$n" -eq 2 ] && ok "backups under a nested prefix survive every prune" || bad "nested prefix objects left: $n"
 
 echo
 echo "roundtrip: $PASS passed, $FAILED failed"

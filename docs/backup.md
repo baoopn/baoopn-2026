@@ -136,7 +136,9 @@ backupctl list
 - After each good scheduled backup, the service deletes backups older than
   `BACKUP_KEEP_DAYS` (default 30). It always keeps the newest
   `BACKUP_KEEP_MIN` (default 7), however old. `BACKUP_KEEP_DAYS=0` keeps
-  everything. Objects with other names in the bucket are never touched.
+  everything. Prune only looks at `<prefix>/<YYYY>/<MM>/` objects with
+  this tool's names. It never touches other files, or backups of another
+  deployment under a nested prefix such as `baoopn/staging/`.
 - The healthcheck stays healthy while the service idles and while it waits
   for its first run. It turns **unhealthy** when no backup has worked in
   `BACKUP_MAX_AGE_HOURS` (default 26). Coolify then shows the resource as
@@ -145,8 +147,10 @@ backupctl list
   redeploy does not reset the health state. If that backup is older than
   `BACKUP_MAX_AGE_HOURS`, the service reports unhealthy until the next good
   run. Set `BACKUP_ON_START=true` to run one at once.
-- `docker stop` (and a redeploy) interrupts a running backup. The service
-  removes its temp files and uploads nothing; the next run makes a new one.
+- `docker stop` (and a redeploy) interrupts a running backup and removes its
+  temp files. A stop never leaves a half-made backup that counts: a backup
+  counts only once its manifest is uploaded. A lone dump may remain, and
+  prune removes it once it is old.
 - `BACKUP_PING_URL` (optional): a GET after each success and `<url>/fail`
   after each failure, as [healthchecks.io](https://healthchecks.io) expects.
   Use it to get an email when backups stop.

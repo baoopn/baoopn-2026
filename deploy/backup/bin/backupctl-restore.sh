@@ -106,12 +106,20 @@ toc_list() {
 	pg_restore --list >"$WORKDIR/toc" 2>"$WORKDIR/toc.err"
 }
 
+# cleanup_restore: removes the workdir and, after an interrupted --to-file,
+# the plaintext PATH.partial.
+cleanup_restore() {
+	[ -z "${partial:-}" ] || rm -f "$partial"
+	cleanup_workdir
+}
+
 restore_setup() {
 	require_storage
 	umask 077
 	make_workdir
-	trap 'cleanup_workdir' EXIT
-	trap 'cleanup_workdir; exit 130' INT TERM
+	partial=
+	trap 'cleanup_restore' EXIT
+	trap 'cleanup_restore; exit 130' INT TERM
 	load_identity
 }
 

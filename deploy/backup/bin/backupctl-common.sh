@@ -8,6 +8,9 @@ STATUS_DIR=${BACKUP_STATUS_DIR:-/tmp/backup-status}
 NAME_BASE=baoopn
 # Extended regex (awk) for the object names this tool creates.
 NAME_RE="^$NAME_BASE-[0-9]{8}T[0-9]{6}Z\\.dump\\.age\$"
+# Object paths relative to the prefix: <YYYY>/<MM>/<name>[.json]. Anything
+# else (another deployment under a nested prefix, foreign files) is ignored.
+PATH_RE="^[0-9]{4}/[0-9]{2}/$NAME_BASE-[0-9]{8}T[0-9]{6}Z\\.dump\\.age(\\.json)?\$"
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -219,14 +222,16 @@ object_path() {
 }
 
 # remote_listing: prints "path;size;modtime" for every backup object (dumps
-# and manifests). rclone's stderr is kept apart from the listing. Any error
-# fails, except a missing prefix (no backups yet), which is an empty list.
+# and manifests) at <YYYY>/<MM>/ under the prefix; other paths are dropped,
+# so list, restore latest and prune never see them. rclone's stderr is kept
+# apart from the listing. Any error fails, except a missing prefix (no
+# backups yet), which is an empty list.
 remote_listing() {
 	errf=$(mktemp "${TMPDIR:-/tmp}/backupctl-ls.XXXXXX") || return 1
 	if out=$(rcl lsf -R --files-only --format pst --separator ';' \
 		--include '*.dump.age' --include '*.dump.age.json' "$REMOTE_BASE" 2>"$errf"); then
 		rm -f "$errf"
-		[ -z "$out" ] || printf '%s\n' "$out"
+		[ -z "$out" ] || printf '%s\n' "$out" | awk -F';' -v re="$PATH_RE" '$1 ~ re'
 		return 0
 	fi
 	if [ -z "$out" ] && grep -q 'directory not found' "$errf" &&
