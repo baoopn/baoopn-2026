@@ -32,7 +32,10 @@ const (
 	eventBuffer     = 32
 )
 
-var errTooManyStreams = errors.New("contact: too many inbox streams")
+var (
+	errTooManyStreams = errors.New("contact: too many inbox streams")
+	errShuttingDown   = errors.New("contact: inbox streams closed for shutdown")
+)
 
 // events fans inbox changes out to the admin streams of this process.
 //
@@ -63,7 +66,10 @@ func newEvents(max int) *events {
 func (h *events) subscribe() (*eventSub, func(), error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || len(h.subs) >= h.max {
+	if h.closed {
+		return nil, nil, errShuttingDown
+	}
+	if len(h.subs) >= h.max {
 		return nil, nil, errTooManyStreams
 	}
 	s := &eventSub{ch: make(chan []byte, eventBuffer), gone: make(chan struct{})}

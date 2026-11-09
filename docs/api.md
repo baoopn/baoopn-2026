@@ -137,8 +137,8 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
 | `ready` | `{}` | the stream opened |
 | `thread.created` | `{ thread_id }` | a contact form was stored |
 | `message.created` | `{ thread_id, message_id, direction, request_id? }` | an inbound email was stored (`inbound`), or an admin reply was inserted (`outbound`, with its `request_id`) |
-| `message.updated` | `{ thread_id, message_id, status }` | a reply or retry recorded `sent` or `failed` |
-| `thread.updated` | `{ thread_id, change, status? }` | marked `read` / `unread`, or `change: "status"` with the new `status` |
+| `message.updated` | `{ thread_id, message_id, status }` | a retry started (`sending`), or a reply or retry recorded `sent` or `failed` |
+| `thread.updated` | `{ thread_id, change, status? }` | marked `read` / `unread` (only when that changed it), or `change: "status"` with the new `status` |
 | `thread.deleted` | `{ thread_id }` | the thread was deleted |
 
 - Events carry ids and kinds only, never bodies, names or email addresses: the
@@ -146,7 +146,8 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
 - No `id:` and no replay. The client refetches everything on each `ready`.
 - `: keep-alive` every 25 s without events (below Cloudflare's 100 s idle limit).
 - The server ends each stream after 15 min; the client reconnects with a fresh
-  token. On shutdown every stream ends at once.
+  token. On shutdown every stream ends at once, and new ones get
+  `503 shutting_down` with `Retry-After: 10`.
 - At most 16 open streams: above that `503 too_many_streams` with `Retry-After: 10`.
   A client that stops reading (32 events buffered) is dropped and reconnects.
 - Mounted behind `AdminAuth` without the 60 s admin request timeout; deadlines as

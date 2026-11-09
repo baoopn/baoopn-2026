@@ -185,8 +185,9 @@ func TestCloseStreamsEndsStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	if res.StatusCode != 503 {
-		t.Fatalf("stream after CloseStreams: %d", res.StatusCode)
+	if res.StatusCode != 503 || res.Header.Get("Retry-After") != "10" || !strings.Contains(string(body), `"shutting_down"`) {
+		t.Fatalf("stream after CloseStreams: %d %s", res.StatusCode, body)
 	}
 }

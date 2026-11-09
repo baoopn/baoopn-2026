@@ -1,6 +1,7 @@
 package contact
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -36,6 +37,10 @@ func (m *Module) handleEvents(w http.ResponseWriter, r *http.Request) {
 	sub, unsubscribe, err := m.events.subscribe()
 	if err != nil {
 		w.Header().Set("Retry-After", "10")
+		if errors.Is(err, errShuttingDown) {
+			httpapi.Error(w, http.StatusServiceUnavailable, "shutting_down", "the server is restarting, try again shortly")
+			return
+		}
 		httpapi.Error(w, http.StatusServiceUnavailable, "too_many_streams", "too many inbox streams, try again later")
 		return
 	}

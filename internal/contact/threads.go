@@ -115,10 +115,14 @@ func (m *Module) handleDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleRead(read bool) http.HandlerFunc {
-	sql := `UPDATE threads SET read_at = coalesce(read_at, now()) WHERE id = $1`
+	// The statement returns whether the thread changed, so a no-op (already
+	// read, already unread) publishes nothing.
+	sql := `WITH prev AS (SELECT id, read_at IS NULL AS changed FROM threads WHERE id = $1 FOR UPDATE)
+		UPDATE threads t SET read_at = coalesce(t.read_at, now()) FROM prev WHERE t.id = prev.id RETURNING prev.changed`
 	change := "read"
 	if !read {
-		sql = `UPDATE threads SET read_at = NULL WHERE id = $1`
+		sql = `WITH prev AS (SELECT id, read_at IS NOT NULL AS changed FROM threads WHERE id = $1 FOR UPDATE)
+		UPDATE threads t SET read_at = NULL FROM prev WHERE t.id = prev.id RETURNING prev.changed`
 		change = "unread"
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -127,16 +131,19 @@ func (m *Module) handleRead(read bool) http.HandlerFunc {
 			notFound(w)
 			return
 		}
-		tag, err := m.d.DB.Exec(r.Context(), sql, id)
+		var changed bool
+		err := m.d.DB.QueryRow(r.Context(), sql, id).Scan(&changed)
+		if isNoRows(err) {
+			notFound(w)
+			return
+		}
 		if err != nil {
 			m.internal(w, "mark read", err)
 			return
 		}
-		if tag.RowsAffected() == 0 {
-			notFound(w)
-			return
+		if changed {
+			m.events.publish(Event{Type: evThreadUpdated, ThreadID: id, Change: change})
 		}
-		m.events.publish(Event{Type: evThreadUpdated, ThreadID: id, Change: change})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
