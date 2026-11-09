@@ -147,9 +147,7 @@ func (m *Module) queueRun(ctx context.Context) (Run, error) {
 	now := m.d.Now().UTC()
 	var run Run
 	err := pgx.BeginFunc(ctx, m.d.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE backup_runs SET status = 'failed', finished_at = $1,
-			error = 'Not picked up by the backup service within 10 minutes'
-			WHERE status = 'queued' AND requested_at < $2`, now, now.Add(-queuedExpiry)); err != nil {
+		if err := expireQueued(ctx, tx, now); err != nil {
 			return err
 		}
 		var state string
@@ -174,8 +172,9 @@ func (m *Module) queueRun(ctx context.Context) (Run, error) {
 			return errConflict{"not_configured", msg}
 		}
 		var active bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM backup_runs
-			WHERE status IN ('queued','running'))`).Scan(&active); err != nil {
+		// The agent is online here, so a left-over running row does not block.
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM backup_runs WHERE `+activeWhere+`)`,
+			activeArgs(state, seen, true)...).Scan(&active); err != nil {
 			return err
 		}
 		if active {
