@@ -22,8 +22,14 @@ log() {
 info() { log INFO "$@"; }
 warn() { log WARN "$@"; }
 err() { log ERROR "$@"; }
+# die MESSAGE: logs an ERROR and exits 1. With LAST_ERROR_FILE set (during a
+# backup), the message also goes there for the run's status row.
 die() {
 	err "$@"
+	if [ -n "${LAST_ERROR_FILE:-}" ]; then
+		{ printf '%s
+' "$*" >"$LAST_ERROR_FILE"; } 2>/dev/null
+	fi
 	exit 1
 }
 

@@ -24,6 +24,12 @@ or on a machine without Docker.
 
 - The whole `baoopn` database: posts and their parts, projects, settings,
   contact messages, the media table, analytics and `goose_db_version`.
+  The backup settings from the admin page are part of `settings`, so a
+  restore brings them back.
+- The tables `backup_runs` and `backup_agent` (the status the admin page
+  shows) are in the dump, but without their rows. They describe the server
+  that made the backup, so a restored database starts with an empty run
+  history.
 - Format: `pg_dump --format=custom --compress=6 --no-owner --no-privileges`,
   piped into `age`. The plaintext dump never touches the bucket or the disk.
 
@@ -133,7 +139,8 @@ backupctl list
   `BACKUP_ON_START=true` also runs one when the container starts.
 - A failed run gets one retry after `BACKUP_RETRY_MINUTES` (default 30).
   The container never exits because of a failed backup.
-- After each good scheduled backup, the service deletes backups older than
+- After each good backup the service starts (scheduled, at start, a retry
+  or **Back up now**), it deletes backups older than
   `BACKUP_KEEP_DAYS` (default 30). It always keeps the newest
   `BACKUP_KEEP_MIN` (default 7), however old. `BACKUP_KEEP_DAYS=0` keeps
   everything. Prune only looks at `<prefix>/<YYYY>/<MM>/` objects with
@@ -164,6 +171,55 @@ an SSH session (the Coolify terminal cannot do this):
 docker ps --format '{{.Names}}' | grep '^backup-'
 docker exec -i <backup-container> backupctl verify latest -i - < portfolio-backup-age-key.txt
 ```
+
+## Admin page
+
+The admin dashboard has a **Backups** page. The backup service writes its
+state to the database every 30 seconds, and the page reads it from there.
+The api never talks to the bucket.
+
+The page shows:
+
+- Whether backups work: the last good backup, the next run, the last
+  error, and whether the service is online (it checked in within the last
+  3 minutes).
+- The destination: `s3` or `rclone`, the S3 provider, the bucket and the
+  prefix. For an rclone destination it only says "rclone remote", since
+  `BACKUP_REMOTE` may hold credentials.
+- Whether the age recipient, the S3 endpoint, the access key, the secret
+  and the ping URL are set. It never shows their values.
+- The last 20 runs, with size, duration, table count and how many old
+  backups the run deleted.
+
+On the page you can:
+
+- **Back up now.** The api queues a request and the service starts it
+  within 30 seconds. Only one backup runs at a time. If a scheduled run
+  starts first, it answers the request.
+- Change the daily time, `BACKUP_KEEP_DAYS`, `BACKUP_KEEP_MIN` and
+  `BACKUP_MAX_AGE_HOURS`. A changed value overrides the env value, and the
+  service applies it within 30 seconds. An empty field uses the env value.
+  **Reset to defaults** removes every override.
+- Pause scheduled backups. A paused service skips scheduled and startup
+  backups, and its healthcheck stays healthy. **Back up now** still works.
+
+The service checks every override it reads. A bad value logs one warning,
+and the service uses the env value. The api checks the same rules when you
+save:
+
+| Setting | Rule |
+|---|---|
+| daily time | `HH:MM`, 24-hour, UTC |
+| keep days | 0 to 3650 (`0` keeps all) |
+| keep at least | 0 to 1000 |
+| alert after (hours) | 25 to 720 |
+
+The status needs the tables from migration `00009`. With an older schema,
+or another database, the service logs one line, "status reporting off",
+and backs up as before. A failed status write logs one warning and never
+fails a backup or changes the healthcheck. The service only writes error
+lines from its own log to the database, cut to 500 characters. It never
+writes a secret.
 
 ## Commands
 
@@ -362,8 +418,18 @@ of every table and the goose version. It also checks the failure cases: no
 or bad recipient, wrong or missing key, a changed file, a non-empty target,
 partial settings, the retention rules, a stop during a running backup, and
 that no plaintext dump lands on disk. The seed data holds a few MB of random
-bytes, so verify and restore stream a file larger than a pipe buffer. CI
-runs it on every pull request.
+bytes, so verify and restore stream a file larger than a pipe buffer.
+
+`deploy/backup/test/status.sh` tests the status the admin page reads, with
+the same kind of throwaway containers. It checks the heartbeat (no secret
+values), **Back up now**, overrides and bad values, pause, a recipient with
+SQL in it, a database without the status tables, a read-only database
+role, runs left over by a stopped container, the 200-run limit, CLI runs,
+a restore without status rows, a quick `docker stop` and the idle mode. It
+takes a few minutes, since the service checks the database every 30
+seconds.
+
+CI runs both on every pull request.
 
 ```bash
 make backup-test
