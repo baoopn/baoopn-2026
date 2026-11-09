@@ -111,6 +111,11 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/brand` | – | `AdminBrandAsset[]` (slot order) |
 | PUT | `/brand/{slot}` | multipart `file` (request ≤ 1 MiB) — see *Brand assets* | `AdminBrandAsset` (`custom: true`; the same bytes as the current file change nothing) |
 | DELETE | `/brand/{slot}` | – | `AdminBrandAsset` (`custom: false`, back to the default; idempotent); 404 `not_found` for an unknown slot |
+| GET | `/backups` | – | `BackupStatus` (see *Backups*) |
+| PUT | `/backups/settings` | `BackupSettingsInput` (a missing field is `null`) | `BackupStatus`; 422 `validation` names the field and its range |
+| DELETE | `/backups/settings` | – | `BackupStatus` (the four overrides are cleared; `paused` stays) |
+| PUT | `/backups/pause` | `{ paused }` | `BackupStatus` (sets or clears `paused_at`) |
+| POST | `/backups/run` | – | `202 BackupRun` (`status: "queued"`); 409 `busy`, `agent_offline` or `not_configured` |
 
 ### Inbox event stream — `GET /api/admin/inbox/events`
 
@@ -202,6 +207,50 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   no absolute http(s) URL, the emails show the text badge instead. The logo is a remote image
   shared by all recipients, so its URL carries no per-recipient data, but fetching it can still
   reveal that a mail was opened.
+
+### Backups
+
+The backup sidecar (`deploy/backup`, see `docs/backup.md`) writes a heartbeat to
+`backup_agent` every 30 s and one row per run to `backup_runs`. The API only reads these
+tables. It never talks to the bucket. It writes the `backup` settings document and queues
+manual runs. No secret value reaches the API: `secrets` only says which ones are set.
+
+- **Health** (`health`, the first rule that matches wins):
+
+  | code | when |
+  |---|---|
+  | `not_reporting` | no heartbeat row yet (sidecar not deployed, or an older version) |
+  | `offline` | the last heartbeat is 3 min old or more |
+  | `not_configured` | the sidecar is idle because backups are not set up (`agent.idle_reason` says why) |
+  | `paused` | scheduled backups are paused (the sidecar says so, or `settings.paused` is on) |
+  | `ok` | the last success is at most `max_age_hours` old (26 when unknown) |
+  | `warning` | as `ok`, but the newest finished run failed |
+  | `waiting` | no success yet, and less than `retry_minutes` + 60 min have passed since the first run was due (or none is planned yet) |
+  | `stale` | anything else: no success within `max_age_hours` |
+
+- **Settings:** each of `backup_time`, `keep_days`, `keep_min` and `max_age_hours` has
+  `env` (the sidecar's value from its environment), `override` (the admin's value) and
+  `value` (the override if set, else env). `source` is `override` or `env`.
+  `null` means "use the env value". The rules:
+
+  | field | allowed |
+  |---|---|
+  | `backup_time` | `HH:MM`, 24-hour UTC, `00:00` to `23:59` (`""` counts as `null`) |
+  | `keep_days` | 0 to 3650 (0 keeps every backup) |
+  | `keep_min` | 0 to 1000 |
+  | `max_age_hours` | 25 to 720 |
+
+  A stored value outside these rules counts as no override (the sidecar logs a warning and
+  uses its env value). `pending` is true until the sidecar has applied the latest change; it
+  checks every 30 s. Pausing stops scheduled and startup backups only: Back up now still works.
+- **Back up now:** `POST /backups/run` adds a queued run. The sidecar starts it within 30 s.
+  At most one run is queued at a time: 409 `busy` while a run is queued or running. 409
+  `agent_offline` when there is no heartbeat in the last 3 min, and 409 `not_configured` when
+  the sidecar is idle. A queued run that is not picked up within 10 min fails with
+  "Not picked up by the backup service within 10 minutes".
+- **Runs:** `runs` lists the newest 20. `last_run` is the newest finished run, `active_run` the
+  queued or running one. The sidecar keeps the newest 200 finished runs. `last_success_at` is
+  the latest of the sidecar's last success and the newest `ok` run.
 
 ### Media uploads
 
