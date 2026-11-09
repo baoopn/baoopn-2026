@@ -116,8 +116,10 @@ func (m *Module) handleDetail(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) handleRead(read bool) http.HandlerFunc {
 	sql := `UPDATE threads SET read_at = coalesce(read_at, now()) WHERE id = $1`
+	change := "read"
 	if !read {
 		sql = `UPDATE threads SET read_at = NULL WHERE id = $1`
+		change = "unread"
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := idParam(r, "id")
@@ -134,6 +136,7 @@ func (m *Module) handleRead(read bool) http.HandlerFunc {
 			notFound(w)
 			return
 		}
+		m.events.publish(Event{Type: evThreadUpdated, ThreadID: id, Change: change})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -164,6 +167,7 @@ func (m *Module) handlePatch(w http.ResponseWriter, r *http.Request) {
 		m.internal(w, "patch thread", err)
 		return
 	}
+	m.events.publish(Event{Type: evThreadUpdated, ThreadID: id, Change: "status", Status: t.Status})
 	httpapi.JSON(w, http.StatusOK, t)
 }
 
@@ -182,5 +186,6 @@ func (m *Module) handleDelete(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
+	m.events.publish(Event{Type: evThreadDeleted, ThreadID: id})
 	w.WriteHeader(http.StatusNoContent)
 }

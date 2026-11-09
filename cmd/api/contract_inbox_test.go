@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -293,4 +297,52 @@ func TestContractEmptyStates(t *testing.T) {
 	c.fail("GET", "/api/admin/threads/abc", nil, 404, "not_found")
 	c.fail("GET", "/api/admin/posts/999999", nil, 404, "not_found")
 	c.fail("POST", "/api/admin/threads/999999/messages", map[string]string{"body": "x", "request_id": "req-nothread"}, 404, "not_found")
+}
+
+// The inbox stream through the full router: no request timeout, ready first,
+// then a form submission arrives as thread.created with ids only.
+func TestContractInboxEvents(t *testing.T) {
+	c := newHarness(t)
+	srv := httptest.NewServer(c.h)
+	t.Cleanup(srv.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/admin/inbox/events", nil)
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "text/event-stream" ||
+		res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("stream: %d %v", res.StatusCode, res.Header)
+	}
+	rd := bufio.NewReader(res.Body)
+	frame := func() string {
+		var b strings.Builder
+		for {
+			line, err := rd.ReadString('\n')
+			if err != nil {
+				t.Fatalf("read: %v (so far %q)", err, b.String())
+			}
+			if line == "\n" {
+				return b.String()
+			}
+			b.WriteString(line)
+		}
+	}
+	if f := frame(); f != "retry: 5000\n" {
+		t.Fatalf("first frame %q", f)
+	}
+	if f := frame(); f != "event: ready\ndata: {}\n" {
+		t.Fatalf("second frame %q", f)
+	}
+
+	c.ok("POST", "/api/v1/contact", contactForm("Priya Shah", "priya@example.com",
+		"Hello Bao, let's build something."), 201, okShape, false)
+	c.wait()
+	tid := fmt.Sprint(c.scalar(`SELECT id FROM threads`))
+	if f := frame(); f != `event: thread.created`+"\n"+`data: {"thread_id":`+tid+"}\n" {
+		t.Fatalf("event frame %q", f)
+	}
 }

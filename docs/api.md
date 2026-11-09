@@ -103,6 +103,7 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | DELETE | `/threads/{id}` | – | `204` |
 | POST | `/threads/{id}/messages` | `{ body, request_id }` (1–10 000 chars) | `ThreadMessage` (`status` sent or failed) |
 | POST | `/threads/{id}/messages/{mid}/retry` | – | `ThreadMessage` |
+| GET | `/inbox/events` | – | Server-Sent Events, see *Inbox event stream* |
 | GET | `/analytics` | `range` (`24h`,`7d`,`30d`,`90d`), `tz` (IANA) | `AnalyticsReport` |
 | GET | `/settings` | – | `SiteSettings` |
 | PUT | `/settings` | `SiteSettings` | `SiteSettings` |
@@ -110,6 +111,48 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/brand` | – | `AdminBrandAsset[]` (slot order) |
 | PUT | `/brand/{slot}` | multipart `file` (request ≤ 1 MiB) — see *Brand assets* | `AdminBrandAsset` (`custom: true`; the same bytes as the current file change nothing) |
 | DELETE | `/brand/{slot}` | – | `AdminBrandAsset` (`custom: false`, back to the default; idempotent); 404 `not_found` for an unknown slot |
+
+### Inbox event stream — `GET /api/admin/inbox/events`
+
+`text/event-stream` (`Cache-Control: no-store`, `X-Accel-Buffering: no`) for the
+admin inbox, so lists, the unread badge and an open thread update live. Auth is the
+usual `Authorization: Bearer <clerk session token>` header, checked once when the
+stream opens; the token never goes in the URL, so the client reads the stream with
+`fetch`, not `EventSource`. 401/403 and 503 `admin_disabled` as for every admin route.
+
+```
+retry: 5000
+
+event: ready
+data: {}
+
+event: message.created
+data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc123"}
+
+: keep-alive
+```
+
+| event | data | when |
+|---|---|---|
+| `ready` | `{}` | the stream opened |
+| `thread.created` | `{ thread_id }` | a contact form was stored |
+| `message.created` | `{ thread_id, message_id, direction, request_id? }` | an inbound email was stored (`inbound`), or an admin reply was inserted (`outbound`, with its `request_id`) |
+| `message.updated` | `{ thread_id, message_id, status }` | a reply or retry recorded `sent` or `failed` |
+| `thread.updated` | `{ thread_id, change, status? }` | marked `read` / `unread`, or `change: "status"` with the new `status` |
+| `thread.deleted` | `{ thread_id }` | the thread was deleted |
+
+- Events carry ids and kinds only, never bodies, names or email addresses: the
+  client refetches what changed. Unknown events are ignored.
+- No `id:` and no replay. The client refetches everything on each `ready`.
+- `: keep-alive` every 25 s without events (below Cloudflare's 100 s idle limit).
+- The server ends each stream after 15 min; the client reconnects with a fresh
+  token. On shutdown every stream ends at once.
+- At most 16 open streams: above that `503 too_many_streams` with `Retry-After: 10`.
+  A client that stops reading (32 events buffered) is dropped and reconnects.
+- Mounted behind `AdminAuth` without the 60 s admin request timeout; deadlines as
+  for the now-playing stream (read deadline cleared, 30 s per write).
+- Events are published in-process: correct while one API instance runs. More
+  instances would need Postgres `LISTEN/NOTIFY` feeding each instance's hub.
 
 ### Brand assets
 
