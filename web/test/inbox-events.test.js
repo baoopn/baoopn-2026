@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyInboxEvent } from '../src/lib/admin/inbox/events.js';
+import { inboxKeys } from '../src/lib/admin/inbox/keys.js';
 
 /** A fake QueryClient that records calls, plus recorded hook calls. */
 function harness() {
@@ -98,4 +99,26 @@ test('hooks are optional', () => {
 	const { qc, calls } = harness();
 	applyInboxEvent(qc, 'message.created', '{"thread_id":1,"message_id":2,"direction":"inbound"}');
 	assert.equal(calls.length, 3);
+});
+
+test('events.js uses exactly the shared inboxKeys', () => {
+	const { qc, calls } = harness();
+	applyInboxEvent(qc, 'ready', '{}');
+	applyInboxEvent(qc, 'message.created', '{"thread_id":3,"message_id":4,"direction":"inbound"}');
+	const keys = calls.map(([, f]) => f.queryKey);
+	assert.deepEqual(keys, [
+		inboxKeys.all,
+		inboxKeys.threadsAll,
+		inboxKeys.unread,
+		inboxKeys.thread(3)
+	]);
+	assert.deepEqual(inboxKeys.threads({ status: 'open', q: '' }), [
+		'inbox',
+		'threads',
+		{ status: 'open', q: '' }
+	]);
+	// Every key is under the root that `ready` invalidates.
+	for (const k of [...keys, inboxKeys.threads({ status: 'spam', q: 'x' })]) {
+		assert.equal(k[0], inboxKeys.all[0]);
+	}
 });

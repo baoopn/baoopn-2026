@@ -15,11 +15,12 @@
  * @property {(requestId: string, messageId: number) => void} [ownReply] An admin reply was stored.
  */
 
-const ALL = /** @type {const} */ (['inbox']);
-const THREADS = /** @type {const} */ (['inbox', 'threads']);
-const UNREAD = /** @type {const} */ (['inbox', 'unread']);
-/** @param {number} id */
-const thread = (id) => /** @type {const} */ (['inbox', 'thread', id]);
+import { inboxKeys } from './keys.js';
+
+const ALL = inboxKeys.all;
+const THREADS = inboxKeys.threadsAll;
+const UNREAD = inboxKeys.unread;
+const thread = inboxKeys.thread;
 
 /** @param {unknown} v @returns {v is number} */
 const isId = (v) => typeof v === 'number' && Number.isSafeInteger(v) && v > 0;

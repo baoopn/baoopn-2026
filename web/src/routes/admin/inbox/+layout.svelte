@@ -43,13 +43,15 @@
 		]}
 	>
 		<div class="flex flex-col gap-3 border-b border-rule px-4 pt-6 pb-4 sm:px-6 lg:px-5">
-			<h1 class="font-display text-3xl font-semibold">
-				Inbox
-				{#if unreadCount > 0}<span class="font-mono text-base text-ink-soft"
-						>· {unreadCount} unread</span
-					>{/if}
+			<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+				<h1 class="font-display text-3xl font-semibold">
+					Inbox
+					{#if unreadCount > 0}<span class="font-mono text-base text-ink-soft"
+							>· {unreadCount} unread</span
+						>{/if}
+				</h1>
 				<LiveStatus />
-			</h1>
+			</div>
 			<Segmented {options} bind:value={status} label="Thread status" size="sm" />
 			<SearchInput
 				class="w-full"

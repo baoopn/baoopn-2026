@@ -7,19 +7,17 @@
 import type { QueryClient } from '@tanstack/svelte-query';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { auth } from '../auth.svelte';
+import { backoffDelay, retryAfterDelay, statusAfterGrace, type LiveStatus } from './backoff.js';
 import { applyInboxEvent } from './events.js';
 import { createSSEParser } from './sse.js';
 
-export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
+export type { LiveStatus };
 
 const URL_PATH = '/api/admin/inbox/events';
 const FRESH_MS = 8_000;
 const IDLE_MS = 60_000; // server sends `: keep-alive` every 25 s
 const RECONNECTING_AFTER_MS = 2_000;
 const HIDDEN_PAUSE_MS = 60_000;
-const BACKOFF_MIN_MS = 1_000;
-const BACKOFF_MAX_MS = 30_000;
-const DEFAULT_RETRY_AFTER_S = 10;
 const OWN_REPLIES_MAX = 50;
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -65,6 +63,11 @@ class InboxLive {
 		return () => this.#stop();
 	}
 
+	/** Close the stream and forget everything (sign-out, HMR). */
+	stop(): void {
+		this.#stop();
+	}
+
 	#stop(): void {
 		this.#gen++;
 		this.#conn?.abort();
@@ -103,7 +106,7 @@ class InboxLive {
 	}
 
 	#online = () => {
-		if (!this.#qc || this.#paused) return;
+		if (!this.#qc || this.#paused || this.#ready) return;
 		this.#disconnect();
 		this.#attempt = 0;
 		this.status = 'connecting';
@@ -127,7 +130,7 @@ class InboxLive {
 				this.#disconnect();
 				if (this.#reconnectingTimer) clearTimeout(this.#reconnectingTimer);
 				this.#reconnectingTimer = null;
-				if (this.status !== 'offline') this.status = 'connecting';
+				if (this.status !== 'offline') this.status = 'paused';
 			}, HIDDEN_PAUSE_MS);
 			return;
 		}
@@ -136,6 +139,7 @@ class InboxLive {
 		if (this.#paused) {
 			this.#paused = false;
 			this.#attempt = 0;
+			if (this.status === 'paused') this.status = 'connecting';
 			this.#connect();
 		}
 	};
@@ -145,7 +149,7 @@ class InboxLive {
 		if (this.#reconnectingTimer) return;
 		this.#reconnectingTimer = setTimeout(() => {
 			this.#reconnectingTimer = null;
-			if (!this.#ready && this.status !== 'offline') this.status = 'reconnecting';
+			this.status = statusAfterGrace(this.status, this.#ready);
 		}, RECONNECTING_AFTER_MS);
 	}
 
@@ -159,9 +163,7 @@ class InboxLive {
 	}
 
 	#backoff(): number {
-		const base = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** this.#attempt);
-		this.#attempt++;
-		return Math.round(base * (0.5 + Math.random())); // ±50 % jitter
+		return backoffDelay(this.#attempt++);
 	}
 
 	#resetIdle(conn: AbortController): void {
@@ -212,6 +214,8 @@ class InboxLive {
 				delay = this.#backoff();
 				return;
 			}
+			// Watchdog from here: a fetch that stalls before headers also aborts.
+			this.#resetIdle(conn);
 			const res = await fetch(URL_PATH, {
 				headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
 				cache: 'no-store',
@@ -224,9 +228,7 @@ class InboxLive {
 				return;
 			}
 			if (res.status === 429 || res.status === 503) {
-				const ra = Number(res.headers.get('Retry-After'));
-				const s = Number.isFinite(ra) && ra > 0 ? ra : DEFAULT_RETRY_AFTER_S;
-				delay = Math.max(s * 1000, this.#backoff());
+				delay = retryAfterDelay(res.headers.get('Retry-After'), this.#backoff());
 				return;
 			}
 			if (!res.ok || !res.body) {
@@ -286,3 +288,6 @@ class InboxLive {
 }
 
 export const live = new InboxLive();
+
+// Dev only: a hot-reloaded module must not leave the old stream running.
+import.meta.hot?.dispose(() => live.stop());

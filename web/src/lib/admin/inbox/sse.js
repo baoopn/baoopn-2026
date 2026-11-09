@@ -94,9 +94,12 @@ export function createSSEParser(onEvent) {
 			}
 			buf = buf.slice(start);
 			if (buf.length > MAX_SSE_EVENT) {
-				// One line over the cap: discard it up to its terminator.
+				// One line over the cap: discard it up to its terminator, and drop
+				// the event it belongs to rather than dispatch it with partial data.
 				buf = '';
 				lineTooLong = true;
+				tooBig = true;
+				data = '';
 			}
 		},
 		end() {

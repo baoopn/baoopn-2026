@@ -361,8 +361,10 @@
 	}
 }
 
+/* No fade: a static tint for as long as the thread stays fresh (8 s). */
 @media (prefers-reduced-motion: reduce) {
 	.admin .inbox-fresh {
 		animation: none;
+		background-color: color-mix(in oklab, var(--spot-now) 18%, transparent);
 	}
 }

@@ -10,16 +10,15 @@ import {
 } from '@tanstack/svelte-query';
 import type { ThreadDetail, ThreadMessage, ThreadStatus, ThreadSummary } from '#lib/api/types.js';
 import { del, get, patch, post, qs } from '../api';
+import { inboxKeys as keys } from './keys.js';
 import { live } from './live.svelte';
 
 export type ThreadFilter = { status: ThreadStatus; q: string };
 
+/** Keys live in keys.js so events.js (the stream) uses exactly the same ones. */
 export const inboxKeys = {
-	all: ['inbox'] as const,
-	threadsAll: ['inbox', 'threads'] as const,
-	threads: (f: ThreadFilter) => ['inbox', 'threads', f] as const,
-	thread: (id: number) => ['inbox', 'thread', id] as const,
-	unread: ['inbox', 'unread'] as const
+	...keys,
+	threads: (f: ThreadFilter) => keys.threads(f)
 };
 
 const poll = (ms: number) => (live.status === 'live' ? false : ms);
@@ -96,7 +95,11 @@ export function markReadMutation(qc: QueryClient) {
 	return mutationOptions({
 		mutationFn: (id: number) => post<void>(`/threads/${id}/read`),
 		onMutate: async (id) => {
-			await qc.cancelQueries({ queryKey: inboxKeys.threadsAll });
+			// An in-flight list or detail refetch must not overwrite the optimistic read.
+			await Promise.all([
+				qc.cancelQueries({ queryKey: inboxKeys.threadsAll }),
+				qc.cancelQueries({ queryKey: inboxKeys.thread(id) })
+			]);
 			const lists = snapshotLists(qc);
 			const unread = qc.getQueryData<number>(inboxKeys.unread);
 			const detail = qc.getQueryData<ThreadDetail>(inboxKeys.thread(id));
@@ -121,7 +124,8 @@ export function markReadMutation(qc: QueryClient) {
 			qc.setQueryData(inboxKeys.unread, ctx.unread);
 			if (ctx.detail) qc.setQueryData(inboxKeys.thread(id), ctx.detail);
 		},
-		onSettled: () => invalidate(qc, inboxKeys.threadsAll, inboxKeys.unread)
+		onSettled: (_d, _e, id) =>
+			invalidate(qc, inboxKeys.threadsAll, inboxKeys.unread, inboxKeys.thread(id))
 	});
 }
 
