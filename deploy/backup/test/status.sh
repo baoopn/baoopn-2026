@@ -8,9 +8,11 @@
 # (the repo's migrations), plain (one table, no status tables) and restored
 # (empty). Backups go to a local rclone remote (a Docker volume). Checks:
 # the heartbeat (no secret values), run-now requests, admin overrides and
-# bad values, pause, SQL safety, a database without the status tables, a
-# read-only role, interrupted runs, trimming old runs, CLI runs, a restore
-# without status data, a quick docker stop and the idle mode.
+# bad values, pause, a database outage, resume after a long pause, a new
+# daily time, run-now across the daily time, a lost final write, old
+# requests, SQL safety, a database without the status tables, a read-only
+# role, interrupted runs, trimming old runs, CLI runs, a restore without
+# status data, a quick docker stop and the idle mode.
 #
 # Env: BACKUP_TEST_IMAGE (default baoopn-backup:test), SKIP_BUILD=1 to reuse
 # an existing image, KEEP_ON_FAIL=1 to leave the containers.
@@ -139,8 +141,9 @@ STALE=$(q baoopn "INSERT INTO backup_runs (kind, status, started_at) VALUES ('sc
 q baoopn "INSERT INTO backup_runs (kind, status, started_at, finished_at)
 	SELECT 'scheduled', 'ok', now() - g * interval '1 day', now() - g * interval '1 day' FROM generate_series(1, 250) g" >/dev/null
 IDLE_RUN=$(queue idle)
+q idle "INSERT INTO settings (key, value) VALUES ('backup', '{\"keep_days\": 9}')" >/dev/null
 
-svc main baoopn
+svc main baoopn -e BACKUP_STATUS_PROBE_SECONDS=20
 # S3 settings without an endpoint: idles. Marker values must never show.
 docker run -d --name "$ID-idle" --network "$NET" -e PGHOST="$PG" -e PGUSER=baoopn -e PGPASSWORD=st-password \
 	-e PGDATABASE=idle -e BACKUP_AGE_RECIPIENT="$RECIPIENT" -e BACKUP_S3_BUCKET=st-bucket \
@@ -164,6 +167,8 @@ if grep -q '"state":"idle"' "$TMP/idle.row" && grep -q 'BACKUP_S3_ENDPOINT' "$TM
 else
 	bad "idle row: $(cat "$TMP/idle.row")"
 fi
+is idle "SELECT (SELECT updated_at FROM settings WHERE key = 'backup') = settings_applied_at FROM backup_agent" t &&
+	ok "an idle service still marks the settings as applied" || bad "idle settings_applied_at not set"
 
 echo "== 8 interrupted run"
 is baoopn "SELECT status || ': ' || error FROM backup_runs WHERE id = $STALE" \
@@ -226,8 +231,97 @@ fi
 RUN=$(queue baoopn)
 wait_for 60 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok && ok "a queued run still runs while paused" ||
 	bad "queued while paused: $(q baoopn "SELECT status, error FROM backup_runs WHERE id = $RUN")"
+echo "== 4b database outage while paused"
+docker stop "$PG" >/dev/null
+sleep 45 # more than a tick and a probe (BACKUP_STATUS_PROBE_SECONDS=20)
+health_is main '^ok: paused' && in_logs main "status reporting failed" &&
+	ok "while the database is down the service stays paused and warns" || bad "outage: $(health main)"
+docker start "$PG" >/dev/null
+wait_for 60 docker exec "$PG" pg_isready -U baoopn -d baoopn -h 127.0.0.1 || true
+wait_for 60 in_logs main "status reporting back" && health_is main '^ok: paused' &&
+	ok "after the outage reporting comes back, still paused" || bad "after outage: $(health main)"
+
+echo "== 4c resume after a long pause"
+# The last success looks 50 years old: resuming must catch up at once.
+docker exec "$ID-main" sh -c 'echo 1 >/tmp/backup-status/last_success'
+before=$(q baoopn "SELECT coalesce(max(id), 0) FROM backup_runs")
 set_backup '{"paused":false}'
-wait_for 40 in_logs main "scheduled backups resumed" && ok "resume is logged" || bad "no resume log"
+if wait_for 60 in_logs main "resumed: no backup in the last" &&
+	wait_for 60 is baoopn "SELECT count(*) FROM backup_runs WHERE id > $before AND kind = 'scheduled' AND status = 'ok'" 1 &&
+	health_is main '^ok: last backup'; then
+	ok "resuming with an old last success backs up at once; health ok"
+else
+	bad "resume catch-up: $(health main); $(logs main | grep resum)"
+fi
+
+echo "== 14 earlier backup time"
+EARLY=$(date -u -d "@$(($(date +%s) - 3600))" +%H:%M)
+set_backup "{\"backup_time\":\"$EARLY\"}"
+wait_for 40 is baoopn "SELECT (SELECT updated_at FROM settings WHERE key = 'backup') = settings_applied_at FROM backup_agent" t || true
+is baoopn "SELECT next_run_at < now() + interval '13 hours' FROM backup_agent" t &&
+	ok "a time already past today keeps the sooner planned run (no skipped day)" ||
+	bad "next run after $EARLY: $(q baoopn 'SELECT next_run_at FROM backup_agent')"
+
+# lock_hold SECONDS SQL: holds a lock in the background; unlock SECONDS ends it.
+lock_hold() { docker exec -d "$PG" psql -U baoopn -d baoopn -c "BEGIN; $2; SELECT pg_sleep($1);"; }
+unlock() {
+	q baoopn "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+		WHERE query LIKE '%pg_sleep($1)%' AND pid <> pg_backend_pid()" >/dev/null
+}
+
+echo "== 15 run now across the daily time"
+now=$(date +%s)
+SOON=$(date -u -d "@$((now + 90))" +%H:%M)
+soon=$(date -u -d "$(date -u -d "@$((now + 90))" +%Y-%m-%d) $SOON:00" +%s)
+lock_hold 181 "LOCK TABLE projects" # pg_dump waits for it
+set_backup "{\"backup_time\":\"$SOON\"}"
+RUN=$(queue baoopn)
+wait_for 40 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" running || true
+while [ "$(date +%s)" -le $((soon + 5)) ]; do sleep 1; done
+unlock 181
+wait_for 60 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok || true
+sleep 35
+if is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok &&
+	is baoopn "SELECT count(*) FROM backup_runs WHERE id > $RUN" 0 &&
+	is baoopn "SELECT next_run_at > now() + interval '23 hours' FROM backup_agent" t; then
+	ok "a run-now backup that ends after the daily time counts as that run (one backup)"
+else
+	bad "across the daily time: $(q baoopn "SELECT id, kind, status FROM backup_runs WHERE id >= $RUN")"
+fi
+
+echo "== 16 lost final write"
+lock_hold 121 "LOCK TABLE projects"
+RUN=$(queue baoopn)
+wait_for 40 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" running || true
+OLD=$(q baoopn "INSERT INTO backup_runs (kind, status, started_at) VALUES ('cli', 'running', now() - interval '7 hours') RETURNING id")
+NEW=$(q baoopn "INSERT INTO backup_runs (kind, status, started_at) VALUES ('cli', 'running', now()) RETURNING id")
+# Run writes fail (lock_timeout) for 25 s after the backup ends.
+lock_hold 25 "LOCK TABLE backup_runs IN EXCLUSIVE MODE"
+sleep 1
+unlock 121
+if wait_for 90 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok &&
+	in_logs main "status reporting failed (run)" && wait_for 40 in_logs main "status reporting back (run)"; then
+	ok "a failed final write is retried until the run row is ok"
+else
+	bad "lost write: $(q baoopn "SELECT status FROM backup_runs WHERE id = $RUN")"
+fi
+wait_for 40 is baoopn "SELECT status FROM backup_runs WHERE id = $OLD" failed &&
+	is baoopn "SELECT status FROM backup_runs WHERE id = $NEW" running &&
+	ok "a run left running for 7 hours fails; a recent one (another process) is kept" ||
+	bad "sweep: $(q baoopn "SELECT id, status, error FROM backup_runs WHERE id IN ($OLD, $NEW)")"
+q baoopn "DELETE FROM backup_runs WHERE id = $NEW" >/dev/null
+
+echo "== 17 old request"
+last=$(q baoopn "SELECT max(id) FROM backup_runs")
+OLDQ=$(q baoopn "INSERT INTO backup_runs (kind, status, requested_at) VALUES ('manual', 'queued', now() - interval '11 minutes') RETURNING id")
+if wait_for 40 is baoopn "SELECT error FROM backup_runs WHERE id = $OLDQ" "Not picked up by the backup service within 10 minutes"; then
+	sleep 5
+	is baoopn "SELECT count(*) FROM backup_runs WHERE id > $last AND id <> $OLDQ" 0 &&
+		ok "a request older than 10 minutes fails without a backup" || bad "a backup ran for an old request"
+else
+	bad "old request: $(q baoopn "SELECT status, error FROM backup_runs WHERE id = $OLDQ")"
+fi
+set_backup '{}'
 
 echo "== 10 cli"
 if docker exec "$ID-main" backupctl backup >/dev/null 2>"$TMP/cli.err" &&

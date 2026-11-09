@@ -23,6 +23,8 @@ LIB_DIR=$(dirname "$0")
 . "$LIB_DIR/backupctl-restore.sh"
 # shellcheck source=backupctl-status.sh
 . "$LIB_DIR/backupctl-status.sh"
+# shellcheck source=backupctl-settings.sh
+. "$LIB_DIR/backupctl-settings.sh"
 
 usage() {
 	sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
@@ -70,6 +72,7 @@ idle() {
 			last_warn=$now
 		fi
 		status_reprobe
+		apply_settings
 		heartbeat idle "$1"
 		fail_queued "$1"
 		sleep_for 60
@@ -97,18 +100,30 @@ set_next() {
 	! is_uint "$fd" || [ "$fd" -le "$(date -u +%s)" ] || status_write first_due "$NEXT"
 }
 
-# plan_next: picks up a new BACKUP_TIME (admin override) at once.
+# plan_next: picks up a new BACKUP_TIME (admin override) at once. The next
+# run is the sooner of the planned one and the new time, so a change never
+# skips a day: the gap between two scheduled runs stays at most 24 hours.
 plan_next() {
-	if [ -z "$NEXT" ] || [ "$BACKUP_TIME" != "$NEXT_TIME" ]; then
+	if [ -z "$NEXT" ]; then
 		set_next "$(next_run_epoch)"
+	elif [ "$BACKUP_TIME" != "$NEXT_TIME" ]; then
+		new=$(next_run_epoch)
+		NEXT_TIME=$BACKUP_TIME
+		[ "$new" -ge "$NEXT" ] || set_next "$new"
 	fi
 }
 
 # run_job KIND: one backup (and prune). A failed scheduled or startup run
 # gets one retry after RETRY_MINUTES; any success clears a pending retry.
+# A good backup that ends after the planned run time counts as that run.
+# Returns 2 when a manual request could not be claimed.
 run_job() {
-	if backup_with_status "$1" >/dev/null; then
+	backup_with_status "$1" >/dev/null
+	rc=$?
+	[ "$rc" -ne 2 ] || return 2
+	if [ "$rc" -eq 0 ]; then
 		RETRY_AT=
+		[ "$(date -u +%s)" -lt "$NEXT" ] || set_next "$(next_run_epoch)"
 		return 0
 	fi
 	case $1 in
@@ -152,7 +167,7 @@ cmd_run() {
 	NEXT=
 	NEXT_TIME=
 	RETRY_AT=
-	QUEUE_HOLD=0
+	RESUMED=
 	time_env=${BACKUP_TIME:-03:00}
 	env_defaults
 	RETRY_MINUTES=${BACKUP_RETRY_MINUTES:-30}
@@ -204,14 +219,24 @@ cmd_run() {
 		status_reprobe
 		apply_settings
 		plan_next
+		status_sweep
 		heartbeat "$(agent_state)"
 		now=$(date -u +%s)
-		if [ "$now" -ge "$QUEUE_HOLD" ] && queued_run; then
+		if queued_run; then
+			# 2: not claimed, no backup ran; go on to the schedule.
 			run_job manual
-			# A request that could not be claimed waits 10 minutes (the
-			# API expires it), so a failing write never loops backups.
-			[ -n "$RUN_CLAIMED" ] || QUEUE_HOLD=$((now + 600))
-			continue
+			[ $? -eq 2 ] || continue
+		fi
+		if [ -n "$RESUMED" ]; then
+			RESUMED=
+			# Back from a long pause: catch up at once, so the healthcheck
+			# does not turn unhealthy until the next daily run.
+			last=$(status_read last_success)
+			if ! is_uint "$last" || [ $((now - last)) -gt $((MAX_AGE_HOURS * 3600)) ]; then
+				info "resumed: no backup in the last $MAX_AGE_HOURS hours; backing up now"
+				run_job scheduled
+				continue
+			fi
 		fi
 		if [ "$now" -ge "$NEXT" ]; then
 			if [ "$PAUSED" = true ]; then

@@ -195,13 +195,19 @@ On the page you can:
 
 - **Back up now.** The api queues a request and the service starts it
   within 30 seconds. Only one backup runs at a time. If a scheduled run
-  starts first, it answers the request.
+  starts first, it answers the request. A request that waits more than 10
+  minutes fails and starts nothing. A run-now backup that ends after the
+  daily time counts as that day's run.
 - Change the daily time, `BACKUP_KEEP_DAYS`, `BACKUP_KEEP_MIN` and
   `BACKUP_MAX_AGE_HOURS`. A changed value overrides the env value, and the
   service applies it within 30 seconds. An empty field uses the env value.
-  **Reset to defaults** removes every override.
+  **Reset to defaults** removes every override. A new daily time never
+  skips a day: the next run is the sooner of the one already planned and
+  the new time. So two daily runs are at most 24 hours apart.
 - Pause scheduled backups. A paused service skips scheduled and startup
   backups, and its healthcheck stays healthy. **Back up now** still works.
+  On resume, if the last good backup is older than the alert limit, the
+  service backs up at once.
 
 The service checks every override it reads. A bad value logs one warning,
 and the service uses the env value. The api checks the same rules when you
@@ -217,7 +223,10 @@ save:
 The status needs the tables from migration `00009`. With an older schema,
 or another database, the service logs one line, "status reporting off",
 and backs up as before. A failed status write logs one warning and never
-fails a backup or changes the healthcheck. The service only writes error
+fails a backup or changes the healthcheck. While the database is down,
+the service keeps the last settings it read. It retries the final write
+of a run until it works, and it fails runs left "running" for more than 6
+hours (a lost write of an older container). The service only writes error
 lines from its own log to the database, cut to 500 characters. It never
 writes a secret.
 
@@ -422,12 +431,13 @@ bytes, so verify and restore stream a file larger than a pipe buffer.
 
 `deploy/backup/test/status.sh` tests the status the admin page reads, with
 the same kind of throwaway containers. It checks the heartbeat (no secret
-values), **Back up now**, overrides and bad values, pause, a recipient with
-SQL in it, a database without the status tables, a read-only database
-role, runs left over by a stopped container, the 200-run limit, CLI runs,
-a restore without status rows, a quick `docker stop` and the idle mode. It
-takes a few minutes, since the service checks the database every 30
-seconds.
+values), **Back up now**, overrides and bad values, pause, a database
+outage, resume after a long pause, a new daily time, a lost final write,
+old requests, a recipient with SQL in it, a database without the status
+tables, a read-only database role, runs left over by a stopped container,
+the 200-run limit, CLI runs, a restore without status rows, a quick
+`docker stop` and the idle mode. It takes a few minutes, since the service
+checks the database every 30 seconds.
 
 CI runs both on every pull request.
 
