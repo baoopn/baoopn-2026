@@ -36,7 +36,7 @@
 	</span>
 {/snippet}
 
-<section class="card flex flex-col gap-3 p-4 sm:p-5" aria-labelledby="runs-h">
+<section class="card flex min-w-0 flex-col gap-3 p-4 sm:p-5" aria-labelledby="runs-h">
 	<div>
 		<h2 id="runs-h" class="eyebrow">Recent runs</h2>
 		<p class="hint mt-1">

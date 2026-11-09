@@ -247,7 +247,9 @@ manual runs. No secret value reaches the API: `secrets` only says which ones are
   At most one run is queued at a time: 409 `busy` while a run is queued or running. 409
   `agent_offline` when there is no heartbeat in the last 3 min, and 409 `not_configured` when
   the sidecar is idle. A queued run that is not picked up within 10 min fails with
-  "Not picked up by the backup service within 10 minutes".
+  "Not picked up by the backup service within 10 minutes". A running row left behind by a
+  lost sidecar write does not count as active (and does not block a new run) once the online
+  sidecar reports a state other than `running`; the sidecar fails such rows after 6 hours.
 - **Runs:** `runs` lists the newest 20. `last_run` is the newest finished run, `active_run` the
   queued or running one. The sidecar keeps the newest 200 finished runs. `last_success_at` is
   the latest of the sidecar's last success and the newest `ok` run.
