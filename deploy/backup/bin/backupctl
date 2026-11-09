@@ -21,6 +21,10 @@ LIB_DIR=$(dirname "$0")
 . "$LIB_DIR/backupctl-backup.sh"
 # shellcheck source=backupctl-restore.sh
 . "$LIB_DIR/backupctl-restore.sh"
+# shellcheck source=backupctl-status.sh
+. "$LIB_DIR/backupctl-status.sh"
+# shellcheck source=backupctl-settings.sh
+. "$LIB_DIR/backupctl-settings.sh"
 
 usage() {
 	sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
@@ -40,7 +44,8 @@ sleep_for() {
 STOP_RC=0
 
 # on_stop: SIGTERM/SIGINT. Stops a sleep or a running backup or prune (its
-# own trap kills its steps and removes its temp files), then exits.
+# own trap kills its steps and removes its temp files), marks the run as
+# interrupted, then exits.
 on_stop() {
 	[ -z "$SLEEP_PID" ] || kill "$SLEEP_PID" 2>/dev/null
 	if [ -n "$CHILD" ]; then
@@ -48,18 +53,29 @@ on_stop() {
 		kill "$CHILD" 2>/dev/null
 		wait "$CHILD" 2>/dev/null
 	fi
+	status_stop
 	info "stopping"
 	exit "$STOP_RC"
 }
 
 # idle REASON: backups are off or only partly configured. Stay up and
 # healthy (no crash loop) and repeat the warning once a day. REASON names
-# variables, never their values.
+# variables, never their values. With the status tables, report the idle
+# state every minute and fail run-now requests.
 idle() {
 	status_write idle "$1"
+	last_warn=
 	while :; do
-		warn "offsite backups are disabled: $1 (see docs/backup.md); idling"
-		sleep_for 86400
+		now=$(date -u +%s)
+		if [ -z "$last_warn" ] || [ $((now - last_warn)) -ge 86400 ]; then
+			warn "offsite backups are disabled: $1 (see docs/backup.md); idling"
+			last_warn=$now
+		fi
+		status_reprobe
+		apply_settings
+		heartbeat idle "$1"
+		fail_queued "$1"
+		sleep_for 60
 	done
 }
 
@@ -71,15 +87,62 @@ next_run_epoch() {
 	printf '%s\n' "$t"
 }
 
-# scheduled_backup: backup, one retry, then prune after a success.
-scheduled_backup() {
-	if ! backup_with_status >/dev/null; then
+# set_next EPOCH: the next scheduled run. While no backup has worked yet
+# and the first one is still ahead, first_due moves with it (a new time).
+set_next() {
+	[ "$1" != "$NEXT" ] || return 0
+	had=$NEXT
+	NEXT=$1
+	NEXT_TIME=$BACKUP_TIME
+	info "next backup at $(date -u -d "@$NEXT" +%Y-%m-%dT%H:%MZ)"
+	[ -n "$had" ] && [ -z "$(status_read last_success)" ] || return 0
+	fd=$(status_read first_due)
+	! is_uint "$fd" || [ "$fd" -le "$(date -u +%s)" ] || status_write first_due "$NEXT"
+}
+
+# plan_next: picks up a new BACKUP_TIME (admin override) at once. The next
+# run is the sooner of the planned one and the new time, so a change never
+# skips a day: the gap between two scheduled runs stays at most 24 hours.
+plan_next() {
+	if [ -z "$NEXT" ]; then
+		set_next "$(next_run_epoch)"
+	elif [ "$BACKUP_TIME" != "$NEXT_TIME" ]; then
+		new=$(next_run_epoch)
+		NEXT_TIME=$BACKUP_TIME
+		[ "$new" -ge "$NEXT" ] || set_next "$new"
+	fi
+}
+
+# run_job KIND: one backup (and prune). A failed scheduled or startup run
+# gets one retry after RETRY_MINUTES; any success clears a pending retry.
+# A good backup that ends after the planned run time counts as that run.
+# Returns 2 when a manual request could not be claimed.
+run_job() {
+	backup_with_status "$1" >/dev/null
+	rc=$?
+	[ "$rc" -ne 2 ] || return 2
+	if [ "$rc" -eq 0 ]; then
+		RETRY_AT=
+		[ "$(date -u +%s)" -lt "$NEXT" ] || set_next "$(next_run_epoch)"
+		return 0
+	fi
+	case $1 in
+	scheduled | startup)
 		[ "$RETRY_MINUTES" -gt 0 ] || return 0
 		info "retrying in $RETRY_MINUTES minute(s)"
-		sleep_for $((RETRY_MINUTES * 60))
-		backup_with_status >/dev/null || return 0
-	fi
-	run_child cmd_prune || warn "prune failed; will try again after the next backup"
+		RETRY_AT=$(($(date -u +%s) + RETRY_MINUTES * 60))
+		;;
+	esac
+}
+
+# sleep_tick: up to 30 s, less when the next run or retry is sooner.
+sleep_tick() {
+	now=$(date -u +%s)
+	s=30
+	[ $((NEXT - now)) -ge "$s" ] || s=$((NEXT - now))
+	[ -z "$RETRY_AT" ] || [ $((RETRY_AT - now)) -ge "$s" ] || s=$((RETRY_AT - now))
+	[ "$s" -ge 1 ] || s=1
+	sleep_for "$s"
 }
 
 # seed_last_success: the newest complete backup in the bucket counts as the
@@ -98,7 +161,19 @@ seed_last_success() {
 cmd_run() {
 	trap on_stop TERM INT
 	mkdir -p "$STATUS_DIR" 2>/dev/null
-	rm -f "$STATUS_DIR/idle" "$STATUS_DIR/first_due" "$STATUS_DIR/last_success"
+	rm -f "$STATUS_DIR/idle" "$STATUS_DIR/first_due" "$STATUS_DIR/last_success" \
+		"$STATUS_DIR/paused" "$STATUS_DIR/max_age_hours"
+	AGENT_STARTED=$(date -u +%s)
+	NEXT=
+	NEXT_TIME=
+	RETRY_AT=
+	RESUMED=
+	time_env=${BACKUP_TIME:-03:00}
+	env_defaults
+	RETRY_MINUTES=${BACKUP_RETRY_MINUTES:-30}
+	is_uint "$RETRY_MINUTES" || RETRY_MINUTES=30
+	status_init
+	status_interrupted
 
 	# Nothing set at all: an install that does not use off-site backups.
 	config_untouched && idle "no BACKUP_AGE_RECIPIENT and no destination are set"
@@ -106,19 +181,8 @@ cmd_run() {
 	[ -z "$problems" ] || idle "$problems"
 	setup_storage || idle "no usable destination"
 
-	BACKUP_TIME=${BACKUP_TIME:-03:00}
-	case $BACKUP_TIME in
-	[01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
-	*)
-		err "BACKUP_TIME must be HH:MM (24-hour, UTC), e.g. 03:00; using 03:00"
-		BACKUP_TIME=03:00
-		;;
-	esac
-	RETRY_MINUTES=${BACKUP_RETRY_MINUTES:-30}
-	if ! is_uint "$RETRY_MINUTES"; then
-		err "BACKUP_RETRY_MINUTES must be a whole number of minutes; using 30"
-		RETRY_MINUTES=30
-	fi
+	valid_time "$time_env" || err "BACKUP_TIME must be HH:MM (24-hour, UTC), e.g. 03:00; using 03:00"
+	is_uint "${BACKUP_RETRY_MINUTES:-30}" || err "BACKUP_RETRY_MINUTES must be a whole number of minutes; using 30"
 	# Problems below do not idle: the scheduler keeps running, every backup
 	# fails, and the healthcheck turns unhealthy.
 	(setup_db) 2>/dev/null || err "no usable database settings (DATABASE_URL or PG*); backups will fail"
@@ -129,26 +193,71 @@ cmd_run() {
 		rm -f "$recipients"
 	}
 	seed_last_success
+	apply_settings
 
 	info "scheduler: daily at $BACKUP_TIME UTC to the $STORAGE_DESC, keep ${BACKUP_KEEP_DAYS:-30} days (at least ${BACKUP_KEEP_MIN:-7})"
-	case ${BACKUP_ON_START:-false} in
-	true | 1 | yes)
+	plan_next
+	on_start=false
+	case ${BACKUP_ON_START:-false} in true | 1 | yes) on_start=true ;; esac
+	if [ "$on_start" = true ] && [ "$PAUSED" != true ]; then
 		status_write first_due "$(date -u +%s)"
-		info "BACKUP_ON_START: backing up now"
-		scheduled_backup
-		;;
-	*) status_write first_due "$(next_run_epoch)" ;;
-	esac
+	else
+		status_write first_due "$NEXT"
+	fi
+	heartbeat "$(agent_state)"
+	if [ "$on_start" = true ]; then
+		if [ "$PAUSED" = true ]; then
+			info "paused: skipping the startup backup"
+		else
+			info "BACKUP_ON_START: backing up now"
+			run_job startup
+		fi
+	fi
 
+	# One tick every 30 s: settings, heartbeat, run-now requests, schedule.
 	while :; do
-		next=$(next_run_epoch)
-		info "next backup at $(date -u -d "@$next" +%Y-%m-%dT%H:%MZ)"
-		sleep_for $((next - $(date -u +%s)))
-		scheduled_backup
+		status_reprobe
+		apply_settings
+		plan_next
+		status_sweep
+		heartbeat "$(agent_state)"
+		now=$(date -u +%s)
+		if queued_run; then
+			# 2: not claimed, no backup ran; go on to the schedule.
+			run_job manual
+			[ $? -eq 2 ] || continue
+		fi
+		if [ -n "$RESUMED" ]; then
+			RESUMED=
+			# Back from a long pause: catch up at once, so the healthcheck
+			# does not turn unhealthy until the next daily run.
+			last=$(status_read last_success)
+			if ! is_uint "$last" || [ $((now - last)) -gt $((MAX_AGE_HOURS * 3600)) ]; then
+				info "resumed: no backup in the last $MAX_AGE_HOURS hours; backing up now"
+				run_job scheduled
+				continue
+			fi
+		fi
+		if [ "$now" -ge "$NEXT" ]; then
+			if [ "$PAUSED" = true ]; then
+				info "paused: skipping the scheduled backup"
+			else
+				run_job scheduled
+			fi
+			set_next "$(next_run_epoch)"
+			[ "$PAUSED" != true ] || [ -n "$(status_read last_success)" ] || status_write first_due "$NEXT"
+			continue
+		fi
+		if [ -n "$RETRY_AT" ] && [ "$now" -ge "$RETRY_AT" ]; then
+			RETRY_AT=
+			[ "$PAUSED" = true ] || run_job retry
+			continue
+		fi
+		sleep_tick
 	done
 }
 
-# cmd_health: healthy while idle, before the scheduler wrote any status,
+# cmd_health: healthy while idle or paused, before the scheduler wrote any status,
 # while waiting for the first run (plus retry and an hour of slack), or when
 # the last success is recent. Unhealthy only without a recent success.
 cmd_health() {
@@ -157,13 +266,18 @@ cmd_health() {
 		echo "idle: $(status_read idle)"
 		return 0
 	fi
+	if [ -f "$STATUS_DIR/paused" ]; then
+		echo "ok: paused"
+		return 0
+	fi
 	first_due=$(status_read first_due)
 	last=$(status_read last_success)
 	if [ -z "$first_due" ] && [ -z "$last" ]; then
 		echo "ok: scheduler not running yet"
 		return 0
 	fi
-	max_hours=${BACKUP_MAX_AGE_HOURS:-26}
+	max_hours=$(status_read max_age_hours)
+	is_uint "$max_hours" || max_hours=${BACKUP_MAX_AGE_HOURS:-26}
 	is_uint "$max_hours" || max_hours=26
 	retry=${BACKUP_RETRY_MINUTES:-30}
 	is_uint "$retry" || retry=30
@@ -204,7 +318,10 @@ run) cmd_run ;;
 backup)
 	STOP_RC=130
 	trap on_stop TERM INT
-	backup_with_status
+	# Own status temp files: the scheduler may run in the same container.
+	STATUS_TAG=cli
+	status_init
+	backup_with_status cli
 	;;
 list) cmd_list ;;
 restore) cmd_restore "$@" ;;

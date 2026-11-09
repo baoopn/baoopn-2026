@@ -599,3 +599,103 @@ export interface AdminBrandAsset extends BrandAsset {
 	/** Which backgrounds to preview it on. */
 	preview: 'light' | 'dark' | 'both';
 }
+
+// Off-site backups (GET /api/admin/backups). The backup sidecar writes the
+// status rows; the API reads them and stores only the settings doc and
+// queued run requests. Timestamps are RFC 3339 UTC. No secret values, only
+// whether each one is set.
+export type BackupHealth =
+	| 'ok'
+	| 'warning'
+	| 'stale'
+	| 'waiting'
+	| 'paused'
+	| 'not_configured'
+	| 'offline'
+	| 'not_reporting';
+
+export interface BackupSetting<T> {
+	/** override ?? env */
+	value: T | null;
+	/** The sidecar's env default; null when the sidecar has not reported. */
+	env: T | null;
+	/** The stored admin override, if valid. */
+	override: T | null;
+	source: 'env' | 'override';
+}
+
+export type BackupRunKind = 'scheduled' | 'startup' | 'retry' | 'manual' | 'cli';
+export type BackupRunStatus = 'queued' | 'running' | 'ok' | 'failed';
+
+export interface BackupRun {
+	id: number;
+	kind: BackupRunKind;
+	status: BackupRunStatus;
+	requested_at: string | null;
+	started_at: string | null;
+	finished_at: string | null;
+	name: string | null;
+	size_bytes: number | null;
+	sha256: string | null;
+	tables: number | null;
+	goose_version: number | null;
+	pruned: number | null;
+	prune_error: string | null;
+	error: string | null;
+}
+
+export interface BackupAgent {
+	version: string;
+	started_at: string;
+	last_seen_at: string;
+	online: boolean;
+	state: 'idle' | 'waiting' | 'running' | 'paused';
+	idle_reason: string | null;
+	next_run_at: string | null;
+	settings_applied_at: string | null;
+}
+
+export interface BackupStatus {
+	health: BackupHealth;
+	checked_at: string;
+	agent: BackupAgent | null;
+	destination: {
+		kind: 's3' | 'rclone' | null;
+		s3_provider: string | null;
+		s3_bucket: string | null;
+		prefix: string | null;
+	};
+	secrets: {
+		age_recipient: boolean;
+		s3_endpoint: boolean;
+		s3_access_key_id: boolean;
+		s3_secret_access_key: boolean;
+		ping_url: boolean;
+	};
+	settings: {
+		backup_time: BackupSetting<string>;
+		keep_days: BackupSetting<number>;
+		keep_min: BackupSetting<number>;
+		max_age_hours: BackupSetting<number>;
+		retry_minutes: number | null;
+		on_start: boolean | null;
+		paused: boolean;
+		paused_at: string | null;
+		updated_at: string | null;
+		/** Saved settings the sidecar has not applied yet. */
+		pending: boolean;
+	};
+	last_success_at: string | null;
+	last_run: BackupRun | null;
+	active_run: BackupRun | null;
+	/** Newest 20 by id. */
+	runs: BackupRun[];
+}
+
+/** PUT /api/admin/backups/settings. null = use the env default. */
+export interface BackupSettingsInput {
+	backup_time: string | null;
+	keep_days: number | null;
+	keep_min: number | null;
+	max_age_hours: number | null;
+}

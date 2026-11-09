@@ -175,3 +175,5 @@ jobs:
           cache-to: type=gha,mode=max,scope=backup
       - name: Backup/restore roundtrip (local containers, no cloud)
         run: SKIP_BUILD=1 sh deploy/backup/test/roundtrip.sh
+      - name: Backup status in the database (local containers, no cloud)
+        run: SKIP_BUILD=1 sh deploy/backup/test/status.sh

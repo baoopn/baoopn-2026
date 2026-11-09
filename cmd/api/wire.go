@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/baoopn/baoopn-2026/internal/analytics"
+	"github.com/baoopn/baoopn-2026/internal/backups"
 	"github.com/baoopn/baoopn-2026/internal/blog"
 	"github.com/baoopn/baoopn-2026/internal/brand"
 	"github.com/baoopn/baoopn-2026/internal/config"
@@ -95,10 +96,11 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	rec := analytics.New(analytics.Deps{DB: pool, Log: log,
 		Salt: analytics.DeriveSalt(cfg.SecretsKey), SiteHost: analytics.HostOf(cfg.PublicURL)})
 	ov := overview.New(overview.Deps{DB: pool, Log: log, Analytics: rec})
+	backupsMod := backups.New(backups.Deps{DB: pool, Log: log})
 
 	return &modules{
 		list: []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod,
-			contactMod, site, brandMod, rec, ov},
+			contactMod, site, brandMod, rec, ov, backupsMod},
 		media:   mediaStore.Handler(),
 		store:   mediaStore,
 		rec:     rec,

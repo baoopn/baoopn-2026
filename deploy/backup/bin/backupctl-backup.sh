@@ -40,7 +40,10 @@ cmd_backup() {
 	# writing plaintext to disk. Fifos instead of pipes: every exit status is
 	# checked (POSIX sh has no pipefail).
 	mkfifo "$WORKDIR/dump" "$WORKDIR/enc" "$WORKDIR/toc.pipe" || die "cannot create fifos"
-	pg_dump -Fc -Z 6 --no-owner --no-privileges -d "$DB_TARGET" >"$WORKDIR/dump" 2>"$WORKDIR/pg_dump.err" &
+	# The data of the status tables stays out: it describes this server,
+	# and a restore must not bring back old runs or a stale agent row.
+	pg_dump -Fc -Z 6 --no-owner --no-privileges --exclude-table-data=backup_runs \
+		--exclude-table-data=backup_agent -d "$DB_TARGET" >"$WORKDIR/dump" 2>"$WORKDIR/pg_dump.err" &
 	dump_pid=$!
 	tee "$WORKDIR/toc.pipe" <"$WORKDIR/dump" >"$WORKDIR/enc" 2>"$WORKDIR/tee.err" &
 	tee_pid=$!
@@ -109,23 +112,67 @@ cmd_backup() {
 	}
 
 	info "backup $name: done ($(plural "$tables" table) in schema public, $(human_size "$size"), sha256 $sha, schema version $(schema_version "$manifest"))"
+	if [ -n "${RESULT_FILE:-}" ]; then
+		{
+			printf 'name=%s\nsize=%s\nsha256=%s\n' "$name" "$size" "$sha"
+			printf 'tables=%s\ngoose=%s\n' "$tables" "$goose_version"
+		} >"$RESULT_FILE" 2>/dev/null
+	fi
 	printf '%s\n' "$name"
 }
 
-# backup_with_status: one backup in a background subshell (so SIGTERM stops
-# it at once), then status files + ping.
+# backup_with_status KIND: one backup in a background subshell (so SIGTERM
+# stops it at once), then status files, ping and the run's status row. In
+# the scheduler (any KIND but cli) a good backup is followed by a prune.
+# Returns 2 without a backup when a manual request could not be claimed.
 backup_with_status() {
+	kind=${1:-cli}
+	mkdir -p "$STATUS_DIR" 2>/dev/null
+	RESULT_FILE="$STATUS_DIR/result.$STATUS_TAG"
+	LAST_ERROR_FILE="$STATUS_DIR/error.$STATUS_TAG"
+	rm -f "$RESULT_FILE" "$LAST_ERROR_FILE"
+	run_begin "$kind"
+	if [ "$kind" = manual ] && [ -z "$RUN_ID" ]; then
+		# Nothing claimed: the request was answered elsewhere, or the
+		# claim failed. Never back up for a request this run does not own.
+		# shellcheck disable=SC2034 # read by status_stop
+		RUN_ACTIVE=
+		return 2
+	fi
+	status_pulse
 	run_child cmd_backup
 	rc=$?
 	if [ "$rc" -eq 0 ]; then
 		status_write last_success "$(date -u +%s)"
 		ping_url ""
+		run_ok "$RESULT_FILE"
+		if [ "$kind" != cli ]; then
+			rm -f "$LAST_ERROR_FILE"
+			perr=
+			if ! run_child cmd_prune; then
+				perr=$(head -n 1 "$LAST_ERROR_FILE" 2>/dev/null)
+				perr=${perr:-Some old backups could not be deleted; see the backup service log}
+				warn "prune failed; will try again after the next backup"
+			fi
+			run_pruned "$RUN_ID" "$(result_field "$RESULT_FILE" pruned)" "$perr"
+		fi
 	else
 		status_write last_error "$(date -u +%s)"
 		err "backup failed"
 		ping_url /fail
+		msg=$(head -n 1 "$LAST_ERROR_FILE" 2>/dev/null)
+		run_failed "${msg:-The backup failed; see the backup service log}"
 	fi
+	pulse_stop
+	RUN_ID=
+	RESULT_FILE=
+	LAST_ERROR_FILE=
 	return "$rc"
+}
+
+# prune_result COUNT: the number of deleted backups, for the run's row.
+prune_result() {
+	[ -z "${RESULT_FILE:-}" ] || { printf 'pruned=%s\n' "$1" >>"$RESULT_FILE"; } 2>/dev/null
 }
 
 # cmd_prune: deletes backups older than BACKUP_KEEP_DAYS, but always keeps
@@ -139,6 +186,7 @@ cmd_prune() {
 	is_uint "$keep_min" || die "BACKUP_KEEP_MIN must be a whole number"
 	if [ "$keep_days" -eq 0 ]; then
 		info "prune: BACKUP_KEEP_DAYS=0, keeping every backup"
+		prune_result 0
 		return 0
 	fi
 	cutoff_epoch=$(($(date -u +%s) - keep_days * 86400))
@@ -161,6 +209,7 @@ cmd_prune() {
 	)
 	if [ -z "$victims" ]; then
 		info "prune: nothing older than $keep_days days beyond the newest $keep_min"
+		prune_result 0
 		return 0
 	fi
 	count=0
@@ -187,6 +236,7 @@ EOF
 	done
 	rcl rmdirs --leave-root "$REMOTE_BASE" >/dev/null 2>&1 || true
 	info "prune: deleted $count backup(s)"
+	prune_result "$count"
 	return "$failed"
 }
 
