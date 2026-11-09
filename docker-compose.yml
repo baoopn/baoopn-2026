@@ -132,7 +132,7 @@ services:
         condition: service_healthy
 
   # Encrypted backups to a local volume (no cloud needed), see docs/backup.md:
-  #   docker compose --profile backup run --rm backup keygen > .secrets/dev-backup-age-key.txt
+  #   docker compose --profile backup run --rm -T backup keygen > .secrets/dev-backup-age-key.txt
   #   set BACKUP_AGE_RECIPIENT=age1... (printed by keygen) in .env, then
   #   docker compose --profile backup run --rm backup backup
   #   docker compose --profile backup run --rm backup list

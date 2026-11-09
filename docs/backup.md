@@ -142,13 +142,24 @@ backupctl list
   `BACKUP_MAX_AGE_HOURS` (default 26). Coolify then shows the resource as
   degraded. Deploys do not wait for this service.
 - A new container reads the newest backup in the bucket at start, so a
-  redeploy does not reset the health state.
+  redeploy does not reset the health state. If that backup is older than
+  `BACKUP_MAX_AGE_HOURS`, the service reports unhealthy until the next good
+  run. Set `BACKUP_ON_START=true` to run one at once.
+- `docker stop` (and a redeploy) interrupts a running backup. The service
+  removes its temp files and uploads nothing; the next run makes a new one.
 - `BACKUP_PING_URL` (optional): a GET after each success and `<url>/fail`
   after each failure, as [healthchecks.io](https://healthchecks.io) expects.
   Use it to get an email when backups stop.
 
 Test a restore from time to time. `backupctl verify latest` downloads,
-checks and decrypts the newest backup without touching any database.
+checks and decrypts the newest backup without touching any database. It
+needs the private key, which is not on the server, so pipe the key in from
+an SSH session (the Coolify terminal cannot do this):
+
+```bash
+docker ps --format '{{.Names}}' | grep '^backup-'
+docker exec -i <backup-container> backupctl verify latest -i - < portfolio-backup-age-key.txt
+```
 
 ## Commands
 
@@ -172,7 +183,13 @@ it from stdin, so the key never has to be stored on the server.
 (`pg_restore --clean --if-exists`). The restore runs in a single
 transaction: if it fails, nothing changes. `--to-file PATH` only writes the
 decrypted `.dump` file, for use with `pg_restore` by hand. It is the only
-command that writes plaintext to disk.
+command that writes plaintext to disk. It refuses to replace an existing
+PATH unless you add `--force`. It writes `PATH.partial` first and renames it
+at the end, so a failed run leaves PATH as it was.
+
+Log lines count the base tables in schema `public`, the same way for
+backup, verify and restore. A backup without goose data shows schema
+version `none`.
 
 The database to restore into comes from `DATABASE_URL` or the usual `PGHOST`,
 `PGPORT`, `PGUSER`, `PGPASSWORD` and `PGDATABASE`. Point them at another
@@ -339,8 +356,10 @@ restore with throwaway Postgres containers and a local Docker volume as the
 remote. It needs no cloud access. It compares the row count and a checksum
 of every table and the goose version. It also checks the failure cases: no
 or bad recipient, wrong or missing key, a changed file, a non-empty target,
-partial settings, the retention rules, and that no plaintext dump lands on
-disk. CI runs it on every pull request.
+partial settings, the retention rules, a stop during a running backup, and
+that no plaintext dump lands on disk. The seed data holds a few MB of random
+bytes, so verify and restore stream a file larger than a pipe buffer. CI
+runs it on every pull request.
 
 ```bash
 make backup-test
