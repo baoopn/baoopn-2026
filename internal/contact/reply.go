@@ -147,6 +147,7 @@ func (m *Module) handleRetry(w http.ResponseWriter, r *http.Request) {
 		m.internal(w, "retry update", err)
 		return
 	}
+	m.events.publish(Event{Type: evMessageUpdated, ThreadID: id, MessageID: msg.ID, Status: msg.Status})
 	httpapi.JSON(w, http.StatusOK, m.deliver(ctx, t, msg))
 }
 

@@ -107,7 +107,7 @@ func TestEventsLimitAndClose(t *testing.T) {
 	if !isClosed(a.gone) || !isClosed(b.gone) || !isClosed(c.gone) {
 		t.Error("Close left a stream open")
 	}
-	if _, _, err := h.subscribe(); !errors.Is(err, errTooManyStreams) {
+	if _, _, err := h.subscribe(); !errors.Is(err, errShuttingDown) {
 		t.Fatalf("subscribe after Close: %v", err)
 	}
 	h.publish(Event{Type: evThreadCreated, ThreadID: 1}) // no panic after Close

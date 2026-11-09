@@ -114,7 +114,9 @@ func TestReplyPublishesCreatedThenUpdated(t *testing.T) {
 	if code, raw := e.do("POST", fmt.Sprintf("%s/%d/retry", path, fid), "", nil); code != 200 {
 		t.Fatalf("retry: %d %s", code, raw)
 	}
-	wantEvents(t, s, fmt.Sprintf(`message.updated {"thread_id":%d,"message_id":%d,"status":"sent"}`, id, fid))
+	wantEvents(t, s,
+		fmt.Sprintf(`message.updated {"thread_id":%d,"message_id":%d,"status":"sending"}`, id, fid),
+		fmt.Sprintf(`message.updated {"thread_id":%d,"message_id":%d,"status":"sent"}`, id, fid))
 
 	// A retry that is refused publishes nothing.
 	if code, _ := e.do("POST", fmt.Sprintf("%s/%d/retry", path, fid), "", nil); code != 409 {
@@ -130,7 +132,9 @@ func TestThreadChangesPublish(t *testing.T) {
 	base := fmt.Sprintf("/threads/%d", id)
 	for _, step := range []struct{ method, path, body string }{
 		{"POST", base + "/read", ""},
+		{"POST", base + "/read", ""}, // already read: no event
 		{"POST", base + "/unread", ""},
+		{"POST", base + "/unread", ""}, // already unread: no event
 		{"PATCH", base, `{"status":"archived"}`},
 		{"DELETE", base, ""},
 	} {

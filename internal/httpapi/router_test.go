@@ -74,6 +74,10 @@ func TestAdminStreamerRoutes(t *testing.T) {
 		if rec.Code != want || !authed {
 			t.Errorf("%s: %d (authed %v), want %d", path, rec.Code, authed, want)
 		}
+		// Both kinds of route get noCache and the admin rate limit (600/min).
+		if cc, rl := rec.Header().Get("Cache-Control"), rec.Header().Get("X-RateLimit-Limit"); cc != "no-store" || rl != "600" {
+			t.Errorf("%s: Cache-Control %q, X-RateLimit-Limit %q", path, cc, rl)
+		}
 	}
 
 	// Without auth configured the stream is closed like every admin route.
