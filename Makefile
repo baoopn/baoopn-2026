@@ -64,8 +64,9 @@ docker: ## Build both Docker images
 	docker build -f deploy/docker/web.Dockerfile -t baoopn-web:dev .
 
 .PHONY: backup-test
-backup-test: ## Backup image roundtrip test (Docker)
+backup-test: ## Backup image roundtrip and status tests (Docker)
 	sh deploy/backup/test/roundtrip.sh
+	SKIP_BUILD=1 sh deploy/backup/test/status.sh
 
 .PHONY: lint
 lint: ## go vet + svelte-check
