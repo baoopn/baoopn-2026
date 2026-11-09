@@ -21,9 +21,8 @@ STATUS_RESULT=
 DB_OK=
 RUN_ID=
 RUN_ACTIVE=
+PEND_ID=
 PULSE_PID=
-PAUSED=false
-SETTINGS_APPLIED=
 
 # status_psql QUERY [name=value ...]: runs QUERY with psql variables in the
 # background (SIGTERM stays prompt) and sets STATUS_RESULT to its output.
@@ -97,10 +96,11 @@ status_init() {
 	status_probe
 }
 
-# status_probe: STATUS_DB=on when the database has the status tables.
+# status_probe: STATUS_DB=on when the database has the status tables, off
+# when it answers that it has not. A failed probe (the database is down)
+# keeps the last state, so a short outage never resets the admin settings.
 status_probe() {
 	STATUS_PROBED=$(date -u +%s)
-	STATUS_DB=off
 	[ -n "$DB_OK" ] || return 0
 	if ! status_psql "SELECT to_regclass('backup_agent') IS NOT NULL AND to_regclass('backup_runs') IS NOT NULL AND to_regclass('settings') IS NOT NULL"; then
 		status_bad probe
@@ -109,15 +109,21 @@ status_probe() {
 	status_good probe
 	if [ "$STATUS_RESULT" = t ]; then
 		STATUS_DB=on
-	elif [ -z "$STATUS_OFF_LOGGED" ]; then
+		return 0
+	fi
+	STATUS_DB=off
+	if [ -z "$STATUS_OFF_LOGGED" ]; then
 		STATUS_OFF_LOGGED=1
 		info "status reporting off: the database has no backup status tables (older schema or another database); backups run as usual"
 	fi
 }
 
-# status_reprobe: probes again every 5 minutes.
+# status_reprobe: probes again every 5 minutes (BACKUP_STATUS_PROBE_SECONDS,
+# for tests).
 status_reprobe() {
-	[ $(($(date -u +%s) - STATUS_PROBED)) -lt 300 ] || status_probe
+	_every=${BACKUP_STATUS_PROBE_SECONDS:-300}
+	is_uint "$_every" || _every=300
+	[ $(($(date -u +%s) - STATUS_PROBED)) -lt "$_every" ] || status_probe
 }
 
 # status_interrupted: runs left "running" by a stopped container failed.
@@ -126,134 +132,15 @@ status_interrupted() {
 		error='Interrupted: the backup service stopped during this run' WHERE status='running'"
 }
 
-# ─── Settings (admin overrides) ───────────────────────────────────────────────
-
-# env_defaults: validated env values, the fallback for every override.
-env_defaults() {
-	ENV_TIME=${BACKUP_TIME:-03:00}
-	valid_time "$ENV_TIME" || ENV_TIME=03:00
-	ENV_KEEP_DAYS_RAW=${BACKUP_KEEP_DAYS:-30}
-	ENV_KEEP_MIN_RAW=${BACKUP_KEEP_MIN:-7}
-	ENV_KEEP_DAYS=$ENV_KEEP_DAYS_RAW
-	is_uint "$ENV_KEEP_DAYS" || ENV_KEEP_DAYS=
-	ENV_KEEP_MIN=$ENV_KEEP_MIN_RAW
-	is_uint "$ENV_KEEP_MIN" || ENV_KEEP_MIN=
-	ENV_MAX_AGE=${BACKUP_MAX_AGE_HOURS:-26}
-	is_uint "$ENV_MAX_AGE" || ENV_MAX_AGE=26
-	BACKUP_TIME=$ENV_TIME
-	MAX_AGE_HOURS=$ENV_MAX_AGE
-}
-
-valid_time() {
-	case $1 in
-	[01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) return 0 ;;
-	esac
-	return 1
-}
-
-# in_range VALUE MIN MAX: a whole number from MIN to MAX.
-in_range() {
-	is_uint "$1" && [ "${#1}" -le 6 ] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]
-}
-
-# pick FIELD RAW VALID ENV: sets PICK_VAL to RAW when VALID is 1, else to
-# ENV, and PICK_SRC to override or default. A new bad RAW logs one WARN.
-pick() {
-	PICK_SRC=default
-	PICK_VAL=$4
-	eval "_prev=\${BAD_$1:-}"
-	if [ -z "$2" ]; then
-		eval "BAD_$1="
-	elif [ "$3" = 1 ]; then
-		eval "BAD_$1="
-		PICK_SRC=override
-		PICK_VAL=$2
-	else
-		# shellcheck disable=SC2154 # set by eval
-		[ "$_prev" = "$2" ] ||
-			warn "settings: ignoring $1 \"$(clean_text "$2" 40)\" (not valid); using the default ${4:-from the environment}"
-		eval "BAD_$1=\$2"
-	fi
-}
-
-# note FIELD TEXT: one INFO line when an effective setting changes. The
-# first values from env are not logged: the scheduler line shows them.
-note() {
-	eval "_old=\${NOTE_$1:-}"
-	# shellcheck disable=SC2154 # set by eval
-	[ "$_old" != "$2" ] || return 0
-	eval "NOTE_$1=\$2"
-	[ -z "$SETTINGS_APPLIED" ] && [ "$PICK_SRC" = default ] && return 0
-	info "settings: $2"
-}
-
-src_label() {
-	if [ "$PICK_SRC" = override ]; then printf 'admin override'; else printf 'default'; fi
-}
-
-# apply_settings: reads the settings doc and sets BACKUP_TIME,
-# BACKUP_KEEP_DAYS, BACKUP_KEEP_MIN, MAX_AGE_HOURS and PAUSED. Missing or
-# bad values fall back to env. Writes the paused and max_age_hours status
-# files for the healthcheck. A failed read keeps the current values.
-apply_settings() {
-	if [ "$STATUS_DB" = on ]; then
-		if status_sql settings "SELECT translate(value->>'backup_time', E'|\n\r', ''),
-			translate(value->>'keep_days', E'|\n\r', ''), translate(value->>'keep_min', E'|\n\r', ''),
-			translate(value->>'max_age_hours', E'|\n\r', ''), coalesce(value->>'paused', 'false') = 'true',
-			updated_at::text FROM settings WHERE key = 'backup'"; then
-			_line=$(printf '%s\n' "$STATUS_RESULT" | head -n 1)
-			apply_line "$_line"
-		fi
-	else
-		apply_line ''
-	fi
-	if [ "$PAUSED" = true ]; then status_write paused 1; else rm -f "$STATUS_DIR/paused"; fi
-	status_write max_age_hours "$MAX_AGE_HOURS"
-	SETTINGS_APPLIED=1
-}
-
-apply_line() {
-	_t=$(printf '%s' "$1" | cut -d'|' -f1)
-	_kd=$(printf '%s' "$1" | cut -d'|' -f2)
-	_km=$(printf '%s' "$1" | cut -d'|' -f3)
-	_ma=$(printf '%s' "$1" | cut -d'|' -f4)
-	_p=$(printf '%s' "$1" | cut -d'|' -f5)
-	SETTINGS_UPDATED_AT=$(printf '%s' "$1" | cut -d'|' -f6)
-	case $SETTINGS_UPDATED_AT in [0-9]*) ;; *) SETTINGS_UPDATED_AT= ;; esac
-
-	v=0
-	valid_time "$_t" && v=1
-	pick backup_time "$_t" "$v" "$ENV_TIME"
-	BACKUP_TIME=$PICK_VAL
-	note backup_time "daily at $BACKUP_TIME UTC ($(src_label))"
-
-	v=0
-	in_range "$_kd" 0 3650 && v=1
-	pick keep_days "$_kd" "$v" "$ENV_KEEP_DAYS_RAW"
-	BACKUP_KEEP_DAYS=$PICK_VAL
-	note keep_days "keep $BACKUP_KEEP_DAYS days ($(src_label))"
-
-	v=0
-	in_range "$_km" 0 1000 && v=1
-	pick keep_min "$_km" "$v" "$ENV_KEEP_MIN_RAW"
-	BACKUP_KEEP_MIN=$PICK_VAL
-	note keep_min "keep at least $BACKUP_KEEP_MIN backups ($(src_label))"
-
-	v=0
-	in_range "$_ma" 25 720 && v=1
-	pick max_age_hours "$_ma" "$v" "$ENV_MAX_AGE"
-	MAX_AGE_HOURS=$PICK_VAL
-	note max_age_hours "alert after $MAX_AGE_HOURS hours without a backup ($(src_label))"
-
-	_was=$PAUSED
-	if [ "$_p" = t ]; then PAUSED=true; else PAUSED=false; fi
-	if [ "$_was" != "$PAUSED" ]; then
-		if [ "$PAUSED" = true ]; then
-			info "settings: scheduled backups paused (admin)"
-		else
-			info "settings: scheduled backups resumed (admin)"
-		fi
-	fi
+# status_sweep: each tick between backups. Retries a final run write that
+# failed, then fails runs left "running" for over 6 hours (a lost final
+# write of an older process). A CLI backup in another process is never that
+# old, so it is left alone.
+status_sweep() {
+	run_flush
+	status_sql sweep "UPDATE backup_runs SET status='failed', finished_at=now(),
+		error='Interrupted: the backup service lost track of this run'
+		WHERE status='running' AND started_at < now() - interval '6 hours'"
 }
 
 # ─── Agent heartbeat ──────────────────────────────────────────────────────────
@@ -324,9 +211,14 @@ agent_state() {
 	if [ "$PAUSED" = true ]; then printf paused; else printf waiting; fi
 }
 
-# queued_run: a run-now request is waiting.
+# queued_run: a run-now request is waiting. Requests older than 10 minutes
+# fail instead (the API does the same), so an old request never starts a
+# surprise backup.
 queued_run() {
-	status_sql queue "SELECT 1 FROM backup_runs WHERE status = 'queued' LIMIT 1" && [ "$STATUS_RESULT" = 1 ]
+	status_sql queue "UPDATE backup_runs SET status='failed', finished_at=now(),
+		error='Not picked up by the backup service within 10 minutes'
+		WHERE status='queued' AND requested_at < now() - interval '10 minutes';
+	SELECT 1 FROM backup_runs WHERE status = 'queued' LIMIT 1" && [ "$STATUS_RESULT" = 1 ]
 }
 
 # fail_queued REASON: answers run-now requests while backups are off.
@@ -339,15 +231,20 @@ fail_queued() {
 # ─── Run rows ─────────────────────────────────────────────────────────────────
 
 # run_begin KIND: claims a queued request, or adds a running row. Sets RUN_ID.
+# A manual run only claims: with nothing claimed (another process answered
+# the request, or the write failed) RUN_ID stays empty and no backup runs.
 run_begin() {
 	RUN_ID=
 	RUN_ACTIVE=1
 	status_sql run "UPDATE backup_agent SET state='running', last_seen_at=now() WHERE id=1;
 	WITH c AS (UPDATE backup_runs SET status='running', started_at=now()
-		WHERE id=(SELECT id FROM backup_runs WHERE status='queued' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+		WHERE id=(SELECT id FROM backup_runs WHERE status='queued'
+			AND coalesce(requested_at, now()) >= now() - interval '10 minutes'
+			ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
 		RETURNING id),
 	i AS (INSERT INTO backup_runs (kind, status, started_at)
-		SELECT :'kind', 'running', now() WHERE NOT EXISTS (SELECT 1 FROM c) RETURNING id)
+		SELECT :'kind', 'running', now() WHERE :'kind' <> 'manual' AND NOT EXISTS (SELECT 1 FROM c)
+		RETURNING id)
 	SELECT id FROM c UNION ALL SELECT id FROM i" kind="$1" || return 0
 	RUN_ID=$(printf '%s\n' "$STATUS_RESULT" | head -n 1)
 	is_uint "$RUN_ID" || RUN_ID=
@@ -356,42 +253,79 @@ run_begin() {
 TRIM_SQL="DELETE FROM backup_runs WHERE status IN ('ok','failed') AND id NOT IN
 	(SELECT id FROM backup_runs WHERE status IN ('ok','failed') ORDER BY id DESC LIMIT 200)"
 
+# The final write of a run waits in PEND_* until it succeeds: run_flush
+# retries it every tick, so a short database outage during a backup never
+# leaves the row "running".
+
 # run_ok RESULT_FILE: the run row gets the backup's name, size and counts.
 run_ok() {
 	RUN_ACTIVE=
 	[ -n "$RUN_ID" ] || return 0
-	_name=$(result_field "$1" name)
-	_size=$(result_field "$1" size)
-	_sha=$(result_field "$1" sha256)
-	_tables=$(result_field "$1" tables)
-	_goose=$(result_field "$1" goose)
-	for _v in _size _tables _goose; do
-		eval "is_uint \"\$$_v\" || $_v="
-	done
-	status_sql run "UPDATE backup_runs SET status='ok', finished_at=now(), name=NULLIF(:'name', ''),
-		size_bytes=NULLIF(:'size', '')::bigint, sha256=NULLIF(:'sha', ''), tables=NULLIF(:'tables', '')::int,
-		goose_version=NULLIF(:'goose', '')::bigint WHERE id=:'id'::bigint;
-	UPDATE backup_agent SET state=:'state', last_seen_at=now(), last_success_at=now() WHERE id=1;
-	$TRIM_SQL" id="$RUN_ID" name="$(clean_text "$_name" 200)" size="$_size" \
-		sha="$(clean_text "$_sha" 64)" tables="$_tables" goose="$_goose" state="$(agent_state)"
+	pend_set ok
+	PEND_NAME=$(clean_text "$(result_field "$1" name)" 200)
+	PEND_SIZE=$(result_field "$1" size)
+	PEND_SHA=$(clean_text "$(result_field "$1" sha256)" 64)
+	PEND_TABLES=$(result_field "$1" tables)
+	PEND_GOOSE=$(result_field "$1" goose)
+	is_uint "$PEND_SIZE" || PEND_SIZE=
+	is_uint "$PEND_TABLES" || PEND_TABLES=
+	is_uint "$PEND_GOOSE" || PEND_GOOSE=
+	run_flush
 }
 
 # run_failed ERR: the run row failed with ERR (a log line, no secrets).
 run_failed() {
 	RUN_ACTIVE=
 	[ -n "$RUN_ID" ] || return 0
-	status_sql run "UPDATE backup_runs SET status='failed', finished_at=now(), error=:'err'
-		WHERE id=:'id'::bigint;
-	UPDATE backup_agent SET state=:'state', last_seen_at=now() WHERE id=1;
-	$TRIM_SQL" id="$RUN_ID" err="$(clean_text "$1" 500)" state="$(agent_state)"
+	pend_set failed
+	PEND_ERR=$(clean_text "$1" 500)
+	run_flush
 	RUN_ID=
 }
 
-# run_pruned ID COUNT [ERR]: what the prune after a backup did.
+pend_set() {
+	PEND_ID=$RUN_ID
+	PEND_STATUS=$1
+	PEND_AT=$(date -u +%s)
+	PEND_NAME=
+	PEND_SIZE=
+	PEND_SHA=
+	PEND_TABLES=
+	PEND_GOOSE=
+	PEND_ERR=
+	PEND_PRUNED=
+	PEND_PERR=
+}
+
+# run_flush: the pending final write, if any.
+run_flush() {
+	[ -n "$PEND_ID" ] || return 0
+	status_sql run "UPDATE backup_runs SET status=:'status', finished_at=to_timestamp(:'at'::bigint),
+		name=NULLIF(:'name', ''), size_bytes=NULLIF(:'size', '')::bigint, sha256=NULLIF(:'sha', ''),
+		tables=NULLIF(:'tables', '')::int, goose_version=NULLIF(:'goose', '')::bigint,
+		error=NULLIF(:'err', ''), pruned=coalesce(NULLIF(:'n', '')::int, pruned),
+		prune_error=coalesce(NULLIF(:'perr', ''), prune_error) WHERE id=:'id'::bigint;
+	UPDATE backup_agent SET state=:'state', last_seen_at=now(),
+		last_success_at=CASE WHEN :'status' = 'ok' THEN to_timestamp(:'at'::bigint) ELSE last_success_at END
+		WHERE id=1;
+	$TRIM_SQL" id="$PEND_ID" status="$PEND_STATUS" at="$PEND_AT" name="$PEND_NAME" \
+		size="$PEND_SIZE" sha="$PEND_SHA" tables="$PEND_TABLES" goose="$PEND_GOOSE" err="$PEND_ERR" \
+		n="$PEND_PRUNED" perr="$PEND_PERR" state="$(agent_state)" || return 0
+	PEND_ID=
+}
+
+# run_pruned ID COUNT [ERR]: what the prune after a backup did. Joins the
+# pending final write when that has not gone through yet.
 run_pruned() {
 	[ -n "$1" ] || return 0
 	_c=$2
 	is_uint "$_c" || _c=
+	if [ "$PEND_ID" = "$1" ]; then
+		PEND_PRUNED=$_c
+		PEND_PERR=$(clean_text "${3:-}" 500)
+		run_flush
+		return 0
+	fi
 	status_sql run "UPDATE backup_runs SET pruned=NULLIF(:'n', '')::int, prune_error=NULLIF(:'err', '')
 		WHERE id=:'id'::bigint" id="$1" n="$_c" err="$(clean_text "${3:-}" 500)"
 }

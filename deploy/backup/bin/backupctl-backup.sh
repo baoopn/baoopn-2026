@@ -124,6 +124,7 @@ cmd_backup() {
 # backup_with_status KIND: one backup in a background subshell (so SIGTERM
 # stops it at once), then status files, ping and the run's status row. In
 # the scheduler (any KIND but cli) a good backup is followed by a prune.
+# Returns 2 without a backup when a manual request could not be claimed.
 backup_with_status() {
 	kind=${1:-cli}
 	mkdir -p "$STATUS_DIR" 2>/dev/null
@@ -131,8 +132,13 @@ backup_with_status() {
 	LAST_ERROR_FILE="$STATUS_DIR/error.$STATUS_TAG"
 	rm -f "$RESULT_FILE" "$LAST_ERROR_FILE"
 	run_begin "$kind"
-	# shellcheck disable=SC2034 # read by cmd_run (backupctl)
-	RUN_CLAIMED=$RUN_ID
+	if [ "$kind" = manual ] && [ -z "$RUN_ID" ]; then
+		# Nothing claimed: the request was answered elsewhere, or the
+		# claim failed. Never back up for a request this run does not own.
+		# shellcheck disable=SC2034 # read by status_stop
+		RUN_ACTIVE=
+		return 2
+	fi
 	status_pulse
 	run_child cmd_backup
 	rc=$?
