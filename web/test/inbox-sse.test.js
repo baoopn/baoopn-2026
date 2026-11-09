@@ -94,3 +94,16 @@ test('a single line over the cap is discarded up to its line ending', () => {
 	);
 	assert.deepEqual(out, [['message', 'ok']]);
 });
+
+test('an over-long line inside an event drops the whole event', () => {
+	const huge = 'z'.repeat(MAX_SSE_EVENT + 10);
+	const { out } = parse(
+		'event: thread.created\ndata: {"thread_id":1}\n',
+		'data: ',
+		huge,
+		'\n',
+		'data: tail\n\n',
+		'event: ready\ndata: {}\n\n'
+	);
+	assert.deepEqual(out, [['ready', '{}']]);
+});
