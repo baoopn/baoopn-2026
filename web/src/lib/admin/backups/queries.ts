@@ -68,7 +68,7 @@ function queuedPlaceholder(): BackupRun {
 
 export function runNowMutation(qc: QueryClient) {
 	return mutationOptions({
-		// The shared JSON client drops 202 bodies, so `run` may be undefined.
+		// The API answers 202 with the queued run; fall back to a stand-in if the body is empty.
 		mutationFn: () => post<BackupRun | undefined>('/backups/run'),
 		onSuccess: (run) => {
 			qc.setQueryData<BackupStatus>(backupsKey, (cur) =>

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/baoopn/baoopn-2026/internal/backups"
-	"github.com/baoopn/baoopn-2026/internal/backups/backupstest"
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
 )
 
@@ -46,7 +45,6 @@ var (
 // withBackups mounts the backups module on the harness router.
 func withBackups(t *testing.T) func(*httpapi.Deps) {
 	return func(d *httpapi.Deps) {
-		backupstest.EnsureSchema(t, d.DB)
 		d.Modules = append(d.Modules, backups.New(backups.Deps{DB: d.DB,
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil))}))
 	}

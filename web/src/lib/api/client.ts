@@ -39,7 +39,9 @@ export async function apiFull<T>(path: string, opts: ApiOptions = {}): Promise<A
 	}
 	if (token) h.set('Authorization', `Bearer ${token}`);
 	const res = await f(path, { ...init, headers: h, body: payload });
-	if (res.status === 204 || res.status === 202) return { data: undefined as T };
+	if (res.status === 204) return { data: undefined as T };
+	// 202 Accepted may carry a body (a queued backup run, a media item); an
+	// empty one parses to null and yields undefined data.
 	const json = await res.json().catch(() => null);
 	if (!res.ok) {
 		throw new ApiRequestError(

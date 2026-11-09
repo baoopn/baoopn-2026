@@ -16,7 +16,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/baoopn/baoopn-2026/internal/backups/backupstest"
 	"github.com/baoopn/baoopn-2026/internal/testdb"
 )
 
@@ -30,7 +29,6 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	db := testdb.New(t)
-	backupstest.EnsureSchema(t, db)
 	f := &fixture{t: t, db: db}
 	start := time.Now().UTC().Truncate(time.Second)
 	f.now.Store(&start)
