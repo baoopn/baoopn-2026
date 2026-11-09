@@ -10,10 +10,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -22,6 +24,9 @@ const (
 	onlineWindow = 3 * time.Minute
 	// queuedExpiry: a queued run nobody picked up within this fails.
 	queuedExpiry = 10 * time.Minute
+	// staleRunGrace: a running row that started this long before the latest
+	// heartbeat of an online agent that is not running is left over.
+	staleRunGrace = 2 * time.Minute
 	// listRuns is how many runs the status lists.
 	listRuns = 20
 	// Defaults when neither the agent nor an override gives a value.
@@ -215,8 +220,10 @@ func scanRun(row pgx.Row) (Run, error) {
 	return r, err
 }
 
-func queryRuns(ctx context.Context, q querier, where string, limit int) ([]Run, error) {
-	rows, err := q.Query(ctx, `SELECT `+runCols+` FROM backup_runs WHERE `+where+` LIMIT $1`, limit)
+// queryRuns selects runs; where may use $1..$n from args.
+func queryRuns(ctx context.Context, q querier, where string, limit int, args ...any) ([]Run, error) {
+	rows, err := q.Query(ctx, `SELECT `+runCols+` FROM backup_runs WHERE `+where+
+		` LIMIT $`+strconv.Itoa(len(args)+1), append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,12 +239,37 @@ func queryRuns(ctx context.Context, q querier, where string, limit int) ([]Run, 
 	return out, rows.Err()
 }
 
-func firstRun(ctx context.Context, q querier, where string) (*Run, error) {
-	rs, err := queryRuns(ctx, q, where, 1)
+func firstRun(ctx context.Context, q querier, where string, args ...any) (*Run, error) {
+	rs, err := queryRuns(ctx, q, where, 1, args...)
 	if err != nil || len(rs) == 0 {
 		return nil, err
 	}
 	return &rs[0], nil
+}
+
+// activeWhere matches the runs that count as active ($1, $2 from
+// activeArgs): every queued run, and a running run unless it is left over
+// (the agent is online and not running, and the run started more than
+// staleRunGrace before its latest heartbeat). Left-over rows still show in
+// runs; the sidecar marks them failed when it restarts.
+const activeWhere = `(status = 'queued' OR (status = 'running' AND
+	NOT ($1::boolean AND coalesce(started_at < $2::timestamptz, true))))`
+
+func activeArgs(state string, lastSeen time.Time, online bool) []any {
+	return []any{online && state != "running", lastSeen.Add(-staleRunGrace)}
+}
+
+// execer is a pool or a transaction.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// expireQueued fails queued runs nobody picked up within queuedExpiry.
+func expireQueued(ctx context.Context, db execer, now time.Time) error {
+	_, err := db.Exec(ctx, `UPDATE backup_runs SET status = 'failed', finished_at = $1,
+		error = 'Not picked up by the backup service within 10 minutes'
+		WHERE status = 'queued' AND requested_at < $2`, now, now.Add(-queuedExpiry))
+	return err
 }
 
 // loadDoc reads the settings document and when it last changed.
@@ -257,13 +289,18 @@ func loadDoc(ctx context.Context, q querier) (Doc, *time.Time, error) {
 
 // Status reads everything the admin page shows.
 func (m *Module) Status(ctx context.Context) (Status, error) {
+	now := m.d.Now().UTC()
+	// A short write first, so the page never shows a forgotten queued run.
+	if err := expireQueued(ctx, m.d.DB, now); err != nil {
+		return Status{}, err
+	}
 	tx, err := m.d.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return Status{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	st := Status{CheckedAt: m.d.Now().UTC()}
+	st := Status{CheckedAt: now}
 	a, err := loadAgent(ctx, tx)
 	if err != nil {
 		return Status{}, err
@@ -279,8 +316,14 @@ func (m *Module) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 	// A running run first: a queued one only waits behind it.
+	var args []any
+	if a != nil {
+		args = activeArgs(a.State, a.LastSeenAt, now.Sub(a.LastSeenAt) < onlineWindow)
+	} else {
+		args = activeArgs("", time.Time{}, false)
+	}
 	if st.ActiveRun, err = firstRun(ctx, tx,
-		`status IN ('queued','running') ORDER BY (status = 'running') DESC, id DESC`); err != nil {
+		activeWhere+` ORDER BY (status = 'running') DESC, id DESC`, args...); err != nil {
 		return Status{}, err
 	}
 	var lastOK *time.Time

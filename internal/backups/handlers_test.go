@@ -263,7 +263,7 @@ func TestRunNow(t *testing.T) {
 	}
 
 	// The sidecar claims it: still busy while running.
-	f.exec(`UPDATE backup_runs SET status = 'running' WHERE id = $1`, run.ID)
+	f.exec(`UPDATE backup_runs SET status = 'running', started_at = $2 WHERE id = $1`, run.ID, f.clock())
 	f.wantErr(f.do("POST", "/backups/run", ""), 409, "busy")
 	f.exec(`UPDATE backup_runs SET status = 'ok', finished_at = now() WHERE id = $1`, run.ID)
 
@@ -320,5 +320,72 @@ func TestRunNowConcurrent(t *testing.T) {
 	_ = f.db.QueryRow(context.Background(), `SELECT count(*) FROM backup_runs`).Scan(&queued)
 	if accepted != 1 || queued != 1 {
 		t.Errorf("codes %v, %d rows; want exactly one 202 and one row", codes, queued)
+	}
+}
+
+func TestStatusExpiresQueued(t *testing.T) {
+	f := newFixture(t)
+	f.agent("waiting", 0)
+	f.exec(`INSERT INTO backup_runs (kind, status, requested_at) VALUES ('manual', 'queued', $1)`,
+		f.clock().Add(-queuedExpiry-time.Second))
+	f.exec(`INSERT INTO backup_runs (kind, status, requested_at) VALUES ('manual', 'failed', $1)`, f.clock())
+	st := f.status("GET", "/backups", "")
+	if st.ActiveRun != nil {
+		t.Errorf("active run = %+v, want none", st.ActiveRun)
+	}
+	old := st.Runs[1]
+	if old.Status != "failed" || old.Error == nil || *old.Error != "Not picked up by the backup service within 10 minutes" ||
+		old.FinishedAt == nil {
+		t.Errorf("expired run = %+v", old)
+	}
+
+	// A queued run younger than 10 minutes stays.
+	f.exec(`INSERT INTO backup_runs (kind, status, requested_at) VALUES ('manual', 'queued', $1)`,
+		f.clock().Add(-queuedExpiry+time.Minute))
+	if st := f.status("GET", "/backups", ""); st.ActiveRun == nil || st.ActiveRun.Status != "queued" {
+		t.Errorf("fresh queued run = %+v", st.ActiveRun)
+	}
+}
+
+func TestLeftOverRunningRow(t *testing.T) {
+	for name, tc := range map[string]struct {
+		state   string
+		seenAgo time.Duration
+		started time.Duration // before the fixture clock
+		noAgent bool
+		active  bool
+	}{
+		"online, waiting, started long ago":     {state: "waiting", started: time.Hour},
+		"online, paused, started long ago":      {state: "paused", started: time.Hour},
+		"online, waiting, just claimed":         {state: "waiting", started: 30 * time.Second, active: true},
+		"online, running":                       {state: "running", started: time.Hour, active: true},
+		"offline agent":                         {state: "waiting", seenAgo: 5 * time.Minute, started: time.Hour, active: true},
+		"no agent row":                          {noAgent: true, started: time.Hour, active: true},
+		"online, waiting, started 2m1s earlier": {state: "waiting", started: staleRunGrace + time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			if !tc.noAgent {
+				f.agent(tc.state, tc.seenAgo)
+			}
+			f.exec(`INSERT INTO backup_runs (kind, status, started_at) VALUES ('scheduled', 'running', $1)`,
+				f.clock().Add(-tc.started))
+			st := f.status("GET", "/backups", "")
+			if len(st.Runs) != 1 || st.Runs[0].Status != "running" {
+				t.Fatalf("runs = %+v", st.Runs)
+			}
+			if got := st.ActiveRun != nil; got != tc.active {
+				t.Errorf("active_run = %+v, want active %v", st.ActiveRun, tc.active)
+			}
+			r := f.do("POST", "/backups/run", "")
+			switch {
+			case tc.noAgent || tc.seenAgo > 0:
+				f.wantErr(r, 409, "agent_offline")
+			case tc.active:
+				f.wantErr(r, 409, "busy")
+			case r.code != http.StatusAccepted:
+				t.Errorf("POST = %d %s, want 202", r.code, r.Err.Message)
+			}
+		})
 	}
 }
