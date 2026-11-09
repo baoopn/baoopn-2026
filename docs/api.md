@@ -155,7 +155,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 - **Emails** show `email_logo` (PNG, since Gmail shows no SVG) in the header, 48 px tall and
   linked to the site; the URL is made absolute at send time (`MEDIA_PUBLIC_URL/brand/…` as is,
   else `PUBLIC_URL/media/brand/…`), so a replaced logo applies to the next email. When it has
-  no absolute http(s) URL, the emails show the text badge instead.
+  no absolute http(s) URL, the emails show the text badge instead. The logo is a remote image
+  shared by all recipients, so its URL carries no per-recipient data, but fetching it can still
+  reveal that a mail was opened.
 
 ### Media uploads
 

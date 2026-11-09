@@ -81,7 +81,16 @@ func (s *Store) AbsoluteAsset(ctx context.Context, slot, siteURL string) (Asset,
 	}
 	a := s.asset(st, def)
 	if strings.HasPrefix(a.URL, "/") && !strings.HasPrefix(a.URL, "//") {
-		a.URL = strings.TrimRight(strings.TrimSpace(siteURL), "/") + a.URL
+		// The site's origin (any path, query or fragment dropped) + the path.
+		site, err := url.Parse(strings.TrimSpace(siteURL))
+		if err != nil || !absoluteHTTP(site.String()) {
+			return Asset{}, fmt.Errorf("brand: %s: the site URL is not an absolute http(s) URL", slot)
+		}
+		ref, err := url.Parse(a.URL)
+		if err != nil {
+			return Asset{}, fmt.Errorf("brand: %s: %w", slot, err)
+		}
+		a.URL = site.ResolveReference(ref).String()
 	}
 	if !absoluteHTTP(a.URL) {
 		return Asset{}, fmt.Errorf("brand: %s has no absolute http(s) URL", slot)

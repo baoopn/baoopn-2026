@@ -53,7 +53,7 @@ func TestEmailLogo(t *testing.T) {
 		_, html := render(t, Doc{Brand: b, Personal: personal, Preheader: "Hello there", Kicker: "K", Title: "T",
 			Blocks: []Block{{Kind: Para, Text: "Hello there"}}, Footer: "F"})
 		checkSafe(t, b, html)
-		img := `<a href="https://example.test" style="display:inline-block;text-decoration:none;border:0;"><img src="` +
+		img := `<a href="https://example.test" style="display:inline-block;text-decoration:none;border:0;"><img class="logo" src="` +
 			testLogo + `" width="116" height="48" alt="example.test" style="display:block;`
 		if !strings.Contains(html, img) || strings.Contains(html, `class="brand"`) {
 			t.Fatalf("personal=%v: no linked logo in place of the badge: %s", personal, html)
@@ -90,7 +90,7 @@ func TestEmailLogoFallback(t *testing.T) {
 	// A logo without an http(s) home is shown, unlinked.
 	b := Brand{Name: "example.test", LogoURL: testLogo}
 	_, html := render(t, Doc{Brand: b, Blocks: []Block{{Kind: Para, Text: "x"}}})
-	if !strings.Contains(html, `<img src="`+testLogo+`"`) || strings.Contains(html, "href=") {
+	if !strings.Contains(html, `<img class="logo" src="`+testLogo+`"`) || strings.Contains(html, "href=") {
 		t.Errorf("logo without a home: %s", html)
 	}
 }

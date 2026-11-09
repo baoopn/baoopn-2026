@@ -74,7 +74,7 @@ var slots = []slotDef{
 		Accept: []string{"image/svg+xml"}},
 	{Slot: EmailLogo, File: "email-logo.png", Stem: "email-logo", Ext: "png", Type: typePNG, Max: 256 << 10,
 		PNG:   pngRule{MinW: 240, MaxW: 1200, MinH: 60, MaxH: 600, MinAspect: 1500, MaxAspect: 4000},
-		Label: "Email logo", Kind: "logo", Rule: "PNG, 240–1200 px wide, landscape (shown 48 px tall in emails)", Preview: "both",
+		Label: "Email logo", Kind: "logo", Rule: "PNG, 240–1200 × 60–600 px, landscape 1.5:1 to 4:1 (shown 48 px tall in emails)", Preview: "both",
 		Accept: []string{"image/png"}},
 }
 

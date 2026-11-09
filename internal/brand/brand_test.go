@@ -400,7 +400,14 @@ func TestAbsoluteAsset(t *testing.T) {
 	if a, err = s.AbsoluteAsset(ctx, EmailLogo, "https://site.example.com/"); err != nil || a.URL != "https://site.example.com/media/"+key {
 		t.Fatalf("relative media URL: %+v %v", a, err)
 	}
-	for _, site := range []string{"", "javascript:alert(1)", "//evil.example", "https://u@site.example.com"} {
+	// Only the origin of the site URL counts: path, query and fragment are dropped.
+	for _, site := range []string{"https://site.example.com/sub/page?x=1#frag", "https://site.example.com?q=/x",
+		"https://site.example.com#/x", " https://site.example.com "} {
+		if a, err = s.AbsoluteAsset(ctx, EmailLogo, site); err != nil || a.URL != "https://site.example.com/media/"+key {
+			t.Errorf("site %q: %+v %v", site, a, err)
+		}
+	}
+	for _, site := range []string{"", "javascript:alert(1)", "//evil.example", "https://u@site.example.com", "/relative"} {
 		if a, err := s.AbsoluteAsset(ctx, EmailLogo, site); err == nil {
 			t.Errorf("site %q: got %q", site, a.URL)
 		}

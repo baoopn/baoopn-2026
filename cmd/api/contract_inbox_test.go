@@ -98,7 +98,7 @@ func TestContractContactAndInbox(t *testing.T) {
 	}
 	// The reply shows the email logo slot as an absolute URL on the site, read
 	// at send time, and the inbox snippet is the reply's own text.
-	if h := c.mailer.last().HTML; !strings.Contains(h, `<img src="https://baoopn.com/media/brand/email-logo.`) ||
+	if h := c.mailer.last().HTML; !strings.Contains(h, `<img class="logo" src="https://baoopn.com/media/brand/email-logo.`) ||
 		!strings.Contains(h, `opacity:0">Thanks for reaching out!`) {
 		t.Errorf("reply html has no site logo or preheader: %.1500s", h)
 	}
@@ -110,7 +110,7 @@ func TestContractContactAndInbox(t *testing.T) {
 	newLogo, _ := field(decodeData(t, lw, adminBrandAsset), "url").(string)
 	c.ok("POST", base+"/messages", map[string]string{"body": "With the new logo", "request_id": "req-contract-logo"}, 201,
 		threadMessage, false)
-	if h := c.mailer.last().HTML; !strings.Contains(h, `<img src="https://baoopn.com`+newLogo+`" width="144" height="48"`) {
+	if h := c.mailer.last().HTML; !strings.Contains(h, `<img class="logo" src="https://baoopn.com`+newLogo+`" width="144" height="48"`) {
 		t.Errorf("reply after a logo change does not use %s", newLogo)
 	}
 	c.fail("POST", base+"/messages/"+idOf(m1)+"/retry", nil, 409, "not_retryable")
