@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { RefreshCw } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import type { BackupRun } from '#lib/api/types.js';
@@ -56,23 +55,17 @@
 	title="Backups"
 	eyebrow="Site"
 	description="Encrypted off-site database backups: status, schedule and recent runs."
->
-	{#snippet actions()}
-		<button
-			type="button"
-			class="btn btn-ghost btn-sm"
-			onclick={() => status.refetch()}
-			disabled={status.isFetching}
-			aria-label="Reload the backup status"
-		>
-			<RefreshCw class="size-4 {status.isFetching ? 'animate-spin' : ''}" aria-hidden="true" />
-		</button>
-	{/snippet}
-</PageHeader>
+/>
 
 {#if status.data}
 	<div class="flex flex-col gap-6">
-		<StatusCard status={status.data} starting={runM.isPending} onrun={runNow} />
+		<StatusCard
+			status={status.data}
+			starting={runM.isPending}
+			refreshing={status.isFetching}
+			onrun={runNow}
+			onrefresh={() => status.refetch()}
+		/>
 		<div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
 			<RunsTable runs={status.data.runs} />
 			<ScheduleForm status={status.data} />

@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { CircleCheck, CircleSlash, DatabaseBackup, LoaderCircle } from '@lucide/svelte';
+	import {
+		CircleCheck,
+		CircleSlash,
+		DatabaseBackup,
+		LoaderCircle,
+		RefreshCw
+	} from '@lucide/svelte';
 	import type { BackupStatus } from '#lib/api/types.js';
 	import RelTime from '../components/RelTime.svelte';
 	import { healthCopy, runBlockedReason, TONE_SPOT, utcStamp } from './copy.js';
@@ -7,12 +13,17 @@
 	let {
 		status,
 		starting = false,
-		onrun
+		refreshing = false,
+		onrun,
+		onrefresh
 	}: {
 		status: BackupStatus;
 		/** The run request is in flight. */
 		starting?: boolean;
+		/** A status refetch is in flight. */
+		refreshing?: boolean;
 		onrun: () => void;
+		onrefresh: () => void;
 	} = $props();
 
 	const s = $derived(status.settings);
@@ -60,9 +71,20 @@
 </script>
 
 <section class="card flex flex-col gap-5 p-4 sm:p-5" aria-labelledby="backup-status-h">
+	<div class="-mb-3 flex items-center justify-between gap-2">
+		<h2 id="backup-status-h" class="eyebrow">Status</h2>
+		<button
+			type="button"
+			class="btn btn-ghost btn-icon btn-sm"
+			onclick={onrefresh}
+			disabled={refreshing}
+			aria-label="Reload the backup status"
+		>
+			<RefreshCw class="size-4 {refreshing ? 'animate-spin' : ''}" aria-hidden="true" />
+		</button>
+	</div>
 	<div class="flex flex-wrap items-start justify-between gap-4">
 		<div class="flex min-w-0 flex-col gap-2" aria-live="polite">
-			<h2 id="backup-status-h" class="eyebrow">Status</h2>
 			<span class="tag w-fit gap-1.5 border border-on-spot" style:--tag={TONE_SPOT[copy.tone]}>
 				<span class="size-1.5 rounded-full bg-on-spot" aria-hidden="true"></span>
 				{copy.label}
@@ -116,13 +138,13 @@
 		<div>
 			<dt class="eyebrow mb-1">Next scheduled run</dt>
 			<dd>
-				{#if status.agent?.next_run_at}
+				{#if s.paused}
+					<span class="text-ink-soft">Paused</span>
+				{:else if status.agent?.next_run_at}
 					<span class="font-mono text-ink">{utcStamp(status.agent.next_run_at)}</span>
 					<span class="block text-xs text-ink-soft"
 						>{local(status.agent.next_run_at)} your time</span
 					>
-				{:else if s.paused}
-					<span class="text-ink-soft">Paused</span>
 				{:else}
 					<span class="text-ink-soft">Not scheduled</span>
 				{/if}
