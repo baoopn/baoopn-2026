@@ -4,7 +4,7 @@
 	import RelTime from '../components/RelTime.svelte';
 	import EmptyState from '../components/EmptyState.svelte';
 	import { bytes, num, timeSpan } from '../format';
-	import { runKindLabel, runStatusCopy, TONE_SPOT, utcStamp } from './copy.js';
+	import { runKindShort, runStatusCopy, TONE_SPOT, utcStamp } from './copy.js';
 
 	let { runs }: { runs: BackupRun[] } = $props();
 
@@ -70,17 +70,18 @@
 					{#each runs as r (r.id)}
 						{@const err = problem(r)}
 						<tr>
-							<td class="font-mono text-sm">
+							<td class="font-mono text-sm whitespace-nowrap">
 								<RelTime value={when(r)} />
 								<span class="sr-only">({utcStamp(when(r))})</span>
 							</td>
-							<td class="text-sm">{runKindLabel(r.kind)}</td>
-							<td>{@render chip(r)}</td>
-							<td class="num font-mono text-sm tabular-nums">{size(r)}</td>
-							<td class="num font-mono text-sm tabular-nums">{duration(r)}</td>
-							<td class="num font-mono text-sm tabular-nums">{num(r.tables)}</td>
-							<td class="num font-mono text-sm tabular-nums">{num(r.pruned)}</td>
-							<td class="max-w-[16rem]">
+							<td class="text-sm whitespace-nowrap">{runKindShort(r.kind)}</td>
+							<td class="whitespace-nowrap">{@render chip(r)}</td>
+							<td class="num font-mono text-sm whitespace-nowrap tabular-nums">{size(r)}</td>
+							<td class="num font-mono text-sm whitespace-nowrap tabular-nums">{duration(r)}</td>
+							<td class="num font-mono text-sm whitespace-nowrap tabular-nums">{num(r.tables)}</td>
+							<td class="num font-mono text-sm whitespace-nowrap tabular-nums">{num(r.pruned)}</td>
+							<!-- Takes the leftover width and truncates; full text in the title. -->
+							<td class="w-full max-w-0 min-w-[10rem]">
 								{#if err}
 									<span class="block truncate font-mono text-xs text-danger" title={err}>{err}</span
 									>
@@ -102,7 +103,7 @@
 				{@const err = problem(r)}
 				<li class="flex flex-col gap-1.5 py-3">
 					<div class="flex flex-wrap items-center justify-between gap-2">
-						<span class="text-sm font-medium text-ink">{runKindLabel(r.kind)}</span>
+						<span class="text-sm font-medium text-ink">{runKindShort(r.kind)}</span>
 						{@render chip(r)}
 					</div>
 					<p class="font-mono text-xs text-ink-soft">

@@ -8,6 +8,7 @@ import {
 	healthCopy,
 	runBlockedReason,
 	runKindLabel,
+	runKindShort,
 	runStatusCopy,
 	utcStamp
 } from '../src/lib/admin/backups/copy.js';
@@ -28,6 +29,12 @@ const CODES = [
 	'not_reporting'
 ];
 const TONES = Object.keys(TONE_SPOT);
+
+test('every tone is a spot fill, so --on-spot text keeps its contrast', () => {
+	for (const [tone, fill] of Object.entries(TONE_SPOT)) {
+		assert.match(fill, /^var\(--spot-[a-z]+\)$/, tone);
+	}
+});
 
 test('every health code has a label, a known tone, a title and an explanation', () => {
 	assert.deepEqual(Object.keys(HEALTH).sort(), [...CODES].sort());
@@ -66,6 +73,14 @@ test('run kinds and statuses have labels with fallbacks', () => {
 		assert.notEqual(runKindLabel(k), 'Other', k);
 	}
 	assert.equal(runKindLabel('nope'), 'Other');
+	assert.deepEqual(['scheduled', 'startup', 'retry', 'manual', 'cli'].map(runKindShort), [
+		'Scheduled',
+		'Startup',
+		'Retry',
+		'Manual',
+		'CLI'
+	]);
+	assert.equal(runKindShort('nope'), 'Other');
 	for (const s of ['queued', 'running', 'ok', 'failed']) {
 		const c = runStatusCopy(s);
 		assert.notEqual(c.label, 'Unknown', s);

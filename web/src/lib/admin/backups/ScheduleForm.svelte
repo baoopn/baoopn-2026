@@ -82,7 +82,7 @@
 		backup_time: '24-hour HH:MM.',
 		keep_days: '0 keeps every backup.',
 		keep_min: 'Never delete below this many.',
-		max_age_hours: 'Health turns stale when no backup is this old. 25 to 720.'
+		max_age_hours: 'Health turns stale when the newest backup is older than this. 25 to 720.'
 	};
 
 	function envText(k: Field, unit: string): string {

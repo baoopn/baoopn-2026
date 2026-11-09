@@ -12,7 +12,8 @@ export const TONE_SPOT = {
 	warn: 'var(--spot-butter)',
 	danger: 'var(--spot-rose)',
 	info: 'var(--spot-sky)',
-	muted: 'var(--paper-3)'
+	// Text on a spot is always --on-spot, so muted needs a real spot fill too.
+	muted: 'var(--spot-lilac)'
 };
 
 export const DEFAULT_MAX_AGE_HOURS = 26;
@@ -101,6 +102,21 @@ export const RUN_KIND = {
 	manual: 'Back up now',
 	cli: 'Command line'
 };
+
+/** Short kind labels for the runs table. */
+/** @type {Record<string, string>} */
+export const RUN_KIND_SHORT = {
+	scheduled: 'Scheduled',
+	startup: 'Startup',
+	retry: 'Retry',
+	manual: 'Manual',
+	cli: 'CLI'
+};
+
+/** @param {string} kind */
+export function runKindShort(kind) {
+	return Object.hasOwn(RUN_KIND_SHORT, kind) ? RUN_KIND_SHORT[kind] : 'Other';
+}
 
 /** @param {string} kind */
 export function runKindLabel(kind) {
