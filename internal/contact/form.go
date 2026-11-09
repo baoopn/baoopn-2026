@@ -131,6 +131,7 @@ func (m *Module) handleContact(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
+	m.events.publish(Event{Type: evThreadCreated, ThreadID: id})
 	httpapi.JSON(w, http.StatusCreated, map[string]bool{"ok": true})
 
 	if !m.d.Mailer.Enabled() {

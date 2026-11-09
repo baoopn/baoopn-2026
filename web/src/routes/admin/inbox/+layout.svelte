@@ -7,39 +7,21 @@
 	import ErrorState from '#lib/admin/components/ErrorState.svelte';
 	import EmptyState from '#lib/admin/components/EmptyState.svelte';
 	import RelTime from '#lib/admin/components/RelTime.svelte';
-	import { get, qs } from '#lib/admin/api.js';
-	import { Resource } from '#lib/admin/resource.svelte.js';
-	import { inbox } from '#lib/admin/inbox.svelte.js';
+	import { createQuery } from '@tanstack/svelte-query';
+	import { errorMessage } from '#lib/admin/format.js';
+	import { threadsQuery, unreadQuery } from '#lib/admin/inbox/queries.js';
+	import { live } from '#lib/admin/inbox/live.svelte.js';
+	import LiveStatus from '#lib/admin/inbox/LiveStatus.svelte';
 
 	let { children } = $props();
 
 	let status = $state<ThreadStatus>('open');
 	let q = $state('');
 
-	const threads = new Resource(() => get<ThreadSummary[]>('/threads' + qs({ status, q })));
-
-	// Reload when the filters change.
-	$effect(() => {
-		void threads.load();
-	});
-
-	// Silent refresh when a thread changes, or the unread count moves.
-	let lastVersion = 0;
-	let lastUnread = -1;
-	$effect(() => {
-		const v = inbox.version;
-		const u = inbox.unread;
-		if (v !== lastVersion || (lastUnread !== -1 && u !== lastUnread)) void threads.load(true);
-		lastVersion = v;
-		lastUnread = u;
-	});
-
-	$effect(() => {
-		const id = setInterval(() => {
-			if (document.visibilityState === 'visible') void threads.load(true);
-		}, 60_000);
-		return () => clearInterval(id);
-	});
+	const threads = createQuery(() => threadsQuery({ status, q }));
+	const unread = createQuery(() => unreadQuery());
+	const unreadCount = $derived(unread.data ?? 0);
+	const list = $derived<ThreadSummary[] | undefined>(threads.data);
 
 	const selectedId = $derived(page.params.id ? Number(page.params.id) : null);
 
@@ -61,12 +43,15 @@
 		]}
 	>
 		<div class="flex flex-col gap-3 border-b border-rule px-4 pt-6 pb-4 sm:px-6 lg:px-5">
-			<h1 class="font-display text-3xl font-semibold">
-				Inbox
-				{#if inbox.unread > 0}<span class="font-mono text-base text-ink-soft"
-						>· {inbox.unread} unread</span
-					>{/if}
-			</h1>
+			<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+				<h1 class="font-display text-3xl font-semibold">
+					Inbox
+					{#if unreadCount > 0}<span class="font-mono text-base text-ink-soft"
+							>· {unreadCount} unread</span
+						>{/if}
+				</h1>
+				<LiveStatus />
+			</div>
 			<Segmented {options} bind:value={status} label="Thread status" size="sm" />
 			<SearchInput
 				class="w-full"
@@ -76,10 +61,10 @@
 			/>
 		</div>
 
-		<div class="min-h-0 flex-1 overflow-y-auto" aria-busy={threads.loading}>
-			{#if threads.error && !threads.data}
-				<ErrorState message={threads.error} onretry={() => threads.load()} />
-			{:else if !threads.data || (threads.loading && threads.data.length === 0)}
+		<div class="min-h-0 flex-1 overflow-y-auto" aria-busy={threads.isFetching}>
+			{#if threads.isError && !list}
+				<ErrorState message={errorMessage(threads.error)} onretry={() => threads.refetch()} />
+			{:else if threads.isPending || !list}
 				<ul aria-hidden="true">
 					{#each [1, 2, 3, 4, 5] as i (i)}
 						<li class="flex flex-col gap-2 border-b border-rule px-5 py-4">
@@ -88,7 +73,7 @@
 						</li>
 					{/each}
 				</ul>
-			{:else if threads.data.length === 0}
+			{:else if list.length === 0}
 				<EmptyState
 					title={q ? 'No matches' : status === 'open' ? 'Inbox zero' : `No ${status} threads`}
 					message={q
@@ -97,9 +82,10 @@
 				/>
 			{:else}
 				<ul>
-					{#each threads.data as t (t.id)}
+					{#each list as t (t.id)}
 						{@const active = t.id === selectedId}
-						<li class="border-b border-rule">
+						{@const fresh = live.fresh.has(t.id)}
+						<li class={['border-b border-rule', fresh && 'inbox-fresh']}>
 							<a
 								href="/admin/inbox/{t.id}"
 								aria-current={active ? 'page' : undefined}
@@ -137,6 +123,7 @@
 										{t.last_direction === 'outbound' ? 'You: ' : ''}{t.last_preview}
 									</span>
 								</span>
+								{#if fresh}<span class="sr-only">New.</span>{/if}
 								{#if t.unread}<span class="sr-only">Unread.</span>{/if}
 							</a>
 						</li>

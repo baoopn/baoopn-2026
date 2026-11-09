@@ -188,11 +188,12 @@ func (m *Module) receive(ctx context.Context, raw []byte, envTo, envFrom string)
 		rej.reason = "empty"
 		return rej, nil
 	}
-	stored, err := m.storeInbound(ctx, t, body, full, msgID, in.From, min(max(in.Attachments, 0), maxAttachments))
+	msgRow, stored, err := m.storeInbound(ctx, t, body, full, msgID, in.From, min(max(in.Attachments, 0), maxAttachments))
 	if err != nil {
 		return nil, err
 	}
 	if stored {
+		m.events.publish(Event{Type: evMessageCreated, ThreadID: t.ID, MessageID: msgRow, Direction: "inbound"})
 		m.d.Log.Info("contact: inbound email stored", slog.Int64("thread_id", t.ID))
 		m.notifyInbound(ctx, t, body)
 	}
@@ -223,11 +224,12 @@ func (m *Module) ourText(ctx context.Context, threadID int64) ([]string, error) 
 	return out, rows.Err()
 }
 
-// storeInbound adds the message; stored is false for a duplicate Message-ID.
-func (m *Module) storeInbound(ctx context.Context, t thread, body, full, msgID, from string, attachments int) (bool, error) {
+// storeInbound adds the message and returns its id; stored is false for a
+// duplicate Message-ID.
+func (m *Module) storeInbound(ctx context.Context, t thread, body, full, msgID, from string, attachments int) (int64, bool, error) {
 	tx, err := m.d.DB.Begin(ctx)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var id int64
@@ -238,19 +240,22 @@ func (m *Module) storeInbound(ctx context.Context, t thread, body, full, msgID, 
 		ON CONFLICT (rfc_message_id) WHERE rfc_message_id IS NOT NULL DO NOTHING RETURNING id`,
 		t.ID, body, full, msgID, from, from != strings.ToLower(t.Email), attachments).Scan(&id)
 	if isNoRows(err) {
-		return false, nil
+		return 0, false, nil
 	}
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE threads SET last_message_at = now(), last_direction = 'inbound', last_preview = $2,
 			message_count = message_count + 1, read_at = NULL,
 			status = CASE WHEN status = 'archived' THEN 'open' ELSE status END
 		WHERE id = $1`, t.ID, preview(body)); err != nil {
-		return false, err
+		return 0, false, err
 	}
-	return true, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 // storeReject records r. Rows for mail to no live thread (no_token,

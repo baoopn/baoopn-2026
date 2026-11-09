@@ -70,6 +70,13 @@ type Module struct {
 
 	// parse is bmail.ParseInbound; tests swap it to count calls.
 	parse func([]byte) (bmail.Inbound, error)
+
+	// events fans inbox changes out to admin streams (see events.go and
+	// stream.go); the timings are fields so tests can shorten them.
+	events             *events
+	eventsKeepAlive    time.Duration
+	eventsWriteTimeout time.Duration
+	eventsMaxAge       time.Duration
 }
 
 // New returns the module.
@@ -97,6 +104,11 @@ func New(d Deps) *Module {
 		inboundRate: newBucket(inboundPerMinute, time.Minute),
 		junkRate:    newBucket(junkRejectsPerMinute, time.Minute),
 		parse:       bmail.ParseInbound,
+
+		events:             newEvents(maxEventStreams),
+		eventsKeepAlive:    eventsKeepAlive,
+		eventsWriteTimeout: eventsWriteTimeout,
+		eventsMaxAge:       eventsMaxAge,
 	}
 }
 

@@ -130,6 +130,8 @@ func run() error {
 		WriteTimeout: 2 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
+	// Shutdown waits for active connections; open inbox streams end at once.
+	srv.RegisterOnShutdown(mods.contact.CloseStreams)
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("listening", slog.String("addr", cfg.HTTPAddr), slog.String("version", app.Version))

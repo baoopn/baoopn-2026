@@ -13,14 +13,18 @@
 	} from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { MediaQuery } from 'svelte/reactivity';
+	import { createQuery } from '@tanstack/svelte-query';
 	import { LISTENING_ADMIN_URL } from '#lib/links.js';
 	import BrandMark from '../BrandMark.svelte';
 	import { auth } from '../../auth.svelte';
-	import { inbox } from '../../inbox.svelte';
+	import { unreadQuery } from '../../inbox/queries';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
 	const desktop = new MediaQuery('min-width: 1024px');
+
+	const unread = createQuery(() => unreadQuery());
+	const unreadCount = $derived(unread.data ?? 0);
 
 	const items = [
 		{ href: '/admin', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -90,10 +94,10 @@
 					>
 						<item.icon class="size-[1.125rem] shrink-0" aria-hidden="true" />
 						<span class="flex-1">{item.label}</span>
-						{#if item.badge && inbox.unread > 0}
+						{#if item.badge && unreadCount > 0}
 							<span
 								class="rounded-full border border-on-spot bg-spot-now px-2 font-mono text-xs text-on-spot"
-								>{inbox.unread}<span class="sr-only"> unread</span></span
+								>{unreadCount}<span class="sr-only"> unread</span></span
 							>
 						{/if}
 					</a>
