@@ -567,7 +567,8 @@ export type BrandSlot =
 	| 'apple_touch_icon'
 	| 'wordmark_primary'
 	| 'monogram_primary'
-	| 'monogram_inverse';
+	| 'monogram_inverse'
+	| 'email_logo';
 
 export interface BrandAsset {
 	slot: BrandSlot;

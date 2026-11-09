@@ -89,7 +89,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	listeningMod := listening.New(listening.Deps{BaseURL: cfg.SpotifyAPIURL, Log: log, HTTP: httpClient})
 
 	contactMod := contact.New(contact.Deps{DB: pool, Log: log, Mailer: mailer, Settings: site,
-		PublicURL: cfg.PublicURL, InboundDomain: cfg.InboundDomain, InboundSecret: cfg.InboundSecret,
+		PublicURL: cfg.PublicURL, EmailLogo: emailLogo(brandMod, cfg.PublicURL, log), InboundDomain: cfg.InboundDomain, InboundSecret: cfg.InboundSecret,
 		TurnstileSecret: cfg.TurnstileSecret, HTTP: httpClient})
 
 	rec := analytics.New(analytics.Deps{DB: pool, Log: log,
@@ -113,6 +113,21 @@ func ensureBrand(ctx context.Context, b *brand.Store) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	b.Ensure(ctx)
+}
+
+// emailLogo reads the current email logo slot as an absolute URL for the
+// mail layout; on any error the emails show the text badge.
+func emailLogo(b *brand.Store, publicURL string, log *slog.Logger) func() (string, int, int) {
+	return func() (string, int, int) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		a, err := b.AbsoluteAsset(ctx, brand.EmailLogo, publicURL)
+		if err != nil {
+			log.Warn("email logo unavailable, using the text badge", logging.Err(err))
+			return "", 0, 0
+		}
+		return a.URL, a.Width, a.Height
+	}
 }
 
 // orphanGrace maps MEDIA_ORPHAN_GRACE=0 (cleanup off) to the store's

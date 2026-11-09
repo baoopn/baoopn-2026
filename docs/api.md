@@ -123,6 +123,7 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
   | `wordmark_primary` | SVG | viewBox | 256 KiB |
   | `monogram_primary` | SVG | square viewBox | 256 KiB |
   | `monogram_inverse` | SVG | square viewBox | 256 KiB |
+  | `email_logo` | PNG | 240–1200 px wide, 60–600 px tall, 1.5:1 to 4:1 (shown 48 px tall in emails) | 256 KiB |
 
 - **Errors:** 400 `bad_request` (not multipart, no `file` field), 404 `not_found` (unknown
   slot), 413 `too_large`, 415 `unsupported_type` (e.g. "favicon_ico needs an ICO file"),
@@ -151,6 +152,10 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
   a current or default file never is. The orphan cleanup ignores `brand/`.
 - The web app reads `GET /api/v1/brand` (cached 60 s) and redirects `/favicon.ico`,
   `/favicon.svg` and `/apple-touch-icon.png` to the current files.
+- **Emails** show `email_logo` (PNG, since Gmail shows no SVG) in the header, 48 px tall and
+  linked to the site; the URL is made absolute at send time (`MEDIA_PUBLIC_URL/brand/…` as is,
+  else `PUBLIC_URL/media/brand/…`), so a replaced logo applies to the next email. When it has
+  no absolute http(s) URL, the emails show the text badge instead.
 
 ### Media uploads
 

@@ -1,6 +1,7 @@
 package mail
 
 import (
+	htmlpkg "html"
 	"regexp"
 	"strings"
 	"testing"
@@ -20,14 +21,15 @@ func render(t *testing.T, d Doc) (string, string) {
 var (
 	tagRe   = regexp.MustCompile(`<\s*/?\s*([a-zA-Z][a-zA-Z0-9]*)`)
 	hrefRe  = regexp.MustCompile(`href="([^"]*)"`)
+	srcRe   = regexp.MustCompile(`(?i)<img[^>]*\ssrc="([^"]*)"`)
 	inTagRe = regexp.MustCompile(`<[a-zA-Z][^>]*>`)
 )
 
 var allowedTags = map[string]bool{"html": true, "head": true, "meta": true, "title": true, "style": true,
-	"body": true, "div": true, "table": true, "tr": true, "td": true, "span": true, "a": true, "br": true, "strong": true}
+	"body": true, "div": true, "table": true, "tr": true, "td": true, "span": true, "a": true, "br": true, "strong": true, "img": true}
 
-// checkSafe asserts html has only allowed tags, no script or handlers, and
-// links only to the brand.
+// checkSafe asserts html has only allowed tags, no script or handlers, links
+// only to the brand, and images only from the brand's logo URL.
 func checkSafe(t *testing.T, b Brand, html string) {
 	t.Helper()
 	body := html
@@ -39,7 +41,17 @@ func checkSafe(t *testing.T, b Brand, html string) {
 			t.Errorf("tag <%s> not allowed", m[1])
 		}
 	}
-	for _, bad := range []string{"<script", "<img"} {
+	imgs := strings.Count(strings.ToLower(body), "<img")
+	srcs := srcRe.FindAllStringSubmatch(body, -1)
+	if imgs != len(srcs) || (imgs > 0 && b.logo() == nil) {
+		t.Errorf("%d img tags, %d with a src, logo %+v", imgs, len(srcs), b.logo())
+	}
+	for _, m := range srcs {
+		if src := htmlpkg.UnescapeString(m[1]); src != b.LogoURL {
+			t.Errorf("img src %q is not the logo %q", src, b.LogoURL)
+		}
+	}
+	for _, bad := range []string{"<script"} {
 		if strings.Contains(strings.ToLower(body), bad) {
 			t.Errorf("html contains %q", bad)
 		}
@@ -243,7 +255,7 @@ func TestDefang(t *testing.T) {
 func TestBrandNameIsOurLink(t *testing.T) {
 	for _, personal := range []bool{false, true} {
 		text, html := render(t, Doc{Brand: testBrand, Personal: personal, Subject: "S", Footer: "F",
-			Blocks: []Block{{Kind: Para, Text: "Hello"}}})
+			Blocks: []Block{{Kind: Para, Text: "Hello"}}, Signature: "Name\nhttps://example.test"})
 		badge := `<a class="brand-a" href="https://example.test" style="color:#fff5eb;text-decoration:none;">` +
 			`<span class="brand-a" style="color:#fff5eb;text-decoration:none;">example.test</span></a>`
 		if !strings.Contains(html, badge) {
@@ -261,7 +273,8 @@ func TestBrandNameIsOurLink(t *testing.T) {
 				continue
 			}
 			open := body[strings.LastIndex(body[:m[0]+1], "<") : m[0]+1]
-			if !strings.HasPrefix(open, `<span class="brand-a"`) && !strings.HasPrefix(open, `<span class="soft"`) {
+			if !strings.HasPrefix(open, `<span class="brand-a"`) && !strings.HasPrefix(open, `<span class="soft"`) &&
+				!strings.HasPrefix(open, `<span class="sig-a"`) {
 				t.Errorf("personal=%v: bare brand text after %s", personal, open)
 			}
 		}

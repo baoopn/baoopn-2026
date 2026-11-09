@@ -11,8 +11,39 @@ import (
 )
 
 // Brand is the site an email speaks for: Name is the host of the public URL
-// ("baoopn.com"), URL the origin without a trailing slash.
-type Brand struct{ Name, URL string }
+// ("baoopn.com"), URL the origin without a trailing slash. LogoURL is an
+// optional absolute http(s) URL of a PNG logo shown in place of the text
+// badge, LogoWidth × LogoHeight its size in px (0 when unknown).
+type Brand struct {
+	Name, URL             string
+	LogoURL               string
+	LogoWidth, LogoHeight int
+}
+
+// logoHeight is how tall the logo is shown, in CSS px.
+const logoHeight = 48
+
+// Logo is the header logo as the layout shows it.
+type Logo struct {
+	Src, Alt      string
+	Width, Height int
+}
+
+// logo returns the header logo, or nil (the text badge) when LogoURL is not
+// an absolute http(s) URL. Width follows the file's aspect ratio at
+// logoHeight, kept within the 1.5:1 to 4:1 the upload rule allows.
+func (b Brand) logo() *Logo {
+	p, err := url.Parse(b.LogoURL)
+	if b.LogoURL == "" || err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" || p.User != nil ||
+		strings.ContainsAny(b.LogoURL, " \t\r\n\"'<>\\`") {
+		return nil
+	}
+	w := 116 // size unknown: the default logo (480×198) at logoHeight
+	if b.LogoWidth > 0 && b.LogoHeight > 0 {
+		w = (logoHeight*b.LogoWidth + b.LogoHeight/2) / b.LogoHeight
+	}
+	return &Logo{Src: b.LogoURL, Alt: b.Name, Width: min(max(w, logoHeight*3/2), logoHeight*4), Height: logoHeight}
+}
 
 // BrandOf derives the brand from the site's public URL.
 func BrandOf(publicURL string) Brand {
@@ -87,8 +118,10 @@ var (
 	htmlLayout = htmltemplate.Must(htmltemplate.New("layout.html.tmpl").Option("missingkey=error").Funcs(htmltemplate.FuncMap{
 		"lines":        htmlLines,
 		"quoteLines":   quoteLines,
+		"sigLines":     sigLines,
 		"buttonURL":    func(d Doc, b Block) string { return d.Brand.link(b.URL) },
 		"homeURL":      func(b Brand) string { return b.home() },
+		"logo":         func(b Brand) *Logo { return b.logo() },
 		"msoOpen":      func() htmltemplate.HTML { return msoOpen },
 		"msoClose":     func() htmltemplate.HTML { return msoClose },
 		"msoFonts":     func() htmltemplate.HTML { return msoFonts },
@@ -151,6 +184,42 @@ func quoteLines(s string) []string {
 		ls[i] = strings.TrimPrefix(l, " ")
 	}
 	return ls
+}
+
+// SigLine is one line of a signature for HTML. A line that is exactly an
+// http(s) URL has URL set and Text is the URL without its scheme, shown as our
+// own styled link (so mail apps do not restyle it); any other line is plain
+// text with URL "".
+type SigLine struct{ Text, URL string }
+
+// sigLines splits a signature into lines, finding the URL lines.
+func sigLines(s string) []SigLine {
+	var out []SigLine
+	for _, l := range htmlLines(s) {
+		if u, show := sigURL(strings.TrimSpace(l)); u != "" {
+			out = append(out, SigLine{Text: show, URL: u})
+			continue
+		}
+		out = append(out, SigLine{Text: l})
+	}
+	return out
+}
+
+// sigURL returns l and how to show it when l is a whole absolute http(s)
+// URL, else "", "".
+func sigURL(l string) (string, string) {
+	if l == "" || strings.ContainsAny(l, " \t\"'<>\\`") {
+		return "", ""
+	}
+	p, err := url.Parse(l)
+	if err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" || p.User != nil || p.Opaque != "" {
+		return "", ""
+	}
+	show := strings.TrimSuffix(l[strings.Index(l, "://")+3:], "/")
+	if show == "" {
+		return "", ""
+	}
+	return l, show
 }
 
 func blockSep(i int, personal bool) string {

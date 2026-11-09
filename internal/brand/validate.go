@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/png"
 	"net/http"
+	"strings"
 )
 
 // Problem is an upload the API rejects: HTTP status, error code and message.
@@ -110,8 +111,28 @@ func validatePNG(d slotDef, data []byte) (Info, error) {
 	if err != nil {
 		return Info{}, invalid("%s: the PNG header could not be read", d.Slot)
 	}
-	if cfg.Width != 180 || cfg.Height != 180 {
-		return Info{}, invalid("%s must be 180×180 (got %d×%d)", d.Slot, cfg.Width, cfg.Height)
+	r, w, h := d.PNG, cfg.Width, cfg.Height
+	if r.MinW == r.MaxW && r.MinH == r.MaxH {
+		if w != r.MinW || h != r.MinH {
+			return Info{}, invalid("%s must be %d×%d (got %d×%d)", d.Slot, r.MinW, r.MinH, w, h)
+		}
+		return Info{Width: w, Height: h}, nil
+	}
+	if w < r.MinW || w > r.MaxW {
+		return Info{}, invalid("%s must be %d–%d px wide (got %d)", d.Slot, r.MinW, r.MaxW, w)
+	}
+	if h < r.MinH || h > r.MaxH {
+		return Info{}, invalid("%s must be %d–%d px tall (got %d)", d.Slot, r.MinH, r.MaxH, h)
+	}
+	// Integer maths: w/h between MinAspect/1000 and MaxAspect/1000.
+	if r.MinAspect > 0 && (w*1000 < h*r.MinAspect || w*1000 > h*r.MaxAspect) {
+		return Info{}, invalid("%s must be between %s:1 and %s:1 wide (got %d×%d)", d.Slot,
+			ratio(r.MinAspect), ratio(r.MaxAspect), w, h)
 	}
 	return Info{Width: cfg.Width, Height: cfg.Height}, nil
+}
+
+// ratio formats thousandths: 1500 → "1.5", 4000 → "4".
+func ratio(m int) string {
+	return strings.TrimSuffix(strings.TrimRight(fmt.Sprintf("%d.%03d", m/1000, m%1000), "0"), ".")
 }

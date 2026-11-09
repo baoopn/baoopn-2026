@@ -26,7 +26,13 @@ const sentLayout = "2 Jan 2006, 15:04 UTC"
 // preheaderRunes is how much of a message the owner's preheader shows.
 const preheaderRunes = 90
 
-func (m *Module) brand() bmail.Brand { return bmail.BrandOf(m.d.PublicURL) }
+func (m *Module) brand() bmail.Brand {
+	b := bmail.BrandOf(m.d.PublicURL)
+	if m.d.EmailLogo != nil {
+		b.LogoURL, b.LogoWidth, b.LogoHeight = m.d.EmailLogo()
+	}
+	return b
+}
 
 func footerFor(b bmail.Brand) string {
 	return "Sent by the " + b.Name + " contact form."
@@ -122,7 +128,24 @@ func replyDoc(b bmail.Brand, subject, body, signature string) bmail.Doc {
 		}
 		blocks = append(blocks, bmail.Block{Kind: kind, Text: l})
 	}
-	return bmail.Doc{Brand: b, Subject: subject, Blocks: blocks, Signature: signature, Personal: true}
+	return bmail.Doc{Brand: b, Subject: subject, Preheader: replyPreheader(subject, blocks), Blocks: blocks,
+		Signature: signature, Personal: true}
+}
+
+// replyPreheader is the inbox snippet of a reply: its own (unquoted) text on
+// one line, or the subject when there is none. Without it, mail apps show the
+// badge text as the snippet.
+func replyPreheader(subject string, blocks []bmail.Block) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Kind == bmail.Para {
+			parts = append(parts, b.Text)
+		}
+	}
+	if p := oneLine(strings.Join(parts, " ")); p != "" {
+		return clipRunes(p, preheaderRunes)
+	}
+	return clipRunes(oneLine(subject), preheaderRunes)
 }
 
 // paragraphs splits text on blank lines.

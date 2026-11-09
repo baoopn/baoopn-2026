@@ -271,12 +271,12 @@ var (
 	topPlaylists = obj(fields{"time_zone": str,
 		"periods": obj(fields{"week": arr(topPlaylist), "month": arr(topPlaylist), "year": arr(topPlaylist)})})
 
-	brandSlot        = enum("favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "monogram_primary", "monogram_inverse")
+	brandSlot        = enum("favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "monogram_primary", "monogram_inverse", "email_logo")
 	brandAssetFields = fields{"slot": brandSlot, "url": str, "content_type": str, "width": num, "height": num, "custom": boolean}
 	brandAsset       = obj(brandAssetFields)
 	brandShape       = obj(fields{"assets": obj(fields{"favicon_ico": brandAsset, "favicon_svg": brandAsset,
 		"apple_touch_icon": brandAsset, "wordmark_primary": brandAsset, "monogram_primary": brandAsset,
-		"monogram_inverse": brandAsset})})
+		"monogram_inverse": brandAsset, "email_logo": brandAsset})})
 	adminBrandAsset = obj(extend(brandAssetFields, fields{"label": str, "kind": enum("icon", "logo"), "size_bytes": num,
 		"original": str, "updated_at": null(ts), "default_url": str, "accept": arr(str), "rule": str,
 		"preview": enum("light", "dark", "both")}))

@@ -39,6 +39,9 @@
 		}
 	});
 
+	/** Landscape logos preview 48 px tall (the email logo's size in mail). */
+	const wide = $derived(asset.slot === 'wordmark_primary' || asset.slot === 'email_logo');
+
 	async function done(next: AdminBrandAsset, title: string) {
 		onchange(next);
 		toasts.success(title, 'The public site picks up changes within a minute.');
@@ -120,7 +123,7 @@
 							alt="{asset.label} on a {s.name} background"
 							width={asset.width || undefined}
 							height={asset.height || undefined}
-							class={asset.slot === 'wordmark_primary' ? 'h-12 w-auto' : 'size-16'}
+							class={wide ? 'h-12 w-auto' : 'size-16'}
 						/>
 					{/if}
 				</div>

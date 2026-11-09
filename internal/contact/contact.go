@@ -31,6 +31,10 @@ type Deps struct {
 	Settings *sitesettings.Store
 	// PublicURL is the site origin, for admin links in notifications.
 	PublicURL string
+	// EmailLogo returns the email header logo's absolute http(s) URL and its
+	// size in px, read at send time so a replaced logo applies to the next
+	// email; nil or an empty URL shows the text badge.
+	EmailLogo func() (url string, width, height int)
 	// InboundDomain receives replies as reply+<token>@<domain>; empty sends
 	// Reply-To the notify address instead.
 	InboundDomain string

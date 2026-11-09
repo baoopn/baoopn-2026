@@ -1,9 +1,12 @@
 package brand
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -61,6 +64,36 @@ func (s *Store) admin(st State, def slotDef) AdminAsset {
 		a.SizeBytes, a.Original, a.UpdatedAt = c.SizeBytes, c.Original, &at
 	}
 	return a
+}
+
+// AbsoluteAsset returns slot's current file with an absolute http(s) URL,
+// for places outside the site such as emails. A media URL that is already
+// absolute (MEDIA_PUBLIC_URL) is used as is; a site-relative one ("/media/…")
+// gets siteURL in front. On a database error it falls back to the default.
+func (s *Store) AbsoluteAsset(ctx context.Context, slot, siteURL string) (Asset, error) {
+	def, ok := slotByName(slot)
+	if !ok {
+		return Asset{}, ErrUnknownSlot
+	}
+	st, err := s.state(ctx)
+	if err != nil {
+		s.log.WarnContext(ctx, "brand: read state, using the default", logging.Err(err))
+	}
+	a := s.asset(st, def)
+	if strings.HasPrefix(a.URL, "/") && !strings.HasPrefix(a.URL, "//") {
+		a.URL = strings.TrimRight(strings.TrimSpace(siteURL), "/") + a.URL
+	}
+	if !absoluteHTTP(a.URL) {
+		return Asset{}, fmt.Errorf("brand: %s has no absolute http(s) URL", slot)
+	}
+	return a, nil
+}
+
+// absoluteHTTP reports whether u is an absolute http(s) URL with a host and
+// no credentials.
+func absoluteHTTP(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && (p.Scheme == "http" || p.Scheme == "https") && p.Host != "" && p.User == nil
 }
 
 // Brand returns the public view of every slot.
