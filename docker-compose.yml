@@ -151,7 +151,7 @@ services:
       PGHOST: postgres
       PGPORT: "5432"
       PGUSER: baoopn
-      PGPASSWORD: baoopn
+      PGPASSWORD: baoopn # ggignore: local dev database only, same as POSTGRES_PASSWORD above
       PGDATABASE: baoopn
       BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
       BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
