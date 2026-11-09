@@ -1,7 +1,7 @@
 # Deployment
 
 The site runs on Coolify as one Docker Compose resource
-(`docker-compose.coolify.yml`) with four services:
+(`docker-compose.coolify.yml`) with five services:
 
 | Service | Image | Exposure |
 |---|---|---|
@@ -9,10 +9,11 @@ The site runs on Coolify as one Docker Compose resource
 | `api` | `deploy/docker/api.Dockerfile` (Go, distroless, non-root), volume `baoopn-media` on `/data/media` (fallback media store) | internal only (no domain) |
 | `web` | `deploy/docker/web.Dockerfile` (SvelteKit adapter-node, non-root) | `https://example.com` → port 3000 |
 | `mediaworker` | same image as `api`, command `/usr/local/bin/mediaworker` (WebP conversion) | internal only; talks to `api:9100` over gRPC |
+| `backup` | `deploy/backup/Dockerfile` (Alpine, pg_dump + age + rclone, non-root) | internal only; sends encrypted dumps to R2 (see [backup.md](backup.md)) |
 
 The web server is the only public service. It proxies `/api/*` and `/media/*` to
 `http://api:8080` and adds the client IP/country with `INTERNAL_API_TOKEN`.
-Coolify builds both images on the server from the repository, so no registry is used.
+Coolify builds every image on the server from the repository, so no registry is used.
 
 Uploaded media live in the Cloudflare R2 bucket `baoopn-portfolio`, served from
 its custom domain `https://media.baoopn.com` (see *Media bucket* below). Without
@@ -34,6 +35,7 @@ S3-compatible stand-in for R2; a one-shot `rustfs-init` creates the private
   - Worker: `node --test workers/inbound-email/test`.
   - `docker compose config` on both compose files.
   - Docker builds of both images (PRs only, no push).
+  - Backup image: shellcheck, build, roundtrip test.
 - **`release.yml`** runs on push to `main` (or manually). It reuses CI, then asks
   Coolify to deploy the resource and waits until the deployment finishes. A
   commit on `main` that did not come from a merged PR is tested but never deployed.
@@ -74,6 +76,7 @@ Repository settings (Settings → Secrets and variables → Actions):
    | `GITHUB_TOKEN` | optional fine-grained token (public repos, read) |
    | `TURNSTILE_SECRET_KEY`, `PUBLIC_TURNSTILE_SITE_KEY` | optional contact-form captcha |
    | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `MEDIA_PUBLIC_URL` | R2 media bucket (see below) |
+   | `BACKUP_AGE_RECIPIENT`, `BACKUP_S3_*` | off-site backups to the R2 bucket `baoopn-2026-backups` (see [backup.md](backup.md)) |
    | `TRUST_CLOUDFLARE` | `true` while the site is proxied by Cloudflare (see [Client IP and Cloudflare](#client-ip-and-cloudflare)) |
 
    Everything else (`SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, `NOTIFY_EMAIL`,
@@ -332,9 +335,11 @@ temporary failure.
 - **Logs:** Coolify → resource → service → Logs (`LOG_FORMAT=json`).
 - **Health:** the api image probes `/healthz` with `api healthcheck`; the web
   image fetches a static asset.
-- **Backups:** enable Coolify's scheduled backups for the `postgres` service. Media
-  are in R2 (`baoopn-portfolio`); the `baoopn-media` volume keeps the files from
-  before the migration and is the store when R2 is not configured.
+- **Backups:** the `backup` service sends an encrypted `pg_dump` to the private R2
+  bucket `baoopn-2026-backups` every day (see [backup.md](backup.md)). Coolify's own
+  scheduled backups cannot reach a Postgres inside a compose app. Media are in R2
+  (`baoopn-portfolio`), not in the dump; the `baoopn-media` volume keeps the files
+  from before the migration and is the store when R2 is not configured.
 - **Rollback:** redeploy an older commit from Coolify's deployment list.
 
 ## Branch protection

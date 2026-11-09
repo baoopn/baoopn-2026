@@ -5,6 +5,8 @@
 # values; they only protect this throwaway dev container).
 # `docker compose --profile full up --build` also runs the api and web images
 # (site on http://localhost:3000), reading the rest of the config from .env.
+# `docker compose --profile backup ...` runs the encrypted backup service
+# against a local volume (see the backup service below and docs/backup.md).
 services:
   postgres:
     image: postgres:17-alpine
@@ -129,7 +131,61 @@ services:
       api:
         condition: service_healthy
 
+  # Encrypted backups to a local volume (no cloud needed), see docs/backup.md:
+  #   docker compose --profile backup run --rm -T backup keygen > .secrets/dev-backup-age-key.txt
+  #   set BACKUP_AGE_RECIPIENT=age1... (printed by keygen) in .env, then
+  #   docker compose --profile backup run --rm backup backup
+  #   docker compose --profile backup run --rm backup list
+  #   docker compose --profile backup run --rm -T backup verify latest -i - < .secrets/dev-backup-age-key.txt
+  backup:
+    profiles: [backup]
+    build:
+      context: deploy/backup
+      args:
+        VERSION: dev
+    image: baoopn-backup:dev
+    command: ["run"]
+    restart: unless-stopped
+    stop_grace_period: 2m
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: baoopn
+      PGPASSWORD: baoopn # ggignore: local dev database only, same as POSTGRES_PASSWORD above
+      PGDATABASE: baoopn
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-auto}
+      BACKUP_S3_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
+      # The local volume below. The BACKUP_S3_* values above are ignored while
+      # this is set; remove this line to test a real bucket.
+      BACKUP_REMOTE: /backups
+      BACKUP_PREFIX: ${BACKUP_PREFIX:-baoopn}
+      BACKUP_TIME: ${BACKUP_TIME:-03:00}
+      BACKUP_ON_START: ${BACKUP_ON_START:-false}
+      BACKUP_RETRY_MINUTES: ${BACKUP_RETRY_MINUTES:-30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-7}
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-26}
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+    volumes:
+      - baoopn-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/backupctl", "health"]
+      interval: 5m
+      timeout: 10s
+      start_period: 1m
+      start_interval: 5s
+      retries: 2
+
 volumes:
   baoopn-pg:
   baoopn-media:
   baoopn-rustfs:
+  baoopn-backups:

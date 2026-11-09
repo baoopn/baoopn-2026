@@ -50,6 +50,7 @@ seed/                 first-run content (profile, posts and their screenshots)
 web/                  SvelteKit app: public site in routes/(site), admin in routes/admin
 workers/inbound-email Cloudflare Email Worker for email replies
 deploy/docker/        Dockerfiles for the API and the web app
+deploy/backup/        encrypted off-site Postgres backups (docs/backup.md)
 docs/                 API contract (api.md) and deployment notes (deployment.md)
 ```
 
@@ -78,6 +79,7 @@ make test-db                  # Go tests against it
 make lint                     # go vet + svelte-check
 node --test workers/inbound-email/test
 sh scripts/check-public.sh    # no machine paths, keys or secrets in tracked files
+make backup-test              # backup image: backup/restore roundtrip with throwaway containers
 ```
 
 CI runs all of these on every pull request, plus Docker builds of both images.
