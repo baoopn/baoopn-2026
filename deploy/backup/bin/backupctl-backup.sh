@@ -10,7 +10,7 @@ cmd_backup() {
 	umask 077
 	make_workdir
 	trap 'cleanup_workdir' EXIT
-	trap 'cleanup_workdir; exit 130' INT TERM
+	trap 'kill_children; cleanup_workdir; exit 130' INT TERM
 
 	recipients="$WORKDIR/recipients"
 	write_recipients "$recipients" || die "refusing to back up: the age recipient list is empty"
@@ -50,13 +50,18 @@ cmd_backup() {
 		cat >/dev/null
 	} <"$WORKDIR/toc.pipe" &
 	toc_pid=$!
-	age -R "$recipients" -o "$out" <"$WORKDIR/enc" 2>"$WORKDIR/age.err"
+	age -R "$recipients" -o "$out" <"$WORKDIR/enc" 2>"$WORKDIR/age.err" &
+	age_pid=$!
+	CHILD_PIDS="$dump_pid $tee_pid $toc_pid $age_pid"
+	wait "$age_pid"
 	age_rc=$?
 	wait "$dump_pid"
 	dump_rc=$?
 	wait "$tee_pid"
 	tee_rc=$?
 	wait "$toc_pid"
+	# shellcheck disable=SC2034 # read by kill_children (backupctl-common.sh)
+	CHILD_PIDS=
 	if [ "$dump_rc" -ne 0 ]; then
 		die "pg_dump failed (exit $dump_rc): $(tail -n 3 "$WORKDIR/pg_dump.err" | tr '\n' ' ')"
 	fi
@@ -64,15 +69,15 @@ cmd_backup() {
 	[ "$tee_rc" -eq 0 ] || die "tee failed (exit $tee_rc): $(head -n 1 "$WORKDIR/tee.err")"
 	[ "$(cat "$WORKDIR/toc.rc" 2>/dev/null)" = 0 ] ||
 		die "the dump is not a readable archive: $(head -n 1 "$WORKDIR/toc.err")"
-	tables=$(grep -c -E '^[0-9]+; [0-9]+ [0-9]+ TABLE ' "$WORKDIR/toc")
-	[ "$tables" -gt 0 ] || die "the dump contains no tables (wrong or empty database?); not uploading it"
+	tables=$(toc_tables "$WORKDIR/toc")
+	[ "$tables" -gt 0 ] || die "the dump contains no tables in schema public (wrong or empty database?); not uploading it"
 
 	size=$(wc -c <"$out" | tr -d ' ')
 	sha=$(sha256sum "$out" | cut -d' ' -f1)
 	[ "$size" -gt 0 ] || die "encrypted dump is empty"
 
 	info "backup $name: uploading $(human_size "$size") to the $STORAGE_DESC"
-	rcl copyto "$out" "$path" || die "upload failed"
+	run_bg rcl copyto "$out" "$path" || die "upload failed"
 	remote_json=$(rcl lsjson "$path") || remote_json=
 	remote_size=$(printf '%s' "$remote_json" | tr ',' '\n' | sed -n 's/.*"Size":\([0-9]*\).*/\1/p' | head -n 1)
 	if [ "$remote_size" != "$size" ]; then
@@ -98,18 +103,19 @@ cmd_backup() {
 		printf '  "format": "pg_dump-custom+age"\n'
 		printf '}\n'
 	} >"$manifest"
-	rcl copyto "$manifest" "$path.json" || {
+	run_bg rcl copyto "$manifest" "$path.json" || {
 		rcl deletefile "$path" >/dev/null 2>&1 || true
 		die "manifest upload failed; backup removed"
 	}
 
-	info "backup $name: done ($tables tables, $(human_size "$size"), sha256 $sha, schema version ${goose_version:-none})"
+	info "backup $name: done ($(plural "$tables" table) in schema public, $(human_size "$size"), sha256 $sha, schema version $(schema_version "$manifest"))"
 	printf '%s\n' "$name"
 }
 
-# backup_with_status: one backup in a subshell, then status files + ping.
+# backup_with_status: one backup in a background subshell (so SIGTERM stops
+# it at once), then status files + ping.
 backup_with_status() {
-	(cmd_backup)
+	run_child cmd_backup
 	rc=$?
 	if [ "$rc" -eq 0 ]; then
 		status_write last_success "$(date -u +%s)"
@@ -159,10 +165,19 @@ cmd_prune() {
 	fi
 	count=0
 	failed=0
+	paths=$(printf '%s\n' "$listing" | cut -d';' -f1)
 	for v in $victims; do
 		valid_name "$v" || continue
-		dir=$(dirname "$(object_path "$v")")
-		if rcl delete "$dir" --max-depth 1 --include "/$v" --include "/$v.json"; then
+		# Delete by the paths in the listing, wherever the objects are.
+		vpaths=$(printf '%s\n' "$paths" | awk -v v="$v" '{ n = $0; sub(/.*\//, "", n) } n == v || n == v ".json"')
+		gone=1
+		while IFS= read -r p; do
+			[ -n "$p" ] || continue
+			rcl deletefile "$REMOTE_BASE/$p" || gone=0
+		done <<EOF
+$vpaths
+EOF
+		if [ "$gone" = 1 ]; then
 			info "prune: deleted $v"
 			count=$((count + 1))
 		else

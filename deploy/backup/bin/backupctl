@@ -37,10 +37,19 @@ sleep_for() {
 	SLEEP_PID=
 }
 
+STOP_RC=0
+
+# on_stop: SIGTERM/SIGINT. Stops a sleep or a running backup or prune (its
+# own trap kills its steps and removes its temp files), then exits.
 on_stop() {
 	[ -z "$SLEEP_PID" ] || kill "$SLEEP_PID" 2>/dev/null
+	if [ -n "$CHILD" ]; then
+		info "stopping: interrupting the running job"
+		kill "$CHILD" 2>/dev/null
+		wait "$CHILD" 2>/dev/null
+	fi
 	info "stopping"
-	exit 0
+	exit "$STOP_RC"
 }
 
 # idle REASON: backups are off or only partly configured. Stay up and
@@ -70,7 +79,7 @@ scheduled_backup() {
 		sleep_for $((RETRY_MINUTES * 60))
 		backup_with_status >/dev/null || return 0
 	fi
-	(cmd_prune) || warn "prune failed; will try again after the next backup"
+	run_child cmd_prune || warn "prune failed; will try again after the next backup"
 }
 
 # seed_last_success: the newest complete backup in the bucket counts as the
@@ -192,7 +201,11 @@ cmd=${1:-help}
 [ $# -eq 0 ] || shift
 case $cmd in
 run) cmd_run ;;
-backup) backup_with_status ;;
+backup)
+	STOP_RC=130
+	trap on_stop TERM INT
+	backup_with_status
+	;;
 list) cmd_list ;;
 restore) cmd_restore "$@" ;;
 verify) cmd_verify "$@" ;;

@@ -31,6 +31,47 @@ is_uint() {
 	return 0
 }
 
+# plural N WORD: "1 table", "2 tables".
+plural() {
+	if [ "$1" = 1 ]; then printf '%s %s' "$1" "$2"; else printf '%s %ss' "$1" "$2"; fi
+}
+
+# ─── Child processes ──────────────────────────────────────────────────────────
+#
+# sh runs a trap only after the foreground command ends. Long steps run in
+# the background and are waited for, so SIGTERM (docker stop) acts at once.
+# Background jobs get /dev/null as stdin, so a step that reads stdin must
+# redirect it on its own command line.
+
+CHILD=
+CHILD_PIDS=
+
+# run_child CMD...: runs CMD (usually a function, in a subshell) in the
+# background and returns its exit code. The caller's TERM trap kills $CHILD.
+run_child() {
+	"$@" &
+	CHILD=$!
+	wait "$CHILD"
+	_rc=$?
+	CHILD=
+	return "$_rc"
+}
+
+# run_bg CMD...: like run_child, for steps inside a backup; kill_children
+# stops every step started this way (and any pid added to CHILD_PIDS).
+run_bg() {
+	"$@" &
+	_pid=$!
+	CHILD_PIDS="$CHILD_PIDS $_pid"
+	wait "$_pid"
+}
+
+kill_children() {
+	# shellcheck disable=SC2086 # a list of pids
+	[ -z "${CHILD_PIDS# }" ] || kill $CHILD_PIDS 2>/dev/null
+	CHILD_PIDS=
+}
+
 # ─── Temp files ───────────────────────────────────────────────────────────────
 
 # make_workdir: creates a private temp directory in $WORKDIR. The caller's
@@ -319,6 +360,19 @@ json_str() {
 # manifest written by cmd_backup (one key per line).
 manifest_field() {
 	sed -n "s/^[[:space:]]*\"$2\":[[:space:]]*\"\{0,1\}\([^\",]*\)\"\{0,1\},\{0,1\}[[:space:]]*\$/\1/p" "$1" | head -n 1
+}
+
+# schema_version FILE: the manifest's goose version, or "none".
+schema_version() {
+	v=$(manifest_field "$1" goose_version)
+	is_uint "$v" || v=none
+	printf '%s' "$v"
+}
+
+# toc_tables FILE: base tables in schema public in a pg_restore --list TOC
+# (the same set restore counts in pg_tables).
+toc_tables() {
+	grep -c -E '^[0-9]+; [0-9]+ [0-9]+ TABLE public ' "$1"
 }
 
 human_size() {

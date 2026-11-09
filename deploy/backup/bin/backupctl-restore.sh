@@ -42,9 +42,10 @@ load_identity() {
 	IDENTITY_FILE="$WORKDIR/identity"
 	if [ "$IDENTITY" = - ]; then
 		[ ! -t 0 ] || die "-i - reads the age key from stdin: pipe it in (... < key.txt)"
-		cat >"$IDENTITY_FILE" || die "age identity not readable from stdin"
+		# tr: a key saved through a terminal may have CRLF line ends.
+		tr -d '\r' >"$IDENTITY_FILE" || die "age identity not readable from stdin"
 	elif [ -r "$IDENTITY" ] && [ ! -d "$IDENTITY" ]; then
-		cat "$IDENTITY" >"$IDENTITY_FILE" || die "age identity not readable at $IDENTITY"
+		tr -d '\r' <"$IDENTITY" >"$IDENTITY_FILE" || die "age identity not readable at $IDENTITY"
 	else
 		die "age identity not readable at $IDENTITY: mount your key there or pass -i PATH (or -i - to read it from stdin)"
 	fi
@@ -75,8 +76,10 @@ fetch_checked() {
 
 # decrypt_into NAME CMD...: decrypts CIPHER into a fifo and runs CMD with the
 # fifo on stdin. The shell opens the fifo for age (not age -o), so a failed
-# decryption closes it and CMD sees EOF instead of waiting forever. Both
-# exit codes are checked.
+# decryption closes it and CMD sees EOF instead of waiting forever. After
+# CMD, the rest of the stream is drained: pg_restore may stop reading early,
+# and age must still reach the end, so every chunk is authenticated and age
+# never dies of SIGPIPE. Both exit codes are checked.
 decrypt_into() {
 	name=$1
 	shift
@@ -85,15 +88,16 @@ decrypt_into() {
 	mkfifo "$fifo" || die "cannot create a fifo"
 	age -d -i "$IDENTITY_FILE" "$CIPHER" >"$fifo" 2>"$WORKDIR/age.err" &
 	age_pid=$!
-	"$@" <"$fifo"
-	cmd_rc=$?
+	{
+		"$@"
+		cmd_rc=$?
+		cat >/dev/null
+	} <"$fifo"
 	wait "$age_pid"
 	age_rc=$?
 	rm -f "$fifo"
-	# A real age error is written to age.err; a reader that stopped early
-	# kills age with SIGPIPE and leaves it empty.
-	if [ "$age_rc" -ne 0 ] && { [ -s "$WORKDIR/age.err" ] || [ "$cmd_rc" -eq 0 ]; }; then
-		die "$name: decryption failed (wrong identity?): $(head -n 1 "$WORKDIR/age.err")"
+	if [ "$age_rc" -ne 0 ]; then
+		die "$name: decryption failed (wrong identity, or a damaged file): $(head -n 1 "$WORKDIR/age.err")"
 	fi
 	return "$cmd_rc"
 }
@@ -120,8 +124,8 @@ cmd_verify() {
 	info "$name: decrypting and reading the archive"
 	decrypt_into "$name" toc_list ||
 		die "$name: not a valid pg_dump archive: $(head -n 1 "$WORKDIR/toc.err")"
-	entries=$(grep -c '^[0-9]' "$WORKDIR/toc")
-	info "$name: ok, $entries archive entries, database $(manifest_field "$MANIFEST" database), server $(manifest_field "$MANIFEST" server_version), schema version $(manifest_field "$MANIFEST" goose_version)"
+	tables=$(toc_tables "$WORKDIR/toc")
+	info "$name: ok, $(plural "$tables" table) in schema public, database $(manifest_field "$MANIFEST" database), server $(manifest_field "$MANIFEST" server_version), schema version $(schema_version "$MANIFEST")"
 }
 
 restore_db() {
@@ -135,18 +139,25 @@ cmd_restore() {
 	name=$(resolve_name "$WANT") || exit 1
 
 	if [ -n "$TO_FILE" ]; then
+		if [ -e "$TO_FILE" ] && [ "$FORCE" != true ]; then
+			die "$TO_FILE already exists; refusing to overwrite it (use --force)"
+		fi
 		fetch_checked "$name"
 		info "$name: decrypting to $TO_FILE"
-		# umask 077: the file holds the plaintext data.
-		if ! age -d -i "$IDENTITY_FILE" -o "$TO_FILE" "$CIPHER" 2>"$WORKDIR/age.err"; then
-			rm -f "$TO_FILE"
-			die "$name: decryption failed (wrong identity?): $(head -n 1 "$WORKDIR/age.err")"
+		# umask 077: the file holds the plaintext data. Write it under a
+		# temporary name, so a failure never removes or damages PATH.
+		partial="$TO_FILE.partial"
+		if ! age -d -i "$IDENTITY_FILE" -o "$partial" "$CIPHER" 2>"$WORKDIR/age.err"; then
+			rm -f "$partial"
+			die "$name: decryption failed (wrong identity, or a damaged file): $(head -n 1 "$WORKDIR/age.err")"
 		fi
-		if ! pg_restore --list "$TO_FILE" >"$WORKDIR/toc" 2>"$WORKDIR/toc.err"; then
+		if ! pg_restore --list "$partial" >"$WORKDIR/toc" 2>"$WORKDIR/toc.err"; then
+			rm -f "$partial"
 			die "$name: not a valid pg_dump archive: $(head -n 1 "$WORKDIR/toc.err")"
 		fi
-		entries=$(grep -c '^[0-9]' "$WORKDIR/toc")
-		info "$name: decrypted dump written to $TO_FILE ($entries archive entries)"
+		mv -f "$partial" "$TO_FILE" || die "cannot write $TO_FILE"
+		tables=$(toc_tables "$WORKDIR/toc")
+		info "$name: decrypted dump written to $TO_FILE ($(plural "$tables" table) in schema public)"
 		info "restore it with: pg_restore --no-owner --no-privileges --exit-on-error -d DATABASE $TO_FILE"
 		return 0
 	fi
@@ -156,13 +167,13 @@ cmd_restore() {
 	tables=$(sql "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" 2>"$WORKDIR/psql.err") ||
 		die "cannot connect to the target database: $(tail -n 1 "$WORKDIR/psql.err")"
 	if [ "$tables" -gt 0 ] && [ "$FORCE" != true ]; then
-		die "the target database already has $tables table(s) in schema public; refusing to restore over them (use --force to drop and replace the objects in the backup)"
+		die "the target database already has $(plural "$tables" table) in schema public; refusing to restore over them (use --force to drop and replace the objects in the backup)"
 	fi
 
 	fetch_checked "$name"
 
 	if [ "$FORCE" = true ] && [ "$tables" -gt 0 ]; then
-		info "$name: restoring with --clean (replacing $tables existing table(s))"
+		info "$name: restoring with --clean (replacing $(plural "$tables" "existing table"))"
 		set -- --clean --if-exists
 	else
 		info "$name: restoring into an empty database"
@@ -174,7 +185,6 @@ cmd_restore() {
 		exit 1
 	fi
 	tables=$(sql "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'") || tables='?'
-	goose=$(manifest_field "$MANIFEST" goose_version)
-	info "$name: restored ($tables tables in schema public, schema version ${goose:-unknown})"
+	info "$name: restored ($(plural "$tables" table) in schema public, schema version $(schema_version "$MANIFEST"))"
 	info "start the app next: it applies any newer migrations at startup"
 }
