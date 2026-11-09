@@ -119,6 +119,42 @@ func TestICO(t *testing.T) {
 	}
 }
 
+// pngWH is a w×h PNG.
+func pngWH(w, h int) []byte {
+	var b bytes.Buffer
+	_ = png.Encode(&b, image.NewRGBA(image.Rect(0, 0, w, h)))
+	return b.Bytes()
+}
+
+func TestEmailLogoPNG(t *testing.T) {
+	d := mustSlot(t, EmailLogo)
+	for _, wh := range [][2]int{{480, 198}, {240, 160}, {1200, 300}, {240, 60}, {900, 600}} {
+		if info, err := validate(d, pngWH(wh[0], wh[1])); err != nil || info != (Info{wh[0], wh[1]}) {
+			t.Errorf("%dx%d: %+v %v", wh[0], wh[1], info, err)
+		}
+	}
+	for wh, msg := range map[[2]int]string{
+		{200, 100}:  "email_logo must be 240–1200 px wide (got 200)",
+		{1300, 400}: "email_logo must be 240–1200 px wide (got 1300)",
+		{300, 50}:   "email_logo must be 60–600 px tall (got 50)",
+		{240, 161}:  "email_logo must be between 1.5:1 and 4:1 wide (got 240×161)",
+		{1000, 249}: "email_logo must be between 1.5:1 and 4:1 wide (got 1000×249)",
+		{300, 300}:  "email_logo must be between 1.5:1 and 4:1 wide (got 300×300)",
+	} {
+		p := problemOf(t, func() error { _, err := validate(d, pngWH(wh[0], wh[1])); return err }())
+		if p.Status != 422 || p.Code != "validation" || p.Message != msg {
+			t.Errorf("%v: %+v", wh, p)
+		}
+	}
+	if p := problemOf(t, func() error { _, err := validate(d, []byte(svgHead+"</svg>")); return err }()); p.Status != 415 {
+		t.Errorf("svg as email logo: %+v", p)
+	}
+	big := append(pngWH(480, 198), make([]byte, 300<<10)...)
+	if p := problemOf(t, func() error { _, err := validate(d, big); return err }()); p.Status != 413 {
+		t.Errorf("too large: %+v", p)
+	}
+}
+
 func TestAppleTouchPNG(t *testing.T) {
 	d := mustSlot(t, AppleTouchIcon)
 	if info, err := validate(d, pngN(180)); err != nil || info != (Info{180, 180}) {

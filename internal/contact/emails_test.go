@@ -18,13 +18,22 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden emails in testdata/email")
 
 var (
-	goldenBrand = bmail.BrandOf("https://example.test")
+	goldenBrand = goldenBrandWithLogo()
 	// goldenOwner is the sender name the acknowledgement subject names.
 	goldenOwner = "Sam Owner"
 	goldenAt    = time.Date(2026, 11, 7, 14, 5, 0, 0, time.UTC)
 )
 
 const goldenLink = "https://example.test/admin/inbox/123"
+
+// goldenLogo is the email logo in the golden files (the default's size).
+const goldenLogo = "https://media.example.test/brand/email-logo.0123456789abcdef.png"
+
+func goldenBrandWithLogo() bmail.Brand {
+	b := bmail.BrandOf("https://example.test")
+	b.LogoURL, b.LogoWidth, b.LogoHeight = goldenLogo, 480, 198
+	return b
+}
 
 func goldenSub() submission {
 	return submission{name: "Priya Shah", email: "priya@example.test", subject: "A new portfolio site",
@@ -114,7 +123,8 @@ var (
 	inTagRe = regexp.MustCompile(`<[a-zA-Z][^>]*>`)
 	hrefRe  = regexp.MustCompile(`href="([^"]*)"`)
 	allowed = map[string]bool{"html": true, "head": true, "meta": true, "title": true, "style": true,
-		"body": true, "div": true, "table": true, "tr": true, "td": true, "span": true, "a": true, "br": true, "strong": true}
+		"body": true, "div": true, "table": true, "tr": true, "td": true, "span": true, "a": true, "br": true, "strong": true, "img": true}
+	srcRe = regexp.MustCompile(`(?i)<img[^>]*\ssrc="([^"]*)"`)
 )
 
 func TestEmailsAreSafeHTML(t *testing.T) {
@@ -126,8 +136,13 @@ func TestEmailsAreSafeHTML(t *testing.T) {
 				t.Errorf("%s: tag <%s>", name, m[1])
 			}
 		}
-		if l := strings.ToLower(body); strings.Contains(l, "<script") || strings.Contains(l, "<img") {
-			t.Errorf("%s: raw script or img", name)
+		if l := strings.ToLower(body); strings.Contains(l, "<script") {
+			t.Errorf("%s: raw script", name)
+		}
+		// The only image is the configured logo, once.
+		srcs := srcRe.FindAllStringSubmatch(body, -1)
+		if n := strings.Count(strings.ToLower(body), "<img"); n != 1 || len(srcs) != 1 || srcs[0][1] != goldenLogo {
+			t.Errorf("%s: %d img tags, srcs %v", name, n, srcs)
 		}
 		for _, tag := range inTagRe.FindAllString(body, -1) {
 			if l := strings.ToLower(tag); strings.Contains(l, "onerror") || strings.Contains(l, "javascript:") {
@@ -173,6 +188,9 @@ func TestReplyTextIsUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(html, "border-left:3px solid #e3d7fb") || !strings.Contains(html, "old line<br>&gt; older") {
 		t.Fatalf("no quote cell in %s", html)
+	}
+	if d := replyDoc(goldenBrand, "Re: x", body, sig); d.Preheader != "Hi, new line" {
+		t.Fatalf("preheader %q", d.Preheader)
 	}
 	if text, _ := renderDoc(t, replyDoc(goldenBrand, "Re: x", "plain", "")); text != "plain" {
 		t.Fatalf("no signature: %q", text)
@@ -365,6 +383,32 @@ func TestAlertsHaveNoLiveLinks(t *testing.T) {
 		// The brand badge, the inbox button and the footer site link: ours only.
 		if len(links) != 3 || links[0][1] != goldenBrand.URL || links[1][1] != goldenLink || links[2][1] != goldenBrand.URL {
 			t.Errorf("%s: links %v", name, links)
+		}
+	}
+}
+
+// TestReplyPreheader: the inbox snippet of a reply is its own text (no
+// quotes), so the badge or logo never becomes the snippet.
+func TestReplyPreheader(t *testing.T) {
+	const pre = `opacity:0">`
+	for body, want := range map[string]string{
+		"Hi Priya,\n\nTuesday at 10 works.\n> quoted\n>> older\nBye": "Hi Priya, Tuesday at 10 works. Bye",
+		"> only a quote\n> more":    "Re: A new portfolio site",
+		"":                          "Re: A new portfolio site",
+		"  \n\t\n":                  "Re: A new portfolio site",
+		strings.Repeat("word ", 40): strings.TrimSpace(strings.Repeat("word ", 18)) + "…",
+	} {
+		d := replyDoc(goldenBrand, "Re: A new portfolio site", body, "Sam")
+		if d.Preheader != want {
+			t.Errorf("%q: preheader %q, want %q", body, d.Preheader, want)
+		}
+		text, html := renderDoc(t, d)
+		if text != body+sigSep+"Sam" {
+			t.Errorf("%q: text part changed: %q", body, text)
+		}
+		i := strings.Index(html, pre)
+		if i < 0 || !strings.HasPrefix(html[i+len(pre):], want) || i > strings.Index(html, "<img") {
+			t.Errorf("%q: the html preheader does not start with %q", body, want)
 		}
 	}
 }

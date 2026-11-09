@@ -72,6 +72,12 @@ func (m *recMailer) failOnce() {
 	m.failNext = true
 }
 
+func (m *recMailer) last() mail.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sent[len(m.sent)-1]
+}
+
 func (m *recMailer) count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -191,13 +197,14 @@ func newHarness(t *testing.T, opts ...func(*httpapi.Deps)) *harness {
 	syncer := projects.NewSyncer(projects.SyncDeps{DB: pool, Log: log, User: "baoopn", HTTP: httpClient, APIBase: gh.URL})
 	projectsMod := projects.New(projects.Deps{DB: pool, Log: log, Syncer: syncer})
 	listeningMod := listening.New(listening.Deps{BaseURL: sp.URL, Log: log, HTTP: httpClient})
+	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
+	brandMod.Ensure(ctx)
 	contactMod := contact.New(contact.Deps{DB: pool, Log: log, Mailer: mailer, Settings: site,
-		PublicURL: cfg.PublicURL, InboundDomain: ctInboundDomain, InboundSecret: ctInboundSecret, HTTP: httpClient})
+		PublicURL: cfg.PublicURL, EmailLogo: emailLogo(brandMod, cfg.PublicURL, log),
+		InboundDomain: ctInboundDomain, InboundSecret: ctInboundSecret, HTTP: httpClient})
 	rec := analytics.New(analytics.Deps{DB: pool, Log: log, Salt: analytics.DeriveSalt("k"),
 		SiteHost: analytics.HostOf(cfg.PublicURL)})
 	ov := overview.New(overview.Deps{DB: pool, Log: log, Analytics: rec})
-	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
-	brandMod.Ensure(ctx)
 
 	pass := func(next http.Handler) http.Handler { return next }
 	deps := httpapi.Deps{Log: log, DB: pool, AdminAuth: pass, Media: mediaStore.Handler(),

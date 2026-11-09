@@ -96,6 +96,23 @@ func TestContractContactAndInbox(t *testing.T) {
 	if idOf(m1) != idOf(m2) || field(m1, "status") != "sent" || c.mailer.count() != sendsBefore+1 {
 		t.Errorf("idempotent reply: %v vs %v, sends %d", m1, m2, c.mailer.count()-sendsBefore)
 	}
+	// The reply shows the email logo slot as an absolute URL on the site, read
+	// at send time, and the inbox snippet is the reply's own text.
+	if h := c.mailer.last().HTML; !strings.Contains(h, `<img class="logo" src="https://baoopn.com/media/brand/email-logo.`) ||
+		!strings.Contains(h, `opacity:0">Thanks for reaching out!`) {
+		t.Errorf("reply html has no site logo or preheader: %.1500s", h)
+	}
+	logo := pngRect(600, 200)
+	lw := c.brandPut("email_logo", "file", "logo.png", logo)
+	if lw.Code != 200 {
+		t.Fatalf("PUT email_logo = %d %s", lw.Code, lw.Body)
+	}
+	newLogo, _ := field(decodeData(t, lw, adminBrandAsset), "url").(string)
+	c.ok("POST", base+"/messages", map[string]string{"body": "With the new logo", "request_id": "req-contract-logo"}, 201,
+		threadMessage, false)
+	if h := c.mailer.last().HTML; !strings.Contains(h, `<img class="logo" src="https://baoopn.com`+newLogo+`" width="144" height="48"`) {
+		t.Errorf("reply after a logo change does not use %s", newLogo)
+	}
 	c.fail("POST", base+"/messages/"+idOf(m1)+"/retry", nil, 409, "not_retryable")
 	c.fail("POST", base+"/messages", map[string]string{"body": "", "request_id": "req-contract-0002"}, 422, "validation")
 
@@ -124,11 +141,11 @@ func TestContractContactAndInbox(t *testing.T) {
 	c.failRaw(c.hook(eml, envTo, time.Now(), "wrong-secret"), "hook bad signature", 401, "bad_signature")
 	c.failRaw(c.hook(eml, envTo, time.Now().Add(-10*time.Minute), ctInboundSecret), "hook stale", 401, "bad_signature")
 	c.wait()
-	// form, reply, failed-then-retried reply, inbound email
+	// form, reply, reply with the new logo, failed-then-retried reply, inbound email
 	d = c.ok("GET", base, nil, 200, threadDetail, false)
 	msgs := list(field(d, "messages"))
 	last := msgs[len(msgs)-1]
-	if len(msgs) != 4 || field(last, "source") != "email" || field(last, "direction") != "inbound" ||
+	if len(msgs) != 5 || field(last, "source") != "email" || field(last, "direction") != "inbound" ||
 		field(last, "body") != "Monday at 10 works for me. I attached the brief." ||
 		!strings.Contains(fmt.Sprint(field(last, "full_body")), "> Thanks for reaching out!") ||
 		field(last, "attachments_dropped") != float64(1) || field(last, "from_address") != "priya@example.com" ||
@@ -136,7 +153,7 @@ func TestContractContactAndInbox(t *testing.T) {
 		t.Errorf("inbound message (of %d) = %v", len(msgs), last)
 	}
 	th := field(d, "thread")
-	if field(th, "unread") != true || field(th, "last_direction") != "inbound" || field(th, "message_count") != float64(4) {
+	if field(th, "unread") != true || field(th, "last_direction") != "inbound" || field(th, "message_count") != float64(5) {
 		t.Errorf("thread after inbound = %v", th)
 	}
 

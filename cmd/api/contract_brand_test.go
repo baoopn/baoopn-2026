@@ -17,6 +17,12 @@ func pngSquare(n int) []byte {
 	return b.Bytes()
 }
 
+func pngRect(w, h int) []byte {
+	var b bytes.Buffer
+	_ = png.Encode(&b, image.NewRGBA(image.Rect(0, 0, w, h)))
+	return b.Bytes()
+}
+
 func (c *harness) brandPut(slot, field, name string, content []byte) *httptest.ResponseRecorder {
 	c.t.Helper()
 	var b bytes.Buffer
@@ -27,7 +33,7 @@ func (c *harness) brandPut(slot, field, name string, content []byte) *httptest.R
 	return c.raw("PUT", "/api/admin/brand/"+slot, &b, map[string]string{"Content-Type": mw.FormDataContentType()})
 }
 
-var brandSlots = []string{"favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "monogram_primary", "monogram_inverse"}
+var brandSlots = []string{"favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "monogram_primary", "monogram_inverse", "email_logo"}
 
 func TestContractBrand(t *testing.T) {
 	c := newHarness(t)
@@ -97,6 +103,7 @@ func TestContractBrand(t *testing.T) {
 	}
 
 	c.failRaw(c.brandPut("favicon_ico", "file", "x.ico", pngSquare(48)), "PUT png as favicon_ico", 415, "unsupported_type")
+	c.failRaw(c.brandPut("email_logo", "file", "x.png", pngSquare(300)), "PUT square email logo", 422, "validation")
 	c.failRaw(c.brandPut("apple_touch_icon", "file", "x.png", pngSquare(192)), "PUT 192px apple icon", 422, "validation")
 	c.failRaw(c.brandPut("monogram_primary", "file", "x.svg",
 		[]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><script>alert(1)</script></svg>`)),

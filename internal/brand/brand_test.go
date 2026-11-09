@@ -23,6 +23,8 @@ type fakeFiles struct {
 	allMissing bool
 	// putHook runs at the start of every put, outside the lock.
 	putHook func()
+	// base prefixes URL; "" means the absolute media domain.
+	base string
 }
 
 func newFakeFiles() *fakeFiles {
@@ -67,7 +69,12 @@ func (f *fakeFiles) RemoveBrandFile(_ context.Context, key string) error {
 	return nil
 }
 
-func (f *fakeFiles) URL(key string) string { return "https://media.example.com/" + key }
+func (f *fakeFiles) URL(key string) string {
+	if f.base != "" {
+		return f.base + key
+	}
+	return "https://media.example.com/" + key
+}
 
 func (f *fakeFiles) has(key string) bool {
 	ok, _ := f.BrandFileExists(context.Background(), key)
@@ -378,5 +385,42 @@ func TestBrandView(t *testing.T) {
 	}
 	if a := s.admin(State{}, mustSlot(t, MonogramInverse)); a.Preview != "dark" || a.Kind != "logo" {
 		t.Errorf("inverse = %+v", a)
+	}
+}
+
+func TestAbsoluteAsset(t *testing.T) {
+	ctx := context.Background()
+	s, f, _, _ := newTestStore(t)
+	key := s.defaults[EmailLogo].key
+	a, err := s.AbsoluteAsset(ctx, EmailLogo, "https://site.example.com/")
+	if err != nil || a.URL != "https://media.example.com/"+key || a.Width != 480 || a.Height != 198 {
+		t.Fatalf("absolute media URL: %+v %v", a, err)
+	}
+	f.base = "/media/" // no MEDIA_PUBLIC_URL: the site serves /media/*
+	if a, err = s.AbsoluteAsset(ctx, EmailLogo, "https://site.example.com/"); err != nil || a.URL != "https://site.example.com/media/"+key {
+		t.Fatalf("relative media URL: %+v %v", a, err)
+	}
+	// Only the origin of the site URL counts: path, query and fragment are dropped.
+	for _, site := range []string{"https://site.example.com/sub/page?x=1#frag", "https://site.example.com?q=/x",
+		"https://site.example.com#/x", " https://site.example.com "} {
+		if a, err = s.AbsoluteAsset(ctx, EmailLogo, site); err != nil || a.URL != "https://site.example.com/media/"+key {
+			t.Errorf("site %q: %+v %v", site, a, err)
+		}
+	}
+	for _, site := range []string{"", "javascript:alert(1)", "//evil.example", "https://u@site.example.com", "/relative"} {
+		if a, err := s.AbsoluteAsset(ctx, EmailLogo, site); err == nil {
+			t.Errorf("site %q: got %q", site, a.URL)
+		}
+	}
+	f.base = "javascript:alert(1)//"
+	if _, err := s.AbsoluteAsset(ctx, EmailLogo, "https://site.example.com"); err == nil {
+		t.Error("a non-http media URL was accepted")
+	}
+	if _, err := s.AbsoluteAsset(ctx, "nope", "https://site.example.com"); !errors.Is(err, ErrUnknownSlot) {
+		t.Errorf("unknown slot: %v", err)
+	}
+	if a := s.admin(State{}, mustSlot(t, EmailLogo)); a.Kind != "logo" || a.Preview != "both" || a.Label != "Email logo" ||
+		len(a.Accept) != 1 || a.Accept[0] != "image/png" {
+		t.Errorf("email logo = %+v", a)
 	}
 }

@@ -19,6 +19,7 @@ const (
 	WordmarkPrimary = "wordmark_primary"
 	MonogramPrimary = "monogram_primary"
 	MonogramInverse = "monogram_inverse"
+	EmailLogo       = "email_logo"
 )
 
 const (
@@ -36,11 +37,19 @@ type slotDef struct {
 	Type    string // content type
 	Max     int    // upload limit in bytes
 	Square  bool   // SVG viewBox must be square
+	PNG     pngRule
 	Label   string
 	Kind    string // icon or logo
 	Rule    string
 	Preview string // light, dark or both
 	Accept  []string
+}
+
+// pngRule bounds a PNG slot's size in px and its aspect ratio (width /
+// height, as MinAspect and MaxAspect in thousandths).
+type pngRule struct {
+	MinW, MaxW, MinH, MaxH int
+	MinAspect, MaxAspect   int
 }
 
 var slots = []slotDef{
@@ -51,6 +60,7 @@ var slots = []slotDef{
 		Label: "Favicon (SVG)", Kind: "icon", Rule: "SVG with a square viewBox", Preview: "both",
 		Accept: []string{"image/svg+xml"}},
 	{Slot: AppleTouchIcon, File: "apple-touch-icon.png", Stem: "apple-touch-icon", Ext: "png", Type: typePNG, Max: 512 << 10,
+		PNG:   pngRule{MinW: 180, MaxW: 180, MinH: 180, MaxH: 180},
 		Label: "Apple touch icon", Kind: "icon", Rule: "PNG, exactly 180×180 px", Preview: "both",
 		Accept: []string{"image/png"}},
 	{Slot: WordmarkPrimary, File: "wordmark-primary.svg", Stem: "wordmark-primary", Ext: "svg", Type: typeSVG, Max: 256 << 10,
@@ -62,6 +72,10 @@ var slots = []slotDef{
 	{Slot: MonogramInverse, File: "monogram-inverse.svg", Stem: "monogram-inverse", Ext: "svg", Type: typeSVG, Max: 256 << 10, Square: true,
 		Label: "Monogram (inverse, for dark backgrounds)", Kind: "logo", Rule: "SVG with a square viewBox", Preview: "dark",
 		Accept: []string{"image/svg+xml"}},
+	{Slot: EmailLogo, File: "email-logo.png", Stem: "email-logo", Ext: "png", Type: typePNG, Max: 256 << 10,
+		PNG:   pngRule{MinW: 240, MaxW: 1200, MinH: 60, MaxH: 600, MinAspect: 1500, MaxAspect: 4000},
+		Label: "Email logo", Kind: "logo", Rule: "PNG, 240–1200 × 60–600 px, landscape 1.5:1 to 4:1 (shown 48 px tall in emails)", Preview: "both",
+		Accept: []string{"image/png"}},
 }
 
 func slotByName(name string) (slotDef, bool) {

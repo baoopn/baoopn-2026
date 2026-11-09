@@ -13,27 +13,32 @@
 a { color: inherit; }
 @media (max-width: 620px) {
   .card { width: 100% !important; }
-  .pad { padding-left: 16px !important; padding-right: 16px !important; }
+  .pad { padding-left: 18px !important; padding-right: 18px !important; }
 }
 @media (prefers-color-scheme: dark) {
   .paper { background-color: #24212e !important; }
-  .card { background-color: #2d2939 !important; border-color: #f2ecf9 !important; }
+  .card { background-color: #2d2939 !important; border-color: #49465a !important; }
   .ink { color: #f2ecf9 !important; }
   .soft { color: #bdb5cf !important; }
   .rule { border-color: #49465a !important; }
   .chip { background-color: #f0b8a3 !important; color: #3b3552 !important; }
-  .quote { background-color: #353043 !important; }
+  .quote { background-color: #353043 !important; border-left-color: #5b5373 !important; }
   .btn { background-color: #f2ecf9 !important; }
   .btn-a { color: #24212e !important; }
   .brand { background-color: #fff5eb !important; color: #0b0537 !important; }
   .brand-a { color: #0b0537 !important; }
+  .sig-a { color: #f2ecf9 !important; }
+  .logo { color: #f2ecf9 !important; }
 }
 [data-ogsc] .ink { color: #f2ecf9 !important; }
 [data-ogsc] .soft { color: #bdb5cf !important; }
 [data-ogsc] .chip { color: #3b3552 !important; }
 [data-ogsc] .btn-a { color: #24212e !important; }
+[data-ogsc] .rule { border-color: #49465a !important; }
+[data-ogsc] .sig-a { color: #f2ecf9 !important; }
+[data-ogsc] .logo { color: #f2ecf9 !important; }
 [data-ogsb] .paper { background-color: #24212e !important; }
-[data-ogsb] .card { background-color: #2d2939 !important; }
+[data-ogsb] .card { background-color: #2d2939 !important; border-color: #49465a !important; }
 [data-ogsb] .chip { background-color: #f0b8a3 !important; }
 [data-ogsb] .quote { background-color: #353043 !important; }
 [data-ogsc] .brand { color: #0b0537 !important; }
@@ -45,55 +50,71 @@ a { color: inherit; }
 </head>
 <body class="paper" style="margin:0;padding:0;background-color:#fbf7f2;">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:transparent;opacity:0">{{template "dl" .Preheader}}{{preheaderPad}}</div>
-<table role="presentation" class="paper" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#fbf7f2;">
-<tr><td align="center" style="padding:32px 12px;">
+<table role="presentation" class="paper" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#fbf7f2" style="width:100%;background-color:#fbf7f2;">
+<tr><td align="center" style="padding:32px 12px 40px;">
 {{msoOpen}}
-<table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#fffaf5;border:1px solid #3b3552;border-right-width:3px;border-bottom-width:3px;border-radius:14px;">
-<tr><td class="pad" style="padding:{{if .Personal}}24px 32px 8px{{else}}28px 32px 4px{{end}};">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td class="brand" style="background-color:#0b0537;border-radius:6px;padding:{{if .Personal}}4px 8px{{else}}6px 10px{{end}};font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:{{if .Personal}}12px{{else}}13px{{end}};font-weight:700;line-height:1.2;color:#fff5eb;">{{template "brandName" .Brand}}</td></tr></table>
+<table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#fffaf5" style="max-width:600px;width:100%;background-color:#fffaf5;border:1px solid #ece4f2;border-bottom:3px solid #e3d7fb;border-radius:16px;overflow:hidden;">
+<tr><td style="padding:0;font-size:0;line-height:0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;"><tr>
+<td width="33%" height="4" bgcolor="#ffd6c4" style="height:4px;background-color:#ffd6c4;font-size:4px;line-height:4px;mso-line-height-rule:exactly;">&nbsp;</td>
+<td width="34%" height="4" bgcolor="#e3d7fb" style="height:4px;background-color:#e3d7fb;font-size:4px;line-height:4px;mso-line-height-rule:exactly;">&nbsp;</td>
+<td width="33%" height="4" bgcolor="#cdeedd" style="height:4px;background-color:#cdeedd;font-size:4px;line-height:4px;mso-line-height-rule:exactly;">&nbsp;</td>
+</tr></table>
+</td></tr>
+<tr><td class="pad" style="padding:{{if logo .Brand}}28px{{else}}32px{{end}} 40px 0;">
+{{- with logo .Brand}}
+{{- $img := .}}
+{{- with homeURL $.Brand}}<a href="{{.}}" style="display:inline-block;text-decoration:none;border:0;">{{template "logoImg" $img}}</a>{{else}}{{template "logoImg" $img}}{{end}}
+{{- else}}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td class="brand" bgcolor="#0b0537" style="background-color:#0b0537;border-radius:8px;padding:5px 10px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;line-height:1.2;color:#fff5eb;">{{template "brandName" .Brand}}</td></tr></table>
+{{- end}}
 </td></tr>
 {{- if and (not .Personal) (or .Kicker .Title)}}
-<tr><td class="pad" style="padding:20px 32px 0;">
+<tr><td class="pad" style="padding:24px 40px 0;">
 {{- if .Kicker}}
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td class="chip" style="background-color:#ffd6c4;border-radius:999px;padding:3px 10px;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.08em;font-variant:small-caps;text-transform:lowercase;color:#3b3552;">{{.Kicker}}</td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td class="chip" bgcolor="#ffd6c4" style="background-color:#ffd6c4;border-radius:999px;padding:4px 12px;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.08em;font-variant:small-caps;text-transform:lowercase;color:#3b3552;">{{.Kicker}}</td></tr></table>
 {{- end}}
 {{- if .Title}}
-<div class="ink" style="margin:12px 0 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:22px;font-weight:700;line-height:1.3;color:#3b3552;">{{template "dl" .Title}}</div>
+<div class="ink" style="margin:14px 0 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:24px;font-weight:700;line-height:1.3;color:#0b0537;">{{template "dl" .Title}}</div>
 {{- end}}
 </td></tr>
 {{- end}}
-<tr><td class="pad" style="padding:20px 32px 8px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3b3552;">
+<tr><td class="pad" style="padding:{{if .Signature}}24px 40px 6px{{else}}24px 40px 18px{{end}};overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:#2f2a45;">
 {{- range .Blocks}}
 {{- if eq .Kind 0}}
-<div class="ink" style="margin:0 0 16px;color:#3b3552;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;">{{range $i, $l := lines .Text}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
+<div class="ink" style="margin:0 0 18px;color:#2f2a45;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;">{{range $i, $l := lines .Text}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
 {{- else if or (eq .Kind 1) (eq .Kind 3)}}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 16px;table-layout:fixed;"><tr><td class="quote{{if eq .Kind 1}} soft{{else}} ink{{end}}" style="background-color:#f4eefa;border-left:3px solid #e3d7fb;border-radius:4px;padding:12px 16px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-size:{{if eq .Kind 1}}14px{{else}}15px{{end}};line-height:1.6;color:{{if eq .Kind 1}}#6b6585{{else}}#3b3552{{end}};">{{$k := .Kind}}{{$ls := lines .Text}}{{if eq $k 1}}{{$ls = quoteLines .Text}}{{end}}{{range $i, $l := $ls}}{{if $i}}<br>{{end}}{{if eq $k 3}}{{template "dl" $l}}{{else}}{{$l}}{{end}}{{end}}</td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 18px;table-layout:fixed;"><tr><td class="quote{{if eq .Kind 1}} soft{{else}} ink{{end}}" bgcolor="#f4eefa" style="background-color:#f4eefa;border-left:3px solid #e3d7fb;border-radius:10px;padding:14px 18px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-size:{{if eq .Kind 1}}15px{{else}}16px{{end}};line-height:1.65;color:{{if eq .Kind 1}}#6b6585{{else}}#2f2a45{{end}};">{{$k := .Kind}}{{$ls := lines .Text}}{{if eq $k 1}}{{$ls = quoteLines .Text}}{{end}}{{range $i, $l := $ls}}{{if $i}}<br>{{end}}{{if eq $k 3}}{{template "dl" $l}}{{else}}{{$l}}{{end}}{{end}}</td></tr></table>
 {{- else if eq .Kind 2}}
 {{- if .Label}}
-<div class="ink" style="margin:0 0 8px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;color:#3b3552;">{{.Label}}</div>
+<div class="ink" style="margin:0 0 8px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;color:#3b3552;">{{.Label}}</div>
 {{- end}}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 16px;table-layout:fixed;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 18px;table-layout:fixed;">
 {{- range .Fields}}
-<tr><td class="soft rule" width="110" valign="top" style="width:110px;padding:6px 12px 6px 0;border-bottom:1px solid #e0dcdc;font-size:13px;line-height:1.5;color:#6b6585;">{{.Label}}</td><td class="ink rule" valign="top" style="padding:6px 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;border-bottom:1px solid #e0dcdc;font-size:{{if .Mono}}13px{{else}}15px{{end}};line-height:1.5;color:#3b3552;{{if .Mono}}font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;{{end}}">{{template "dl" .Value}}</td></tr>
+<tr><td class="soft rule" width="110" valign="top" style="width:110px;padding:9px 12px 9px 0;border-bottom:1px solid #efe8f3;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;line-height:1.9;color:#6b6585;">{{.Label}}</td><td class="ink rule" valign="top" style="padding:9px 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;border-bottom:1px solid #efe8f3;font-size:{{if .Mono}}14px{{else}}16px{{end}};line-height:1.5;color:#2f2a45;{{if .Mono}}font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;{{end}}">{{template "dl" .Value}}</td></tr>
 {{- end}}
 </table>
 {{- else if eq .Kind 4}}
 {{- $b := .}}
 {{- with buttonURL $ .}}
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px;"><tr><td class="btn" bgcolor="#3b3552" style="background-color:#3b3552;border-radius:10px;padding:12px 20px;"><a class="btn-a" href="{{.}}" style="color:#fbf7f2;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;text-decoration:none;">{{$b.Label}}</a></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 20px;"><tr><td class="btn" bgcolor="#0b0537" style="background-color:#0b0537;border-radius:999px;padding:12px 22px;"><a class="btn-a" href="{{.}}" style="color:#fbf7f2;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:1.2;text-decoration:none;">{{$b.Label}}</a></td></tr></table>
 {{- end}}
 {{- end}}
 {{- end}}
 </td></tr>
 {{- if .Signature}}
-<tr><td class="pad" style="padding:0 32px 20px;">
-<div class="soft rule" style="border-top:1px solid #e0dcdc;padding-top:14px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#6b6585;">{{range $i, $l := lines .Signature}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
+<tr><td class="pad" style="padding:0 40px 36px;">
+<div class="rule" style="border-top:1px solid #efe8f3;padding-top:18px;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.6;">
+{{- range $i, $l := sigLines .Signature}}
+<div class="{{if $i}}soft{{else}}ink{{end}}" style="{{if $i}}font-size:14px;color:#6b6585;{{else}}font-size:15px;font-weight:600;color:#3b3552;{{end}}">{{with $l.URL}}<a class="sig-a" href="{{.}}" style="color:#0b0537;font-weight:600;text-decoration:none;"><span class="sig-a" style="color:#0b0537;font-weight:600;text-decoration:none;">{{$l.Text}}</span></a>{{else}}{{if $l.Text}}{{$l.Text}}{{else}}<br>{{end}}{{end}}</div>
+{{- end}}
+</div>
 </td></tr>
 {{- end}}
 </table>
 {{msoClose}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
-<tr><td class="soft" align="center" style="padding:16px 24px 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b6585;">
+<tr><td class="soft" align="center" style="padding:22px 24px 0;overflow-wrap:anywhere;word-break:break-word;word-wrap:break-word;font-family:'Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b6585;">
 {{- if and .Footer (not .Personal)}}{{range $i, $l := lines .Footer}}{{if $i}}<br>{{end}}{{template "dl" $l}}{{end}}{{end}}
 {{- with homeURL .Brand}}{{if and $.Footer (not $.Personal)}}<br>{{end}}<a class="soft" href="{{.}}" style="color:#6b6585;text-decoration:none;"><span class="soft" style="color:#6b6585;text-decoration:none;">{{$.Brand.Name}}</span></a>{{end}}
 </td></tr>
@@ -107,4 +128,7 @@ their own blue, underlined link, so it is our own link with the colour set
 on the link and on a span inside it; a brand with no http(s) site is
 defanged instead. */}}
 {{- define "brandName"}}{{with homeURL .}}<a class="brand-a" href="{{.}}" style="color:#fff5eb;text-decoration:none;"><span class="brand-a" style="color:#fff5eb;text-decoration:none;">{{$.Name}}</span></a>{{else}}{{template "dl" .Name}}{{end}}{{end}}
+{{- /* logoImg is the header logo; the alt text keeps the brand name
+readable when images are blocked. */}}
+{{- define "logoImg"}}<img class="logo" src="{{.Src}}" width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}" style="display:block;border:0;outline:none;text-decoration:none;height:{{.Height}}px;width:{{.Width}}px;max-width:{{.Width}}px;font-family:'Outfit','Inter',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:{{.Height}}px;color:#0b0537;">{{end}}
 {{- define "dl"}}{{range defang .}}{{if .Sep}}<span>{{.Text}}</span>{{else}}{{.Text}}{{end}}{{end}}{{end}}

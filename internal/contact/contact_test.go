@@ -168,7 +168,7 @@ func TestReplyIsIdempotentAndThreaded(t *testing.T) {
 	m := sent[0]
 	if m.To != "priya@example.com" || m.ReplyTo != replyAddr(tok) || m.Subject != "Re: Hello" || m.AutoSubmitted != "" ||
 		m.InReplyTo != "<in-2@mail.example>" || len(m.References) != 2 || m.References[0] != "<in-1@mail.example>" ||
-		m.Text != "Thanks, let us talk.\n\n-- \nBao Nguyen\nhttps://baoopn.com" || !strings.Contains(m.HTML, "<br>") {
+		m.Text != "Thanks, let us talk.\n\n-- \nBao Nguyen\nhttps://baoopn.com" || !strings.Contains(m.HTML, ">Bao Nguyen</div>") {
 		t.Fatalf("mail: %+v", m)
 	}
 	d := e.detail(id)
