@@ -346,3 +346,23 @@
 		min-width: 44px;
 	}
 }
+
+/* Inbox: a thread that just arrived or changed over the live stream. */
+.admin .inbox-fresh {
+	animation: inbox-fresh 1.8s var(--ease-out) both;
+}
+
+@keyframes inbox-fresh {
+	from {
+		background-color: color-mix(in oklab, var(--spot-now) 18%, transparent);
+	}
+	to {
+		background-color: transparent;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.admin .inbox-fresh {
+		animation: none;
+	}
+}

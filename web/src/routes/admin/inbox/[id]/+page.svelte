@@ -9,79 +9,144 @@
 		ShieldCheck,
 		Trash2
 	} from '@lucide/svelte';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import type { ThreadDetail, ThreadMessage, ThreadStatus, ThreadSummary } from '#lib/api/types.js';
+	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
+	import type { ThreadStatus } from '#lib/api/types.js';
 	import ErrorState from '#lib/admin/components/ErrorState.svelte';
 	import ConfirmDialog from '#lib/admin/components/ConfirmDialog.svelte';
 	import MessageBubble, { type ShownMessage } from '#lib/admin/inbox/MessageBubble.svelte';
 	import Composer from '#lib/admin/inbox/Composer.svelte';
-	import { ApiRequestError, del, get, patch, post } from '#lib/admin/api.js';
-	import { Resource } from '#lib/admin/resource.svelte.js';
-	import { inbox } from '#lib/admin/inbox.svelte.js';
+	import { ApiRequestError } from '#lib/admin/api.js';
+	import {
+		deleteThreadMutation,
+		markReadMutation,
+		markUnreadMutation,
+		retryMessageMutation,
+		sendReplyMutation,
+		setStatusMutation,
+		threadQuery
+	} from '#lib/admin/inbox/queries.js';
+	import { live } from '#lib/admin/inbox/live.svelte.js';
 	import { dateTime, errorMessage } from '#lib/admin/format.js';
 	import { toasts } from '#lib/admin/toast.svelte.js';
 
+	const qc = useQueryClient();
 	const id = $derived(Number(page.params.id));
 
-	const detail = new Resource(() => get<ThreadDetail>(`/threads/${id}`));
+	const detail = createQuery(() => threadQuery(id));
+	const markRead = createMutation(() => markReadMutation(qc));
+	const markUnreadM = createMutation(() => markUnreadMutation(qc));
+	const setStatusM = createMutation(() => setStatusMutation(qc));
+	const deleteM = createMutation(() => deleteThreadMutation(qc));
+	const sendM = createMutation(() => sendReplyMutation(qc));
+	const retryM = createMutation(() => retryMessageMutation(qc));
+
+	const visible = () => document.visibilityState === 'visible';
 
 	/** Optimistic replies not yet acknowledged by the API. */
 	let pending = $state<ShownMessage[]>([]);
 	let localSeq = -1;
-
-	// Load + mark read whenever the thread id changes.
-	$effect(() => {
-		const tid = id;
-		void detail.load();
-		post(`/threads/${tid}/read`)
-			.then(() => inbox.changed())
-			.catch(() => {});
-	});
-
-	// Poll the open thread every 20 s.
-	$effect(() => {
-		const timer = setInterval(() => {
-			if (document.visibilityState === 'visible') void detail.load(true);
-		}, 20_000);
-		return () => clearInterval(timer);
-	});
+	/** Ids of messages this tab sent: their arrival scrolls even when scrolled up (never rendered, so a plain Set). */
+	const mine = new Set<number>();
 
 	const d = $derived(detail.data && detail.data.thread.id === id ? detail.data : undefined);
+	/** The thread is gone (deleted here or in another tab). */
+	const gone = $derived(detail.error instanceof ApiRequestError && detail.error.status === 404);
+
+	// Mark read whenever the thread id changes (while the tab is visible).
+	$effect(() => {
+		const tid = id;
+		untrack(() => {
+			if (visible()) markRead.mutate(tid);
+		});
+	});
+
+	// A visitor message on this thread while we're looking at it: it's read.
+	$effect(() =>
+		live.onInbound((tid) => {
+			if (tid === id && visible()) markRead.mutate(tid);
+		})
+	);
+
+	function onvisibilitychange() {
+		if (visible() && d?.thread.unread) markRead.mutate(id);
+	}
+
+	/** A pending reply the server already stored (seen via the live stream, then a refetch). */
+	function landed(p: ShownMessage): boolean {
+		if (!d || !p.request_id) return false;
+		const mid = live.ownReplies.get(p.request_id);
+		return mid !== undefined && d.messages.some((m) => m.id === mid);
+	}
+
 	const messages = $derived<ShownMessage[]>(
-		d ? [...d.messages, ...pending.filter((p) => p.thread_id === id)] : []
+		d ? [...d.messages, ...pending.filter((p) => p.thread_id === id && !landed(p))] : []
 	);
 	const count = $derived(messages.length);
 
-	/** Keep the newest message in view (re-runs when the message count changes). */
-	function autoscroll(node: HTMLDivElement) {
-		if (count === 0) return;
-		void tick().then(() => node.scrollTo({ top: node.scrollHeight }));
+	// ── Scroll: stick to the bottom, or offer a pill when scrolled up ──
+	let scroller = $state<HTMLDivElement | null>(null);
+	let atBottom = true;
+	let showPill = $state(false);
+	let lastId = NaN;
+	let lastCount = 0;
+
+	function toBottom(el: HTMLDivElement) {
+		void tick().then(() => el.scrollTo({ top: el.scrollHeight }));
 	}
 
-	function upsert(msg: ThreadMessage) {
-		const cur = detail.data;
-		if (!cur || cur.thread.id !== id) return;
-		const exists = cur.messages.some((x) => x.id === msg.id);
-		detail.set({
-			...cur,
-			messages: exists
-				? cur.messages.map((x) => (x.id === msg.id ? msg : x))
-				: [...cur.messages, msg]
+	function onscroll() {
+		const el = scroller;
+		if (!el) return;
+		atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+		if (atBottom) showPill = false;
+	}
+
+	$effect(() => {
+		const n = count;
+		const tid = id;
+		const el = scroller;
+		if (!el || n === 0) return;
+		untrack(() => {
+			if (tid !== lastId) {
+				// First load or another thread: jump to the newest message.
+				lastId = tid;
+				lastCount = n;
+				atBottom = true;
+				showPill = false;
+				toBottom(el);
+				return;
+			}
+			if (n > lastCount) {
+				const newest = messages[n - 1];
+				if (atBottom || newest?.local || (newest && mine.has(newest.id))) {
+					showPill = false;
+					toBottom(el);
+				} else {
+					showPill = true;
+				}
+			}
+			lastCount = n;
 		});
+	});
+
+	function jumpToNewest() {
+		showPill = false;
+		scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
 	}
 
 	async function deliver(local: ShownMessage) {
 		pending = pending.map((p) => (p.id === local.id ? { ...p, status: 'sending', error: '' } : p));
 		try {
-			const msg = await post<ThreadMessage>(`/threads/${local.thread_id}/messages`, {
+			const msg = await sendM.mutateAsync({
+				threadId: local.thread_id ?? id,
 				body: local.body,
-				request_id: local.request_id
+				request_id: local.request_id ?? crypto.randomUUID()
 			});
+			mine.add(msg.id);
 			pending = pending.filter((p) => p.id !== local.id);
-			upsert(msg);
-			inbox.changed();
 			if (msg.status === 'failed') toasts.error('Reply not sent', msg.error || undefined);
 		} catch (err) {
 			const reason =
@@ -118,8 +183,7 @@
 	async function retry(m: ShownMessage) {
 		if (m.local) return deliver(m);
 		try {
-			const msg = await post<ThreadMessage>(`/threads/${id}/messages/${m.id}/retry`);
-			upsert(msg);
+			const msg = await retryM.mutateAsync({ threadId: id, mid: m.id });
 			if (msg.status === 'sent') toasts.success('Reply sent');
 			else toasts.error('Still failing', msg.error || undefined);
 		} catch (err) {
@@ -128,11 +192,8 @@
 	}
 
 	async function setStatus(status: ThreadStatus) {
-		const cur = detail.data;
 		try {
-			const t = await patch<ThreadSummary>(`/threads/${id}`, { status });
-			if (cur) detail.set({ ...cur, thread: t });
-			inbox.changed();
+			await setStatusM.mutateAsync({ id, status });
 			const labels = { open: 'Moved to inbox', archived: 'Archived', spam: 'Marked as spam' };
 			toasts.success(labels[status]);
 		} catch (err) {
@@ -142,8 +203,7 @@
 
 	async function markUnread() {
 		try {
-			await post(`/threads/${id}/unread`);
-			inbox.changed();
+			await markUnreadM.mutateAsync(id);
 			toasts.info('Marked as unread');
 			await goto('/admin/inbox');
 		} catch (err) {
@@ -154,8 +214,7 @@
 	let confirmDelete = $state(false);
 	async function remove() {
 		try {
-			await del(`/threads/${id}`);
-			inbox.changed();
+			await deleteM.mutateAsync(id);
 			toasts.success('Thread deleted');
 			await goto('/admin/inbox');
 		} catch (err) {
@@ -174,20 +233,22 @@
 	}
 </script>
 
+<svelte:document {onvisibilitychange} />
+
 <svelte:head>
 	<title>{d ? d.thread.subject || d.thread.name : 'Thread'} · Inbox · baoopn admin</title>
 </svelte:head>
 
 <div class="flex h-[calc(100dvh-4rem)] min-h-0 flex-col">
-	{#if detail.error && !d}
+	{#if detail.isError && (!d || gone)}
 		<div class="p-6">
 			<a href="/admin/inbox" class="btn btn-ghost btn-sm mb-4 lg:hidden">
 				<ArrowLeft class="size-4" aria-hidden="true" /> Inbox
 			</a>
 			<ErrorState
 				title="Could not load this thread"
-				message={detail.error}
-				onretry={() => detail.load()}
+				message={gone ? 'This thread was deleted.' : errorMessage(detail.error)}
+				onretry={gone ? undefined : () => detail.refetch()}
 			/>
 		</div>
 	{:else if !d}
@@ -291,12 +352,23 @@
 			</p>
 		{/if}
 
-		<div {@attach autoscroll} class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-			<ol class="mx-auto flex max-w-3xl flex-col gap-5" aria-label="Messages" aria-live="polite">
-				{#each messages as m (m.id)}
-					<MessageBubble message={m} onretry={retry} />
-				{/each}
-			</ol>
+		<div class="relative min-h-0 flex-1">
+			<div bind:this={scroller} {onscroll} class="h-full overflow-y-auto px-4 py-6 sm:px-6">
+				<ol class="mx-auto flex max-w-3xl flex-col gap-5" aria-label="Messages" aria-live="polite">
+					{#each messages as m (m.id)}
+						<MessageBubble message={m} onretry={retry} />
+					{/each}
+				</ol>
+			</div>
+			{#if showPill}
+				<button
+					type="button"
+					class="btn btn-secondary btn-sm absolute bottom-3 left-1/2 -translate-x-1/2"
+					onclick={jumpToNewest}
+				>
+					New message <span aria-hidden="true">↓</span>
+				</button>
+			{/if}
 		</div>
 
 		<Composer enabled={d.reply_enabled} to={t.name || t.email} onsend={send} />
