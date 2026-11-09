@@ -38,7 +38,7 @@ cleanup() {
 	if [ "$rc" -ne 0 ] && [ "${KEEP_ON_FAIL:-}" = 1 ]; then
 		echo "KEEP_ON_FAIL: leaving $SRC $DST $NET $VOL"
 	else
-		docker rm -f "$SRC" "$DST" "$ID-run" "$ID-run2" "$ID-idle" "$ID-part" "$ID-bad" "$ID-watch" >/dev/null 2>&1 || true
+		docker rm -f "$SRC" "$DST" "$ID-run" "$ID-run2" "$ID-idle" "$ID-part" "$ID-bad" "$ID-watch" "$ID-term" >/dev/null 2>&1 || true
 		docker network rm "$NET" >/dev/null 2>&1 || true
 		docker volume rm "$VOL" >/dev/null 2>&1 || true
 	fi
@@ -215,6 +215,10 @@ done
 	for v in $versions; do echo "INSERT INTO goose_db_version (version_id, is_applied) VALUES ($v, true);"; done
 	echo "CREATE TABLE rt_seed (id bigserial PRIMARY KEY, label text NOT NULL, payload jsonb, at timestamptz DEFAULT now());"
 	echo "INSERT INTO rt_seed (label, payload) SELECT 'row ' || g || ' café ü 日本', jsonb_build_object('n', g, 's', 'naïve ✓') FROM generate_series(1, 5000) g;"
+	# Incompressible data: the ciphertext must be far larger than a pipe
+	# buffer, so verify and restore really stream it.
+	echo "CREATE TABLE rt_blob (id int PRIMARY KEY, b bytea NOT NULL);"
+	echo "INSERT INTO rt_blob SELECT g, decode(md5(random()::text) || md5(random()::text), 'hex') FROM generate_series(1, 100000) g;"
 	echo "INSERT INTO settings (key, value) VALUES ('rt_profile', '{\"name\": \"Bảo\", \"n\": 1}') ON CONFLICT DO NOTHING;"
 	echo "CREATE ROLE rturl LOGIN SUPERUSER PASSWORD 'rt@pw';"
 } | psql_in "$SRC" >/dev/null
@@ -256,12 +260,23 @@ grep -q '"format": "pg_dump-custom+age"' "$TMP/manifest" && grep -q '"goose_vers
 if on_vol "head -c 64 /backups/baoopn/*/*/$NAME | grep -q age-encryption.org"; then
 	ok "object starts with the age header"
 else bad "object is not age ciphertext"; fi
+size=$(on_vol "cat /backups/baoopn/*/*/$NAME | wc -c" | tr -d ' ')
+[ "$size" -gt 2000000 ] && ok "ciphertext is larger than 2 MB ($size bytes)" || bad "ciphertext too small: $size"
+ntab=$(psql_in "$SRC" -A -t -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")
+grep -q "done ($ntab tables in schema public" "$TMP/out" && ok "backup counts $ntab tables in schema public, as restore does" ||
+	bad "backup table count: $(grep 'done (' "$TMP/out")"
 
 echo "== verify / restore"
-if bk "" verify latest -i - <"$TMP/key.txt" >"$TMP/out" 2>&1; then ok "verify latest -i -"; else
+if bk "" verify latest -i - <"$TMP/key.txt" >"$TMP/out" 2>&1; then ok "verify latest -i - (correct key, large file)"; else
 	bad "verify"
 	cat "$TMP/out"
 fi
+grep -q "ok, $ntab tables in schema public.*schema version [0-9]" "$TMP/out" &&
+	ok "verify reports the same table count and the schema version" || bad "verify log: $(tail -n 1 "$TMP/out")"
+# A key saved through a terminal (CRLF) still works.
+sed 's/$/\r/' "$TMP/key.txt" >"$TMP/key-crlf.txt"
+bk "" verify latest -i - <"$TMP/key-crlf.txt" >"$TMP/out" 2>&1 && ok "verify with a CRLF key file" ||
+	bad "CRLF key: $(tail -n 2 "$TMP/out")"
 expect_fail "verify with the wrong identity fails" "decryption failed" \
 	with_key "$TMP/wrong.txt" bk "" verify latest -i -
 expect_fail "restore without an identity fails" "identity not readable" bk "$DST" restore latest
@@ -297,6 +312,21 @@ else
 	bad "--to-file"
 	cat "$TMP/out"
 fi
+# An existing PATH: refused without --force, kept on a failed decryption.
+if docker run --rm -i -v "$VOL:/backups" -e BACKUP_REMOTE=/backups --entrypoint sh "$IMAGE" -c '
+	cat >/tmp/wrong.txt
+	echo keep >/tmp/out.dump
+	backupctl restore latest --to-file /tmp/out.dump -i /tmp/wrong.txt 2>/tmp/err && exit 1
+	grep -q "already exists" /tmp/err && [ "$(cat /tmp/out.dump)" = keep ] || exit 2
+	backupctl restore latest --to-file /tmp/out.dump --force -i /tmp/wrong.txt 2>/tmp/err && exit 3
+	grep -q "decryption failed" /tmp/err || exit 4
+	[ "$(cat /tmp/out.dump)" = keep ] && [ ! -e /tmp/out.dump.partial ] || exit 5' \
+	<"$TMP/wrong.txt" >"$TMP/out" 2>&1; then
+	ok "--to-file refuses an existing file and keeps it when decryption fails"
+else
+	bad "--to-file with an existing file (exit $?)"
+	cat "$TMP/out"
+fi
 
 no_plaintext "verify" with_key "$TMP/key.txt" bk "" verify latest -i -
 no_plaintext "restore --force" with_key "$TMP/key.txt" bk "$DST" restore latest --force -i -
@@ -309,6 +339,36 @@ docker logs "$ID-idle" 2>&1 | grep -q "WARN.*disabled" && ok "idle logs a WARN" 
 t0=$(date +%s)
 docker stop "$ID-idle" >/dev/null
 [ $(($(date +%s) - t0)) -lt 8 ] && ok "docker stop is quick (SIGTERM handled)" || bad "docker stop took too long"
+
+# SIGTERM during a running backup: a lock makes pg_dump wait, then stop.
+before=$(on_vol 'find /backups/baoopn -name "*.dump.age" | wc -l' | tr -d ' ')
+docker exec -d "$SRC" psql -U baoopn -d baoopn -c "BEGIN; LOCK TABLE rt_seed; SELECT pg_sleep(60);"
+on_vol 'mkdir -p /backups/tmp-term'
+docker run -d --name "$ID-term" --network "$NET" -v "$VOL:/backups" -e TMPDIR=/backups/tmp-term \
+	-e PGHOST="$SRC" -e PGUSER=baoopn -e PGPASSWORD=rt-password -e PGDATABASE=baoopn \
+	-e BACKUP_REMOTE=/backups -e BACKUP_AGE_RECIPIENT="$RECIPIENT" -e BACKUP_ON_START=true "$IMAGE" run >/dev/null
+i=0
+until docker logs "$ID-term" 2>&1 | grep -q "dumping and encrypting"; do
+	i=$((i + 1))
+	[ "$i" -lt 60 ] || break
+	sleep 1
+done
+sleep 1
+t0=$(date +%s)
+docker stop "$ID-term" >/dev/null
+took=$(($(date +%s) - t0))
+left=$(on_vol 'find /backups/tmp-term -mindepth 1 | wc -l' | tr -d ' ')
+after=$(on_vol 'find /backups/baoopn -name "*.dump.age" | wc -l' | tr -d ' ')
+if [ "$took" -lt 8 ] && [ "$left" -eq 0 ] && [ "$after" -eq "$before" ] &&
+	docker logs "$ID-term" 2>&1 | grep -q "interrupting the running job"; then
+	ok "docker stop interrupts a running backup quickly and removes its temp files"
+else
+	bad "stop during a backup: ${took}s, $left temp entries, objects $before -> $after"
+	docker logs "$ID-term" 2>&1 | tail -n 5
+fi
+docker rm -f "$ID-term" >/dev/null
+psql_in "$SRC" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(60)%' AND pid <> pg_backend_pid()" >/dev/null
+on_vol 'rm -rf /backups/tmp-term'
 
 docker run -d --name "$ID-part" -e BACKUP_AGE_RECIPIENT="$RECIPIENT" -e BACKUP_S3_BUCKET=rt-bucket-value \
 	-e BACKUP_S3_ACCESS_KEY_ID=rt-key-value "$IMAGE" run >/dev/null
