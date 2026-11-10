@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Copy } from '@lucide/svelte';
-	import type { CreditLogoKind } from '#lib/api/types.js';
+	import type { CreditLogoKind, CreditLogoStyle } from '#lib/api/types.js';
 	import Segmented from '../components/Segmented.svelte';
 	import { toasts } from '../toast.svelte';
 	import { snippet } from './rules.js';
@@ -22,21 +22,32 @@
 		{ value: 'mark', label: 'Mark' }
 	];
 
+	/** saved adds no color param, so the site gets the variant's saved style. */
+	const styleOptions: { value: 'saved' | CreditLogoStyle; label: string }[] = [
+		{ value: 'saved', label: 'Saved' },
+		{ value: 'color', label: 'Color' },
+		{ value: 'mono', label: 'Mono' }
+	];
+	let style = $state<'saved' | CreditLogoStyle>('saved');
+
 	/** null until the admin picks one, so the switch follows the default logo. */
 	let picked = $state<CreditLogoKind | null>(null);
 	const kind = $derived(picked ?? defaultLogo);
-	const code = $derived(snippet(withLogo(endpoint, kind)));
+	const code = $derived(snippet(withQuery(endpoint, kind, style)));
+	const query = $derived(`?logo=${kind}` + (style === 'saved' ? '' : `&color=${style}`));
 	const apiOrigin = $derived(originOf(endpoint));
 	const logoOrigin = $derived(originOf(logoUrl));
 
-	/** The endpoint with ?logo=<kind>, so the site always gets this variant. */
-	function withLogo(u: string, logo: CreditLogoKind): string {
+	/** The endpoint with ?logo=<kind>, plus &color=<style> unless the saved style is wanted. */
+	function withQuery(u: string, logo: CreditLogoKind, color: 'saved' | CreditLogoStyle): string {
 		try {
 			const url = new URL(u);
 			url.searchParams.set('logo', logo);
+			if (color === 'saved') url.searchParams.delete('color');
+			else url.searchParams.set('color', color);
 			return url.href;
 		} catch {
-			return `${u}?logo=${logo}`;
+			return `${u}?logo=${logo}` + (color === 'saved' ? '' : `&color=${color}`);
 		}
 	}
 
@@ -78,7 +89,19 @@
 			label="Snippet logo"
 			onchange={(v) => (picked = v)}
 		/>
-		<p class="hint">The snippet asks for this variant with ?logo={kind}.</p>
+	</div>
+
+	<div>
+		<p class="field-label">Style</p>
+		<Segmented
+			options={styleOptions}
+			bind:value={style}
+			label="Snippet style"
+		/>
+		<p class="hint">
+			Saved uses the style set on the variant. Color and Mono override it for this site.
+		</p>
+		<p class="hint">The snippet adds <code class="font-mono">{query}</code> to the fetch URL.</p>
 	</div>
 
 	<!-- Focusable so keyboard users can scroll the snippet. -->

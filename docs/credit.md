@@ -102,7 +102,7 @@ and both hosts:
 - `img-src` must allow the host that serves the logo, which is the media host
   (for example `https://media.baoopn.com`). The admin page names the exact host.
 
-## Pick the logo for one site
+## Pick the logo and style for one site
 
 A site asks for one variant by adding `?logo=wordmark` or `?logo=mark` to the
 fetch URL in the snippet, for example
@@ -111,6 +111,16 @@ variant's prefix, suffix and style. Without `?logo=`, or with any other value
 (the match is exact and lowercase), it gets the default variant. The
 **Wordmark** and **Mark** switch above the snippet on the admin page adds the
 query for you.
+
+A site can also override the variant's style with `?color=color` (the filled
+tile) or `?color=mono` (the glyph only, navy on light pages and cream on dark
+ones). The two params work together, for example
+`fetch("https://baoopn.com/api/v1/credit?logo=mark&color=mono")`. Without
+`?color=`, or with any other value (the match is exact and lowercase), the site
+gets the style saved on the variant. The override applies to that request only
+and never changes the saved settings. `logo.style` in the response names the
+style the site got. On the admin page, the **Style** switch above the snippet
+adds `&color=` for **Color** or **Mono**, and adds nothing for **Saved**.
 
 The response still has a `text` field with the same value as `prefix`, so
 snippets copied before the prefix and suffix existed keep working. `text` is
