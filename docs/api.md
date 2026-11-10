@@ -182,7 +182,11 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   `monogram_primary` under `/brand/listening`). `GET /api/v1/brand/listening/` (no slot) and
   `PUT /api/admin/brand/listening` are 404 too. The public routes send CORS headers to the origins
   in `BRAND_CORS_ORIGINS` (default `https://listening.baoopn.com`), with the same exact-match
-  rules as *Credit*. The admin routes never send them.
+  rules as *Credit*. The admin routes never send them. The compose files turn an empty value
+  into the default; to send no CORS headers, set `BRAND_CORS_ORIGINS` empty in the API's own
+  environment, outside compose. The `/{slot}` `302` works for `<img>` and `<link>`, but a
+  `fetch()` that follows it also needs CORS from the media host (media.baoopn.com already
+  sends it).
 - **Admin fields:** each `AdminBrandAsset` has a `group` (`favicons`, `logos`, `icons`,
   `social` or `email`) that the admin page uses for its sections, and a `kind` of `icon`,
   `logo` or `image` (`image` is the social share image). The list is in table order, which
@@ -250,7 +254,8 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
 - **Caching:** `GET /api/v1/brand/listening` is cached 60 s and each `302` 300 s, so a
   client that reads the API sees a replaced file within a few minutes. The file URLs
   themselves never change and are cached for a year. listening.baoopn.com still serves its
-  own copies until it reads this API.
+  own copies until it reads this API. Do not add a Cloudflare cache rule for `/api/*`:
+  Cloudflare ignores `Vary: Origin` and would serve one origin's CORS headers to another.
 
 #### Both brands
 

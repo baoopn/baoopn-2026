@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -230,6 +231,16 @@ func badOrigin(e string) error {
 	return fmt.Errorf("config: BRAND_CORS_ORIGINS entry %q must be an origin like https://listening.example.com", e)
 }
 
+// canonicalPort reports whether p is empty or a port 1-65535 written
+// without a leading zero.
+func canonicalPort(p string) bool {
+	if p == "" {
+		return true
+	}
+	n, err := strconv.Atoi(p)
+	return err == nil && n >= 1 && n <= 65535 && strconv.Itoa(n) == p
+}
+
 // parseOrigins trims, checks and normalizes a list of origins: scheme and
 // host lowercased, the default port dropped, blanks and duplicates removed
 // (order kept). An empty input gives an empty, non-nil slice.
@@ -250,6 +261,9 @@ func parseOrigins(in []string) ([]string, error) {
 		scheme := strings.ToLower(u.Scheme)
 		if (scheme != "http" && scheme != "https") || u.Host == "" || u.Hostname() == "" || u.User != nil ||
 			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+			return nil, badOrigin(e)
+		}
+		if strings.HasSuffix(u.Host, ":") || !canonicalPort(u.Port()) {
 			return nil, badOrigin(e)
 		}
 		host := strings.ToLower(u.Host)

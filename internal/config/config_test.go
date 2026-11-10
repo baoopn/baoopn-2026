@@ -118,7 +118,8 @@ func TestLoadBrandCORSOrigins(t *testing.T) {
 	if want := []string{"https://a.com", "http://localhost:5173"}; err != nil || !slices.Equal(c.BrandCORSOrigins, want) {
 		t.Fatalf("list = %q, %v; want %q", c.BrandCORSOrigins, err, want)
 	}
-	for _, bad := range []string{"*", "null", "https://a.com/x", "ftp://a.com", "https://u@a.com", "https://a.com?q", "a.com"} {
+	for _, bad := range []string{"*", "null", "https://a.com/x", "ftp://a.com", "https://u@a.com", "https://a.com?q", "a.com",
+		"https://a.com:", "https://a.com:0443", "https://a.com:0", "https://a.com:65536", "https://a.com:x", "https://a.com:+443"} {
 		t.Setenv("BRAND_CORS_ORIGINS", bad)
 		if _, err := load(); err == nil || !strings.Contains(err.Error(), "BRAND_CORS_ORIGINS") {
 			t.Errorf("%q: err = %v, want a BRAND_CORS_ORIGINS error", bad, err)
