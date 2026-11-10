@@ -271,24 +271,45 @@ var (
 	topPlaylists = obj(fields{"time_zone": str,
 		"periods": obj(fields{"week": arr(topPlaylist), "month": arr(topPlaylist), "year": arr(topPlaylist)})})
 
-	brandSlot = enum("favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "wordmark_inverse",
+	brandSlotNames = []string{"favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "wordmark_inverse",
 		"wordmark_navy", "wordmark_cream", "monogram_primary", "monogram_inverse", "monogram_navy", "monogram_cream",
-		"email_logo")
-	brandAssetFields = fields{"slot": brandSlot, "url": str, "content_type": str, "width": num, "height": num, "custom": boolean}
-	brandAsset       = obj(brandAssetFields)
-	brandShape       = obj(fields{"assets": obj(fields{"favicon_ico": brandAsset, "favicon_svg": brandAsset,
+		"email_logo"}
+	brandSlot           = enum(brandSlotNames...)
+	listeningBrandSlots = []string{"favicon_ico", "favicon_svg", "apple_touch_icon", "favicon_16", "favicon_32",
+		"favicon_48", "icon_192", "icon_512", "icon_maskable_512", "mark_primary", "mark_inverse", "mark_navy",
+		"mark_cream", "wordmark_primary", "wordmark_inverse", "wordmark_navy", "wordmark_cream",
+		"icon_headphones_navy", "icon_headphones_cream", "icon_now_playing_navy", "icon_now_playing_cream",
+		"icon_now_playing_static_navy", "icon_now_playing_static_cream", "icon_paused_navy", "icon_paused_cream",
+		"icon_playlist_navy", "icon_playlist_cream", "icon_track_navy", "icon_track_cream", "og_image", "email_logo"}
+	listeningBrandSlot  = enum(listeningBrandSlots...)
+	anyBrandSlot        = enum(slices.Concat(brandSlotNames, listeningBrandSlots)...)
+	brandAssetFields    = fields{"slot": brandSlot, "url": str, "content_type": str, "width": num, "height": num, "custom": boolean}
+	brandAsset          = obj(brandAssetFields)
+	listeningBrandAsset = obj(extend(brandAssetFields, fields{"slot": listeningBrandSlot}))
+	brandShape          = obj(fields{"assets": obj(fields{"favicon_ico": brandAsset, "favicon_svg": brandAsset,
 		"apple_touch_icon": brandAsset, "wordmark_primary": brandAsset, "wordmark_inverse": brandAsset,
 		"wordmark_navy": brandAsset, "wordmark_cream": brandAsset, "monogram_primary": brandAsset,
 		"monogram_inverse": brandAsset, "monogram_navy": brandAsset, "monogram_cream": brandAsset,
 		"email_logo": brandAsset})})
-	adminBrandAsset = obj(extend(brandAssetFields, fields{"label": str, "kind": enum("icon", "logo"), "size_bytes": num,
-		"original": str, "updated_at": null(ts), "default_url": str, "accept": arr(str), "rule": str,
+	listeningBrandShape = obj(fields{"assets": obj(listeningAssetFields())})
+	adminBrandAsset     = obj(extend(brandAssetFields, fields{"slot": anyBrandSlot, "label": str,
+		"kind": enum("icon", "logo", "image"), "group": enum("favicons", "logos", "icons", "social", "email"),
+		"size_bytes": num, "original": str, "updated_at": null(ts), "default_url": str, "accept": arr(str), "rule": str,
 		"preview": enum("light", "dark", "both")}))
 
 	okShape     = obj(fields{"ok": boolean})
 	countShape  = obj(fields{"count": num})
 	sentToShape = obj(fields{"sent_to": str})
 )
+
+// listeningAssetFields maps every listening slot to its asset shape.
+func listeningAssetFields() fields {
+	f := fields{}
+	for _, s := range listeningBrandSlots {
+		f[s] = listeningBrandAsset
+	}
+	return f
+}
 
 func extend(base, more fields) fields {
 	out := fields{}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="254" height="121" viewBox="33 9 254 121" role="img" aria-label="baoopn listening">
+  <title>baoopn listening</title>
+  <g fill="none" stroke="#fff5eb" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M45 32.5V70"/>
+    <path d="M45 70a12.5 12.5 0 1 1 12.5 12.5H57"/>
+    <path d="M98.5 82.5a12.5 12.5 0 1 1 12.5-12.5V82.5"/>
+    <path d="M139.5 57.5a12.5 12.5 0 1 1 0 25a12.5 12.5 0 1 1 0-25z"/>
+    <path d="M180.5 57.5a12.5 12.5 0 1 1 0 25a12.5 12.5 0 1 1 0-25z"/>
+    <path d="M127 70V54a33 33 0 0 1 66 0V70"/>
+    <path d="M209 117.5V70a12.5 12.5 0 1 1 12.5 12.5"/>
+    <path d="M250 82.5V70a12.5 12.5 0 0 1 25 0V82.5"/>
+  </g>
+</svg>

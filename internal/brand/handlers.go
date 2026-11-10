@@ -34,6 +34,7 @@ type AdminAsset struct {
 	Asset
 	Label      string     `json:"label"`
 	Kind       string     `json:"kind"`
+	Group      string     `json:"group"`
 	SizeBytes  int64      `json:"size_bytes"`
 	Original   string     `json:"original"`
 	UpdatedAt  *time.Time `json:"updated_at"`
@@ -57,7 +58,7 @@ func (s *Store) asset(st State, def slotDef) Asset {
 }
 
 func (s *Store) admin(st State, def slotDef) AdminAsset {
-	a := AdminAsset{Asset: s.asset(st, def), Label: def.Label, Kind: def.Kind, DefaultURL: s.files.URL(s.defaults[def.Slot].key),
+	a := AdminAsset{Asset: s.asset(st, def), Label: def.Label, Kind: def.Kind, Group: def.Group, DefaultURL: s.files.URL(s.defaults[def.Slot].key),
 		Accept: def.Accept, Rule: def.Rule, Preview: def.Preview, SizeBytes: int64(len(s.defaults[def.Slot].data))}
 	if c, ok := st.Custom[def.Slot]; ok {
 		at := c.UpdatedAt.UTC()
@@ -71,7 +72,7 @@ func (s *Store) admin(st State, def slotDef) AdminAsset {
 // absolute (MEDIA_PUBLIC_URL) is used as is; a site-relative one ("/media/…")
 // gets siteURL in front. On a database error it falls back to the default.
 func (s *Store) AbsoluteAsset(ctx context.Context, slot, siteURL string) (Asset, error) {
-	def, ok := slotByName(slot)
+	def, ok := s.b.slot(slot)
 	if !ok {
 		return Asset{}, ErrUnknownSlot
 	}
@@ -107,27 +108,24 @@ func absoluteHTTP(u string) bool {
 
 // Brand returns the public view of every slot.
 func (s *Store) Brand(st State) Brand {
-	b := Brand{Assets: make(map[string]Asset, len(slots))}
-	for _, def := range slots {
+	b := Brand{Assets: make(map[string]Asset, len(s.b.Slots))}
+	for _, def := range s.b.Slots {
 		b.Assets[def.Slot] = s.asset(st, def)
 	}
 	return b
 }
 
-// Hooks mounts nothing.
-func (s *Store) Hooks(chi.Router) {}
-
-// Public mounts GET /brand and GET /brand/{slot}.
-func (s *Store) Public(r chi.Router) {
-	r.Get("/brand", s.handlePublic)
-	r.Get("/brand/{slot}", s.handleRedirect)
+// mountPublic mounts GET <route> and GET <route>/{slot}.
+func (s *Store) mountPublic(r chi.Router) {
+	r.Get(s.b.Route, s.handlePublic)
+	r.Get(s.b.Route+"/{slot}", s.handleRedirect)
 }
 
-// Admin mounts GET /brand, PUT and DELETE /brand/{slot}.
-func (s *Store) Admin(r chi.Router) {
-	r.Get("/brand", s.handleAdminList)
-	r.Put("/brand/{slot}", s.handlePut)
-	r.Delete("/brand/{slot}", s.handleReset)
+// mountAdmin mounts GET <route>, PUT and DELETE <route>/{slot}.
+func (s *Store) mountAdmin(r chi.Router) {
+	r.Get(s.b.Route, s.handleAdminList)
+	r.Put(s.b.Route+"/{slot}", s.handlePut)
+	r.Delete(s.b.Route+"/{slot}", s.handleReset)
 }
 
 // publicState never fails: on a database error the defaults are served.
@@ -146,7 +144,7 @@ func (s *Store) handlePublic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Store) handleRedirect(w http.ResponseWriter, r *http.Request) {
-	def, ok := slotByName(chi.URLParam(r, "slot"))
+	def, ok := s.b.slot(chi.URLParam(r, "slot"))
 	if !ok {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "unknown brand slot")
 		return
@@ -162,8 +160,8 @@ func (s *Store) handleAdminList(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	out := make([]AdminAsset, 0, len(slots))
-	for _, def := range slots {
+	out := make([]AdminAsset, 0, len(s.b.Slots))
+	for _, def := range s.b.Slots {
 		out = append(out, s.admin(st, def))
 	}
 	httpapi.JSON(w, http.StatusOK, out)
@@ -172,7 +170,7 @@ func (s *Store) handleAdminList(w http.ResponseWriter, r *http.Request) {
 const maxRequest = 1 << 20
 
 func (s *Store) handlePut(w http.ResponseWriter, r *http.Request) {
-	def, ok := slotByName(chi.URLParam(r, "slot"))
+	def, ok := s.b.slot(chi.URLParam(r, "slot"))
 	if !ok {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "unknown brand slot")
 		return

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="track">
+  <title>track</title>
+  <g fill="none" stroke="#0b0537" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M90 105a25 25 0 1 0 0 50a25 25 0 1 0 0-50z"/>
+    <path d="M115 130V45a25 25 0 0 0 25 25"/>
+  </g>
+</svg>

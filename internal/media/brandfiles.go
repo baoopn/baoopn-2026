@@ -18,8 +18,10 @@ import (
 // orphan cleanup (which only looks at root names with a 24-hex stem) and
 // mediarefs never see them.
 
-// BrandKeyRe matches a brand file key: brand/<stem>.<16 hex>.<ext>.
-var BrandKeyRe = regexp.MustCompile(`^brand/[a-z][a-z0-9-]{0,39}\.[0-9a-f]{16}\.(ico|png|svg)$`)
+// BrandKeyRe matches a brand file key: brand/<stem>.<16 hex>.<ext>, or
+// brand/listening/<stem>.<16 hex>.<ext> for the listening sub-brand. No
+// other subfolder is allowed.
+var BrandKeyRe = regexp.MustCompile(`^brand/(listening/)?[a-z][a-z0-9-]{0,39}\.[0-9a-f]{16}\.(ico|png|svg)$`)
 
 // ErrBadBrandKey is returned for a key that does not match BrandKeyRe.
 var ErrBadBrandKey = errors.New("media: invalid brand file key")
@@ -34,7 +36,8 @@ var brandTypeByExt = map[string]string{
 func brandPath(dir, key string) string { return filepath.Join(dir, filepath.FromSlash(key)) }
 
 // PutBrandFile stores data under key (bucket: immutable cache headers, SVG
-// as an attachment; disk: MEDIA_DIR/brand, written atomically).
+// as an attachment; disk: MEDIA_DIR/brand or MEDIA_DIR/brand/listening,
+// written atomically).
 func (s *Store) PutBrandFile(ctx context.Context, key, ctype string, data []byte) error {
 	if !BrandKeyRe.MatchString(key) {
 		return ErrBadBrandKey
@@ -54,7 +57,8 @@ func (s *Store) PutBrandFile(ctx context.Context, key, ctype string, data []byte
 		}
 		return nil
 	}
-	dir := filepath.Join(s.dir, "brand")
+	dst := brandPath(s.dir, key)
+	dir := filepath.Dir(dst)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("media: brand dir: %w", err)
 	}
@@ -70,7 +74,7 @@ func (s *Store) PutBrandFile(ctx context.Context, key, ctype string, data []byte
 		return fmt.Errorf("media: write brand file: %w", errors.Join(werr, cerr))
 	}
 	_ = os.Chmod(tmpName, 0o644)
-	if err := os.Rename(tmpName, brandPath(s.dir, key)); err != nil {
+	if err := os.Rename(tmpName, dst); err != nil {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("media: rename brand file: %w", err)
 	}

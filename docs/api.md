@@ -24,6 +24,8 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
 | GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`; the defaults when the database is unreachable) |
 | GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
+| GET | `/brand/listening` | – | `ListeningBrand` (the same for the listening sub-brand; `Cache-Control: public, max-age=60`) |
+| GET | `/brand/listening/{slot}` | – | `302` to the listening slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
 | GET | `/credit` | `?logo=wordmark\|mark&color=color\|mono` (both optional) | `Credit` (the footer credit for client sites; `logo` picks the variant instead of the stored default, `color` overrides that variant's style for this request; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
 | OPTIONS | `/credit` | – | `204` CORS preflight (headers only for a listed origin) |
 | GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
@@ -113,6 +115,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/brand` | – | `AdminBrandAsset[]` (slot order) |
 | PUT | `/brand/{slot}` | multipart `file` (request ≤ 1 MiB) — see *Brand assets* | `AdminBrandAsset` (`custom: true`; the same bytes as the current file change nothing) |
 | DELETE | `/brand/{slot}` | – | `AdminBrandAsset` (`custom: false`, back to the default; idempotent); 404 `not_found` for an unknown slot |
+| GET | `/brand/listening` | – | `AdminBrandAsset[]` of the listening sub-brand (slot order) |
+| PUT | `/brand/listening/{slot}` | multipart `file`, as for `/brand/{slot}` | `AdminBrandAsset` |
+| DELETE | `/brand/listening/{slot}` | – | `AdminBrandAsset` (back to the default; idempotent) |
 | GET | `/credit` | – | `AdminCredit` (see *Credit*) |
 | PUT | `/credit` | `CreditInput` | `AdminCredit`; 422 `validation` with a message that starts with the field name |
 | GET | `/backups` | – | `BackupStatus` (see *Backups*) |
@@ -166,6 +171,24 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
 
 ### Brand assets
 
+- **Brands:** the API keeps two brands. `baoopn` is the site itself: routes `/brand`, settings
+  key `brand`, files under `brand/`. `listening` is the sub-brand of listening.baoopn.com:
+  routes `/brand/listening` (public and admin, same verbs, errors and cache headers as
+  `baoopn`), settings key `brand_listening`, files under `brand/listening/`. Each brand's
+  store only reads, keeps and deletes its own keys, so a reset or prune of one brand never
+  touches the other. A slot name outside the brand's table is 404 `not_found` (for example
+  `monogram_primary` under `/brand/listening`). `GET /api/v1/brand/listening/` (no slot) and
+  `PUT /api/admin/brand/listening` are 404 too. The routes send no CORS headers: other sites
+  read them server side.
+- **Admin fields:** each `AdminBrandAsset` has a `group` (`favicons`, `logos`, `icons`,
+  `social` or `email`) that the admin page uses for its sections, and a `kind` of `icon`,
+  `logo` or `image` (`image` is the social share image). The list is in table order, which
+  is also group order.
+- **Keys:** `media.BrandKeyRe` accepts `brand/<stem>.<16 hex>.<ext>` and
+  `brand/listening/<stem>.<16 hex>.<ext>`. No other subfolder, case or `..` is accepted.
+
+#### baoopn slots
+
 - **Slots** (fixed order), with what each accepts (type sniffed from the bytes, never the name):
 
   | slot | type | rule | max |
@@ -182,6 +205,50 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   | `monogram_navy` | SVG | viewBox (navy glyph, shown on light backgrounds) | 256 KiB |
   | `monogram_cream` | SVG | viewBox (cream glyph, shown on dark backgrounds) | 256 KiB |
   | `email_logo` | PNG | 240–1200 px wide, 60–600 px tall, 1.5:1 to 4:1 (shown 48 px tall in emails) | 256 KiB |
+
+#### listening slots
+
+- **Slots** (fixed order). The defaults are the files of the listening design kit, copied
+  byte for byte into `internal/brand/defaults/listening/`:
+
+  | slot | type | rule | max |
+  |---|---|---|---|
+  | `favicon_ico` | ICO | must contain 16×16, 32×32 and 48×48 | 256 KiB |
+  | `favicon_svg` | SVG | square viewBox | 256 KiB |
+  | `apple_touch_icon` | PNG | exactly 180×180 | 512 KiB |
+  | `favicon_16` | PNG | exactly 16×16 | 512 KiB |
+  | `favicon_32` | PNG | exactly 32×32 | 512 KiB |
+  | `favicon_48` | PNG | exactly 48×48 | 512 KiB |
+  | `icon_192` | PNG | exactly 192×192 | 512 KiB |
+  | `icon_512` | PNG | exactly 512×512 | 512 KiB |
+  | `icon_maskable_512` | PNG | exactly 512×512; keep the mark inside the central 80% circle | 512 KiB |
+  | `mark_primary` | SVG | square viewBox | 256 KiB |
+  | `mark_inverse` | SVG | square viewBox (shown on dark backgrounds) | 256 KiB |
+  | `mark_navy` | SVG | viewBox (navy glyph, shown on light backgrounds) | 256 KiB |
+  | `mark_cream` | SVG | viewBox (cream glyph, shown on dark backgrounds) | 256 KiB |
+  | `wordmark_primary` | SVG | viewBox | 256 KiB |
+  | `wordmark_inverse` | SVG | viewBox (shown on dark backgrounds) | 256 KiB |
+  | `wordmark_navy` | SVG | viewBox (navy glyph, shown on light backgrounds) | 256 KiB |
+  | `wordmark_cream` | SVG | viewBox (cream glyph, shown on dark backgrounds) | 256 KiB |
+  | `icon_<name>_navy` | SVG | square viewBox (shown on light backgrounds) | 256 KiB |
+  | `icon_<name>_cream` | SVG | square viewBox (shown on dark backgrounds) | 256 KiB |
+  | `og_image` | PNG | exactly 1200×630 | 512 KiB |
+  | `email_logo` | PNG | 240–1200 px wide, 60–600 px tall, 1.5:1 to 4:1 (shown 160 px wide in emails) | 512 KiB |
+
+  `<name>` is one of `headphones`, `now_playing` (animated), `now_playing_static` (the same
+  bars without motion, for reduced motion), `paused`, `playlist` and `track`: 12 UI icon
+  slots, 31 slots in all.
+- **Animated SVG:** an SVG may animate with SMIL (`<animate>`, `<set>`), as the default
+  `icon_now_playing_*` does. The SVG rules below still apply, so an animation can never change
+  a link. Scripts and `url(` references stay blocked.
+- **Maskable icon:** the API checks only the size of `icon_maskable_512`. Nothing checks the
+  safe zone, so keep the mark inside the central 80% circle yourself. The admin page shows a
+  copy clipped to a circle next to the full image.
+- **Caching:** `GET /api/v1/brand/listening` is cached 60 s and each `302` 300 s, so a
+  replaced file reaches listening.baoopn.com within a few minutes. The file URLs themselves
+  never change and are cached for a year.
+
+#### Both brands
 
 - **Errors:** 400 `bad_request` (not multipart, no `file` field), 404 `not_found` (unknown
   slot), 413 `too_large`, 415 `unsupported_type` (e.g. "favicon_ico needs an ICO file"),
@@ -200,13 +267,14 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   `<style>` or in any attribute without a namespace prefix.
   Editor attributes (Inkscape, Sodipodi) are fine.
 - **Storage:** files are stored byte for byte (never converted, no `media` row) under
-  `brand/<stem>.<16 hex of sha256>.<ext>` in the bucket (or `MEDIA_DIR/brand/`), so each
+  `brand/<stem>.<16 hex of sha256>.<ext>` in the bucket (or `MEDIA_DIR/brand/`; the
+  listening brand uses `brand/listening/` and `MEDIA_DIR/brand/listening/`), so each
   version has its own immutable URL (`MEDIA_PUBLIC_URL/brand/…`, else `/media/brand/…`).
   The defaults are embedded in the API (`internal/brand/defaults/`) and uploaded on startup
   when missing; an override whose file is gone falls back to the default (only when every
   default was found or uploaded, so an unreachable or read-only bucket cannot wipe the overrides). Uploading a
-  slot's default bytes is a reset. The `brand`
-  setting holds only overrides and replaced files. A replaced file is deleted 7 days later;
+  slot's default bytes is a reset. The `brand` and `brand_listening`
+  settings hold only overrides and replaced files. A replaced file is deleted 7 days later;
   a current or default file never is. The orphan cleanup ignores `brand/`.
 - The web app reads `GET /api/v1/brand` (cached 60 s) and redirects `/favicon.ico`,
   `/favicon.svg` and `/apple-touch-icon.png` to the current files.
