@@ -12,7 +12,9 @@
 # daily time, run-now across the daily time, a lost final write, old
 # requests, SQL safety, a database without the status tables, a read-only
 # role, interrupted runs, trimming old runs, CLI runs, a restore without
-# status data, a quick docker stop and the idle mode.
+# status data, a quick docker stop and the idle mode. The services tick
+# every 2 s (BACKUP_TICK_SECONDS) so the waits stay short; one more service
+# keeps the default 30 s tick for the docker stop check.
 #
 # Env: BACKUP_TEST_IMAGE (default baoopn-backup:test), SKIP_BUILD=1 to reuse
 # an existing image, KEEP_ON_FAIL=1 to leave the containers.
@@ -31,6 +33,9 @@ PG="$ID-pg"
 TMP=$(mktemp -d)
 PASS=0
 FAILED=0
+# Tick and status probe interval of the services, in seconds.
+TICK=2
+PROBE=5
 # A daily time 12 hours away: no scheduled backup during the test.
 FAR=$(date -u -d "@$(($(date +%s) + 43200))" +%H:%M)
 
@@ -39,7 +44,7 @@ cleanup() {
 	if [ "$rc" -ne 0 ] && [ "${KEEP_ON_FAIL:-}" = 1 ]; then
 		echo "KEEP_ON_FAIL: leaving $ID-* containers, $NET and $VOL"
 	else
-		for c in pg main idle evil plain ro; do docker rm -f "$ID-$c" >/dev/null 2>&1 || true; done
+		for c in pg main idle evil plain ro slow; do docker rm -f "$ID-$c" >/dev/null 2>&1 || true; done
 		docker network rm "$NET" >/dev/null 2>&1 || true
 		docker volume rm "$VOL" >/dev/null 2>&1 || true
 	fi
@@ -83,7 +88,8 @@ health() { docker exec "$ID-$1" backupctl health 2>&1; }
 health_is() { health "$1" | grep -q -- "$2"; }
 
 # svc NAME DB [docker args...]: the scheduler against database DB. PGU and
-# PGP pick the role; RCPT overrides the recipient.
+# PGP pick the role; RCPT overrides the recipient. A later -e flag overrides
+# a default (docker keeps the last value).
 svc() {
 	n=$1
 	d=$2
@@ -91,7 +97,7 @@ svc() {
 	docker run -d --name "$ID-$n" --network "$NET" -v "$VOL:/backups" \
 		-e PGHOST="$PG" -e PGUSER="${PGU:-baoopn}" -e PGPASSWORD="${PGP:-st-password}" -e PGDATABASE="$d" \
 		-e BACKUP_REMOTE=/backups -e BACKUP_AGE_RECIPIENT="${RCPT:-$RECIPIENT}" -e BACKUP_TIME="$FAR" \
-		"$@" "$IMAGE" run >/dev/null
+		-e BACKUP_TICK_SECONDS="$TICK" "$@" "$IMAGE" run >/dev/null
 }
 
 # queue DB: a run-now request, as the API makes it; prints its id.
@@ -143,10 +149,10 @@ q baoopn "INSERT INTO backup_runs (kind, status, started_at, finished_at)
 IDLE_RUN=$(queue idle)
 q idle "INSERT INTO settings (key, value) VALUES ('backup', '{\"keep_days\": 9}')" >/dev/null
 
-svc main baoopn -e BACKUP_STATUS_PROBE_SECONDS=20
+svc main baoopn -e BACKUP_STATUS_PROBE_SECONDS="$PROBE"
 # S3 settings without an endpoint: idles. Marker values must never show.
 docker run -d --name "$ID-idle" --network "$NET" -e PGHOST="$PG" -e PGUSER=baoopn -e PGPASSWORD=st-password \
-	-e PGDATABASE=idle -e BACKUP_AGE_RECIPIENT="$RECIPIENT" -e BACKUP_S3_BUCKET=st-bucket \
+	-e PGDATABASE=idle -e BACKUP_AGE_RECIPIENT="$RECIPIENT" -e BACKUP_TICK_SECONDS="$TICK" -e BACKUP_S3_BUCKET=st-bucket \
 	-e BACKUP_S3_ACCESS_KEY_ID=st-marker-key -e BACKUP_S3_SECRET_ACCESS_KEY=st-marker-secret \
 	-e BACKUP_PING_URL=https://st-marker-ping.invalid/x "$IMAGE" run >/dev/null
 
@@ -233,7 +239,7 @@ wait_for 60 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok && ok 
 	bad "queued while paused: $(q baoopn "SELECT status, error FROM backup_runs WHERE id = $RUN")"
 echo "== 4b database outage while paused"
 docker stop "$PG" >/dev/null
-sleep 45 # more than a tick and a probe (BACKUP_STATUS_PROBE_SECONDS=20)
+sleep $((TICK + PROBE + 15)) # more than a tick and a probe
 health_is main '^ok: paused' && in_logs main "status reporting failed" &&
 	ok "while the database is down the service stays paused and warns" || bad "outage: $(health main)"
 docker start "$PG" >/dev/null
@@ -270,9 +276,9 @@ unlock() {
 }
 
 echo "== 15 run now across the daily time"
-now=$(date +%s)
-SOON=$(date -u -d "@$((now + 90))" +%H:%M)
-soon=$(date -u -d "$(date -u -d "@$((now + 90))" +%Y-%m-%d) $SOON:00" +%s)
+# The first minute boundary at least 15 s ahead (15 to 74 s).
+soon=$((($(date +%s) + 15 + 59) / 60 * 60))
+SOON=$(date -u -d "@$soon" +%H:%M)
 lock_hold 181 "LOCK TABLE projects" # pg_dump waits for it
 set_backup "{\"backup_time\":\"$SOON\"}"
 RUN=$(queue baoopn)
@@ -280,7 +286,7 @@ wait_for 40 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" running |
 while [ "$(date +%s)" -le $((soon + 5)) ]; do sleep 1; done
 unlock 181
 wait_for 60 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok || true
-sleep 35
+sleep $((2 * TICK + 5)) # a tick and more for a second backup to show
 if is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok &&
 	is baoopn "SELECT count(*) FROM backup_runs WHERE id > $RUN" 0 &&
 	is baoopn "SELECT next_run_at > now() + interval '23 hours' FROM backup_agent" t; then
@@ -295,8 +301,8 @@ RUN=$(queue baoopn)
 wait_for 40 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" running || true
 OLD=$(q baoopn "INSERT INTO backup_runs (kind, status, started_at) VALUES ('cli', 'running', now() - interval '7 hours') RETURNING id")
 NEW=$(q baoopn "INSERT INTO backup_runs (kind, status, started_at) VALUES ('cli', 'running', now()) RETURNING id")
-# Run writes fail (lock_timeout) for 25 s after the backup ends.
-lock_hold 25 "LOCK TABLE backup_runs IN EXCLUSIVE MODE"
+# Run writes fail (lock_timeout) for 15 s after the backup ends.
+lock_hold 15 "LOCK TABLE backup_runs IN EXCLUSIVE MODE"
 sleep 1
 unlock 121
 if wait_for 90 is baoopn "SELECT status FROM backup_runs WHERE id = $RUN" ok &&
@@ -347,7 +353,20 @@ sleep 2
 t0=$(date +%s)
 docker stop "$ID-main" >/dev/null
 took=$(($(date +%s) - t0))
-[ "$took" -lt 5 ] && ok "docker stop during the tick sleep takes ${took}s" || bad "docker stop took ${took}s"
+[ "$took" -lt 5 ] && ok "docker stop takes ${took}s" || bad "docker stop took ${took}s"
+# The default 30 s tick, against plain: no status writes. A stop during the
+# tick sleep must not wait for the sleep to end.
+svc slow plain -e BACKUP_TICK_SECONDS=30
+if wait_for 40 in_logs slow "next backup at"; then
+	sleep 2
+	t0=$(date +%s)
+	docker stop "$ID-slow" >/dev/null
+	took=$(($(date +%s) - t0))
+	[ "$took" -lt 5 ] && ok "docker stop during a 30 s tick sleep takes ${took}s" ||
+		bad "docker stop (30 s tick) took ${took}s"
+else
+	bad "slow: no next backup log: $(logs slow | tail -n 3)"
+fi
 
 echo "== 5 sql safety"
 # SQL in the recipient (fails the run) and in the prefix (stored as text).
@@ -370,7 +389,7 @@ PGU=ro PGP=ro-pass svc ro baoopn -e BACKUP_ON_START=true -e BACKUP_PREFIX=ro
 wait_for 90 health_is plain '^ok: last backup' || true
 wait_for 90 health_is ro '^ok: last backup' || true
 # At least two more ticks of the read-only service.
-sleep 35
+sleep $((2 * TICK + 5))
 n=$(logs plain | grep -c "status reporting off: the database has no backup status tables" || true)
 health_is plain '^ok: last backup' && [ "$n" -eq 1 ] &&
 	ok "a database without status tables: backup ok, reporting off logged once" ||

@@ -156,15 +156,59 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backup: ${{ steps.filter.outputs.backup }}
+    steps:
+      # Plain git, no extra token permissions: release.yml calls this
+      # workflow with contents: read only.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "backup=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BASE...HEAD")
+          if printf '%s\n' "$files" | grep -E -q '^(deploy/backup/|migrations/|\.github/workflows/ci\.yml$|docker-compose[^/]*\.yml$)'; then
+            echo "backup=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "backup=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  # Always runs, so a failed path check fails this required check instead of
+  # skipping it. On a pull request that does not touch the backup files,
+  # every step after the skip notice is skipped.
   backup:
     name: Backup — shellcheck, build, roundtrip
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Path check failed
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::error::the changes job did not succeed"
+          exit 1
+      - name: Skip notice
+        if: needs.changes.outputs.backup != 'true' && github.event_name == 'pull_request'
+        run: echo "::notice::no backup changes, skipping"
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.backup == 'true' || github.event_name != 'pull_request'
       - name: shellcheck
+        if: needs.changes.outputs.backup == 'true' || github.event_name != 'pull_request'
         run: shellcheck -x deploy/backup/bin/* deploy/backup/test/*.sh
       - uses: docker/setup-buildx-action@v3
+        if: needs.changes.outputs.backup == 'true' || github.event_name != 'pull_request'
       - uses: docker/build-push-action@v6
+        if: needs.changes.outputs.backup == 'true' || github.event_name != 'pull_request'
         with:
           context: deploy/backup
           file: deploy/backup/Dockerfile
@@ -174,6 +218,8 @@ jobs:
           cache-from: type=gha,scope=backup
           cache-to: type=gha,mode=max,scope=backup
       - name: Backup/restore roundtrip (local containers, no cloud)
+        if: needs.changes.outputs.backup == 'true' || github.event_name != 'pull_request'
         run: SKIP_BUILD=1 sh deploy/backup/test/roundtrip.sh
       - name: Backup status in the database (local containers, no cloud)
+        if: needs.changes.outputs.backup == 'true' || github.event_name != 'pull_request'
         run: SKIP_BUILD=1 sh deploy/backup/test/status.sh
