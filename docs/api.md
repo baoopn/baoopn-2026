@@ -68,7 +68,7 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
   within a minute, or with no event 15 s after opening, and it
   retries the stream every 5 min. The stream closes after the tab has been hidden for 60 s.
 
-## Admin — `/api/admin` (Bearer Clerk session token)
+## Admin — `/api/admin` (Bearer Clerk session token or user API key)
 
 `GET /config` is unauthenticated (`AdminConfig`). Everything else needs
 `Authorization: Bearer <clerk session token>`; 401 `unauthorized`, 403 `forbidden`.
@@ -127,6 +127,22 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | DELETE | `/backups/settings` | – | `BackupStatus` (the four overrides are cleared; `paused` stays) |
 | PUT | `/backups/pause` | `{ paused }` | `BackupStatus` (sets or clears `paused_at`) |
 | POST | `/backups/run` | – | `202 BackupRun` (`status: "queued"`); 409 `busy`, `agent_offline` or `not_configured` |
+
+### Calling the admin API with an API key
+
+Scripts can call the admin API with a Clerk user API key instead of a session token.
+
+- Create the key in `/admin/account`, on the API keys tab. Only keys that belong to an admin work.
+- Send it as `Authorization: Bearer <key>`. The API sees the `ak_` prefix and checks the key with Clerk.
+- The API returns 401 `unauthorized` for an invalid, revoked or expired key, 403 `forbidden`
+  for a user who is not an admin, and 502 `auth_unavailable` when it cannot reach Clerk
+  or Clerk rejects the server's own secret key.
+- The API caches a checked key for up to 60 s, so a revoked key can keep working for up to 60 s.
+- The same limit of 600 requests per minute per IP applies.
+
+```
+curl -H "Authorization: Bearer $ADMIN_USER_API_KEY" https://baoopn.com/api/admin/me
+```
 
 ### Inbox event stream — `GET /api/admin/inbox/events`
 
