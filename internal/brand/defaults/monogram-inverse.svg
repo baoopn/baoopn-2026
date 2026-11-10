@@ -1,9 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="baoopn monogram">
-  <title>baoopn monogram</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="baoopn mark">
+  <title>baoopn mark</title>
   <rect width="200" height="200" rx="21" fill="#fff5eb"/>
   <g fill="none" stroke="#0b0537" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M37.5 50V125"/>
-    <path d="M37.5 125a25 25 0 1 1 25 25H61.7"/>
-    <path d="M112.5 150V125a25 25 0 0 1 50 0V150"/>
+    <path d="M59 75a25 25 0 1 1 0 50a25 25 0 1 1 0-50z"/>
+    <path d="M141 75a25 25 0 1 1 0 50a25 25 0 1 1 0-50z"/>
+    <path d="M84 100a16 16 0 0 1 32 0"/>
   </g>
+  <circle cx="66" cy="102" r="7.5" fill="#0b0537"/>
+  <circle cx="148" cy="102" r="7.5" fill="#0b0537"/>
 </svg>

@@ -9,7 +9,7 @@
 	const inverse = $derived(brandSize(brand, 'monogram_inverse', 64, 64));
 </script>
 
-<!-- Brand-kit monogram: primary (navy badge) by day, inverse by night. -->
+<!-- Brand-kit glasses mark: primary (navy badge) by day, inverse by night. -->
 <img
 	src={brandSrc(brand, 'monogram_primary')}
 	alt=""

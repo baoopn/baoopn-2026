@@ -38,7 +38,7 @@ func (b Brand) logo() *Logo {
 		strings.ContainsAny(b.LogoURL, " \t\r\n\"'<>\\`") {
 		return nil
 	}
-	w := 116 // size unknown: the default logo (480×198) at logoHeight
+	w := 116 // size unknown: the default logo (640×264) at logoHeight
 	if b.LogoWidth > 0 && b.LogoHeight > 0 {
 		w = (logoHeight*b.LogoWidth + b.LogoHeight/2) / b.LogoHeight
 	}

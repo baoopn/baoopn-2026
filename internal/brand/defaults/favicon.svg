@@ -1,40 +1,11 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="200"
-   height="200"
-   viewBox="0 0 200 200"
-   version="1.1"
-   id="svg1"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs1" />
-  <g
-     id="layer1"
-     transform="translate(-3.242506,-538.4079)">
-    <path
-       style="vector-effect:non-scaling-stroke;fill:#0b0637;fill-opacity:1;stroke:none;stroke-width:1.20001;stroke-linecap:round;stroke-linejoin:round;-inkscape-stroke:hairline;paint-order:markers stroke fill"
-       id="rect43-6"
-       width="240"
-       height="240"
-       x="1200"
-       y="0"
-       d="m 1225,0 h 190 a 25,25 45 0 1 25,25 v 190 a 25,25 135 0 1 -25,25 h -190 a 25,25 45 0 1 -25,-25 V 25 a 25,25 135 0 1 25,-25 z"
-       transform="matrix(0.83333333,0,0,0.83333333,-996.75749,538.40788)" />
-    <g
-       id="g43-1"
-       transform="translate(-1179.2576,520.40788)"
-       style="fill:none;stroke:#fff5eb;stroke-opacity:1">
-      <path
-         id="path27-3-6-6-4-1-4"
-         style="fill:none;fill-opacity:1;stroke:#fff5eb;stroke-width:16;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:markers stroke fill"
-         d="m 1220.0001,68 c 0,74.868 0,75 0,75 m 0,0 a 25.00002,25.00002 0 0 1 25,-25.0001 25.00002,25.00002 0 0 1 25.0001,25.0001 v 0 a 25.00002,25.00002 0 0 1 -25.0001,25 25.00002,25.00002 0 0 1 -0.8189,-0.02" />
-      <path
-         id="path51-15-8-6-3-8-2"
-         style="fill:none;fill-opacity:1;stroke:#fff5eb;stroke-width:16;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:markers stroke fill"
-         d="m 1345.0001,143 c 0,24.956 0,25 0,25 m -50,-25 a 25.00002,25.00002 0 0 1 25,-25.0001 25.00002,25.00002 0 0 1 25,25.0001 m -50,0 c 0,24.956 0,25 0,25" />
-    </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="baoopn">
+  <title>baoopn</title>
+  <rect width="200" height="200" rx="21" fill="#0b0537"/>
+  <g fill="none" stroke="#fff5eb" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M59 75a25 25 0 1 1 0 50a25 25 0 1 1 0-50z"/>
+    <path d="M141 75a25 25 0 1 1 0 50a25 25 0 1 1 0-50z"/>
+    <path d="M84 100a16 16 0 0 1 32 0"/>
   </g>
+  <circle cx="66" cy="102" r="7.5" fill="#fff5eb"/>
+  <circle cx="148" cy="102" r="7.5" fill="#fff5eb"/>
 </svg>
