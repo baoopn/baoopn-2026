@@ -1,6 +1,16 @@
+<p align="center">
+  <a href="https://baoopn.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://baoopn.com/api/v1/brand/wordmark_inverse">
+      <img src="https://baoopn.com/api/v1/brand/wordmark_primary" alt="baoopn" width="200">
+    </picture>
+  </a>
+</p>
+
 # baoopn-2026
 
-The source of my portfolio and blog: a Go API and a SvelteKit site with an admin dashboard.
+The source of my portfolio and blog at [baoopn.com](https://baoopn.com): a Go API and a
+SvelteKit site with an admin dashboard.
 
 ## What it does
 
@@ -14,6 +24,17 @@ The source of my portfolio and blog: a Go API and a SvelteKit site with an admin
   countries. No cookies and no stored IPs.
 - **Listening.** A now-playing card and recent plays from my
   [spotify-tracker](https://github.com/baoopn/spotify-tracker) service.
+- **Brand files.** The logos, icons and email logo live in the admin. I can replace or reset each
+  one, and a public API serves them to other sites. It holds two brands: baoopn, and the
+  listening sub-brand that listening.baoopn.com uses. See [docs/brand-kit](docs/brand-kit).
+- **Footer credit.** Client sites I build fetch a "by baoopn" credit from one endpoint. I set the
+  text and logo style in the admin, and only listed sites get it. See
+  [docs/credit.md](docs/credit.md).
+- **Backups.** An encrypted Postgres dump goes off-site once a day. The admin shows the status and recent
+  runs, sets the schedule, and has a button to back up now. See [docs/backup.md](docs/backup.md).
+- **SEO.** Each page has a canonical URL and structured data, and the admin is kept out of search.
+- **Admin API keys.** The account page embeds Clerk's profile panel, where I can make API keys.
+  Scripts can then call the admin API with a key instead of a session.
 
 ## Stack
 
@@ -44,14 +65,14 @@ internal network and forwards the visitor's IP and country with a shared token.
 
 ```
 cmd/api/              API entry point and wiring
-internal/             feature packages (blog, projects, contact, mail, analytics, media, auth, ...)
+internal/             feature packages (blog, projects, contact, mail, analytics, brand, credit, ...)
 migrations/           goose SQL migrations, embedded in the binary
 seed/                 first-run content (profile, posts and their screenshots)
 web/                  SvelteKit app: public site in routes/(site), admin in routes/admin
 workers/inbound-email Cloudflare Email Worker for email replies
 deploy/docker/        Dockerfiles for the API and the web app
 deploy/backup/        encrypted off-site Postgres backups (docs/backup.md)
-docs/                 API contract (api.md) and deployment notes (deployment.md)
+docs/                 API contract (api.md), deployment, backups, credit and the brand kit
 ```
 
 ## Run it locally
