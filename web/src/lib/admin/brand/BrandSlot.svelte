@@ -1,23 +1,32 @@
 <script lang="ts">
 	import { ImageUp, LoaderCircle, RotateCcw } from '@lucide/svelte';
 	import { invalidateAll } from '$app/navigation';
-	import type { AdminBrandAsset } from '#lib/api/types.js';
+	import type { AdminBrandAsset, BrandName } from '#lib/api/types.js';
 	import ConfirmDialog from '#lib/admin/components/ConfirmDialog.svelte';
 	import RelTime from '#lib/admin/components/RelTime.svelte';
 	import { admin, put } from '#lib/admin/api.js';
 	import { bytes, errorMessage } from '#lib/admin/format.js';
 	import { toasts } from '#lib/admin/toast.svelte.js';
+	import { BRAND_COPY, apiBase, isMaskable, isWide, previewSizes } from './layout.js';
 
 	let {
 		asset,
+		brand = 'baoopn',
+		base = apiBase(brand),
 		onchange
-	}: { asset: AdminBrandAsset; onchange: (a: AdminBrandAsset) => void } = $props();
+	}: {
+		asset: AdminBrandAsset;
+		brand?: BrandName;
+		/** Admin API path of the brand's slot list; PUT and DELETE go to base/slot. */
+		base?: string;
+		onchange: (a: AdminBrandAsset) => void;
+	} = $props();
 
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let confirmOpen = $state(false);
 
-	const id = $derived('brand-' + asset.slot);
+	const id = $derived('brand-' + brand + '-' + asset.slot);
 	const swatches = $derived(
 		[
 			{ key: 'light', name: 'light', bg: '#fff5eb' },
@@ -25,32 +34,16 @@
 		].filter((s) => asset.preview === 'both' || asset.preview === s.key)
 	);
 
-	/** Preview sizes in CSS px; null means "logo, sized by height". */
-	const sizes = $derived.by((): number[] | null => {
-		switch (asset.slot) {
-			case 'favicon_ico':
-				return [16, 32, 48];
-			case 'favicon_svg':
-				return [32, 64];
-			case 'apple_touch_icon':
-				return [90];
-			default:
-				return null;
-		}
-	});
-
-	/** Landscape logos preview 48 px tall (the email logo's size in mail). */
+	/** Preview sizes in CSS px; null means a logo or image sized by its shape. */
+	const sizes = $derived(previewSizes(asset.slot));
 	// Wide logos keep their aspect ratio; the rest fill a square.
-	const wide = $derived(
-		asset.slot.startsWith('wordmark_') ||
-			asset.slot === 'monogram_navy' ||
-			asset.slot === 'monogram_cream' ||
-			asset.slot === 'email_logo'
-	);
+	const wide = $derived(isWide(asset));
+	const maskable = $derived(isMaskable(asset.slot));
+	const path = $derived(base + '/' + asset.slot);
 
 	async function done(next: AdminBrandAsset, title: string) {
 		onchange(next);
-		toasts.success(title, 'The public site picks up changes within a minute.');
+		toasts.success(title, BRAND_COPY[brand].toast);
 		await invalidateAll();
 	}
 
@@ -64,7 +57,7 @@
 		try {
 			const fd = new FormData();
 			fd.append('file', file);
-			await done(await put<AdminBrandAsset>('/brand/' + asset.slot, fd), `${asset.label} replaced`);
+			await done(await put<AdminBrandAsset>(path, fd), `${asset.label} replaced`);
 		} catch (err) {
 			error = errorMessage(err);
 			toasts.error(`Could not replace the ${asset.label.toLowerCase()}`, error);
@@ -79,7 +72,7 @@
 		error = null;
 		try {
 			await done(
-				await admin<AdminBrandAsset>('/brand/' + asset.slot, { method: 'DELETE' }),
+				await admin<AdminBrandAsset>(path, { method: 'DELETE' }),
 				`${asset.label} reset`
 			);
 		} catch (err) {
@@ -94,7 +87,7 @@
 <li class="card flex flex-col gap-3 p-4" aria-labelledby="{id}-h" aria-busy={busy}>
 	<div class="flex flex-wrap items-start justify-between gap-2">
 		<div class="min-w-0">
-			<h3 id="{id}-h" class="font-medium">{asset.label}</h3>
+			<h4 id="{id}-h" class="font-medium">{asset.label}</h4>
 			<p id="{id}-rule" class="hint mt-0">{asset.rule}</p>
 		</div>
 		<span
@@ -122,6 +115,17 @@
 								style:width="{px}px"
 								style:height="{px}px"
 							/>
+							{#if maskable}
+								<img
+									src={asset.url}
+									alt="{asset.label} at {px} px, clipped to a circle, on a {s.name} background"
+									width={px}
+									height={px}
+									class="overflow-hidden rounded-full"
+									style:width="{px}px"
+									style:height="{px}px"
+								/>
+							{/if}
 						{/each}
 					{:else}
 						<img
@@ -129,7 +133,11 @@
 							alt="{asset.label} on a {s.name} background"
 							width={asset.width || undefined}
 							height={asset.height || undefined}
-							class={wide ? 'h-12 w-auto' : 'size-16'}
+							class={asset.slot === 'og_image'
+								? 'h-auto w-full max-w-xs'
+								: wide
+									? 'h-12 w-auto'
+									: 'size-16'}
 						/>
 					{/if}
 				</div>
