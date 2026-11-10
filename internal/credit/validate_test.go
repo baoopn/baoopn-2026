@@ -15,6 +15,11 @@ func TestNormalizeOrigin(t *testing.T) {
 		{"http://127.0.0.1", "http://127.0.0.1"},
 		{"http://[::1]:80", "http://[::1]"},
 		{"  https://xn--bcher-kva.de  ", "https://xn--bcher-kva.de"},
+		{"https://a.com:0443", "https://a.com"},
+		{"https://a.com:08443", "https://a.com:8443"},
+		{"http://localhost:080", "http://localhost"},
+		{"https://[2001:DB8::1]:8443", "https://[2001:db8::1]:8443"},
+		{"https://my-site.co.uk", "https://my-site.co.uk"},
 	} {
 		if got, ok := normalizeOrigin(c.in); !ok || got != c.want {
 			t.Errorf("normalizeOrigin(%q) = %q %v, want %q", c.in, got, ok, c.want)
@@ -24,6 +29,9 @@ func TestNormalizeOrigin(t *testing.T) {
 		"http://a.com", "https://a.com/x", "https://a.com?q", "https://a.com#f", "https://*.a.com",
 		"https://u@a.com", "ftp://a.com", "https://bücher.de", "null", "", "a.com", "https://",
 		"https://a.com:0", "https://a.com:99999", "https:a.com", "https://" + strings.Repeat("a", 200) + ".com",
+		"https://a.com:", "https://a.com:00", "https://a.com:065536", "https://a_b.com", "https://a..com",
+		"https://.a.com", "https://a.com.", "https://a%2ecom", "https://[fe80::1%25eth0]", "https://[::1",
+		"https://a<b.com", `https://a"b.com`, "https://a b.com", "https://[1.2.3.4]", "https://a.com:x",
 	} {
 		if got, ok := normalizeOrigin(in); ok {
 			t.Errorf("normalizeOrigin(%q) = %q, want rejected", in, got)
@@ -62,6 +70,14 @@ func TestValidate(t *testing.T) {
 		"empty text":   {func(i *Input) { i.Text = "   " }, msgText},
 		"81 runes":     {func(i *Input) { i.Text = strings.Repeat("é", 81) }, msgText},
 		"tab":          {func(i *Input) { i.Text = "a\tb" }, msgText},
+		"line sep":     {func(i *Input) { i.Text = "a\u2028b" }, msgText},
+		"para sep":     {func(i *Input) { i.Text = "a\u2029b" }, msgText},
+		"bidi RLO":     {func(i *Input) { i.Text = "a\u202eb" }, msgText},
+		"bidi LRE":     {func(i *Input) { i.Text = "a\u202ab" }, msgText},
+		"bidi isolate": {func(i *Input) { i.Text = "a\u2066b\u2069" }, msgText},
+		"zero width":   {func(i *Input) { i.Text = "a\u200bb" }, msgText},
+		"zwj":          {func(i *Input) { i.Text = "a\u200db" }, msgText},
+		"bom":          {func(i *Input) { i.Text = "\ufeffab" }, msgText},
 		"http url":     {func(i *Input) { i.URL = "http://baoopn.com" }, msgURL},
 		"no scheme":    {func(i *Input) { i.URL = "//x" }, msgURL},
 		"javascript":   {func(i *Input) { i.URL = "javascript:alert(1)" }, msgURL},

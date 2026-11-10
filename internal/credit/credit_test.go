@@ -171,10 +171,93 @@ func TestCORS(t *testing.T) {
 }
 
 func TestPublicBrandError(t *testing.T) {
-	m, b := newTest(&Doc{Text: "x", URL: "https://baoopn.com", Logo: LogoWordmark, Origins: []string{}})
+	m, b := newTest(&Doc{Text: "x", URL: "https://baoopn.com", Logo: LogoWordmark, Origins: []string{"https://a.com"}})
 	b.err = errors.New("bad site URL")
-	if w := serve(m, "GET", ""); w.Code != 500 || strings.Contains(w.Header().Get("Cache-Control"), "public") {
+	w := serve(m, "GET", "https://a.com")
+	if w.Code != 500 || w.Header().Get("Cache-Control") != "no-store" ||
+		w.Header().Get("Access-Control-Allow-Origin") != "" || w.Header().Get("Vary") != "Origin" {
 		t.Errorf("brand error = %d %v", w.Code, w.Header())
+	}
+}
+
+// TestPublicReadError: a failed read serves the defaults for 60 s with no
+// CORS header, and the next request reads again.
+func TestPublicReadError(t *testing.T) {
+	m, _ := newTest(nil)
+	fail := true
+	reads := 0
+	m.read = func(context.Context) ([]byte, error) {
+		reads++
+		if fail {
+			return nil, errors.New("db down")
+		}
+		return []byte(`{"text":"Made by","url":"https://x.com","logo":"mark","origins":["https://a.com"]}`), nil
+	}
+	w := serve(m, "GET", "https://a.com")
+	h := w.Header()
+	var env struct{ Data Credit }
+	if w.Code != 200 || h.Get("Cache-Control") != "public, max-age=60" || h.Get("Access-Control-Allow-Origin") != "" ||
+		h.Get("Vary") != "Origin" || json.Unmarshal(w.Body.Bytes(), &env) != nil ||
+		env.Data.Text != defaultText || env.Data.URL != "https://www.baoopn.com" || env.Data.Logo.Kind != LogoWordmark {
+		t.Errorf("GET on read error = %d %v %s", w.Code, h, w.Body)
+	}
+	w = serve(m, "OPTIONS", "https://a.com")
+	if w.Code != 204 || w.Body.Len() != 0 {
+		t.Errorf("OPTIONS on read error = %d", w.Code)
+	}
+	for k := range w.Header() {
+		if strings.HasPrefix(k, "Access-Control-") {
+			t.Errorf("OPTIONS on read error has %s", k)
+		}
+	}
+	if m.snap.Load() != nil || reads != 2 {
+		t.Fatalf("snapshot %v after %d failed reads, want nil", m.snap.Load(), reads)
+	}
+	// The database is back: the next request reads it and lists the origin.
+	fail = false
+	w = serve(m, "GET", "https://a.com")
+	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "https://a.com" ||
+		w.Header().Get("Cache-Control") != "public, max-age=300" || reads != 3 || m.snap.Load() == nil {
+		t.Errorf("GET after recovery = %d %v, reads %d", w.Code, w.Header(), reads)
+	}
+	serve(m, "GET", "https://a.com")
+	if reads != 3 {
+		t.Errorf("reads = %d, want the snapshot to serve the 4th request", reads)
+	}
+}
+
+// TestSaveDuringFirstLoad: a save that finishes while the first read is in
+// flight wins over that older read.
+func TestSaveDuringFirstLoad(t *testing.T) {
+	m, _ := newTest(nil)
+	entered, release := make(chan struct{}), make(chan struct{})
+	m.read = func(context.Context) ([]byte, error) {
+		close(entered)
+		<-release
+		return []byte(`{"text":"Old","url":"https://old.com","logo":"wordmark","origins":[]}`), nil
+	}
+	var written []Doc
+	m.write = func(_ context.Context, d Doc) error { written = append(written, d); return nil }
+
+	got := make(chan Doc, 1)
+	go func() {
+		d, err := m.load(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		got <- d
+	}()
+	<-entered
+	saved := Doc{Text: "New", URL: "https://new.com", Logo: LogoMark, Origins: []string{"https://a.com"}}
+	if err := m.save(t.Context(), saved); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if d := <-got; d.Text != "New" || d.Logo != LogoMark {
+		t.Errorf("slow load returned %+v, want the saved doc", d)
+	}
+	if d := m.snap.Load(); d == nil || d.Text != "New" || len(written) != 1 {
+		t.Errorf("snapshot = %+v, writes %d", d, len(written))
 	}
 }
 
