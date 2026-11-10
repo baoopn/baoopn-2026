@@ -1,6 +1,10 @@
 // Package credit serves the "Designed & built by" line that client sites
 // show in their footers, and stores its settings document "credit".
 //
+// The line is prefix + linked logo + suffix. Each logo variant (wordmark,
+// mark) has its own prefix, suffix and style; a client site picks the
+// variant with ?logo=.
+//
 // GET /api/v1/credit answers cross-origin reads for the origins in the
 // document only; the rest of the API stays same-origin.
 package credit
@@ -25,9 +29,9 @@ import (
 // Key is the settings key of the credit document.
 const Key = "credit"
 
-// Limits of the document (CreditLimits in types.ts).
+// Limits of the document (AdminCredit.limits in types.ts).
 const (
-	TextMax    = 80
+	TextMax    = 80 // per line: prefix and suffix each
 	URLMax     = 500
 	OriginsMax = 50
 	originMax  = 200
@@ -39,7 +43,16 @@ const (
 	LogoMark     = "mark"
 )
 
-const defaultText = "Designed & built by"
+// Logo styles: color is the filled tile, mono the glyph only.
+const (
+	StyleColor = "color"
+	StyleMono  = "mono"
+)
+
+const defaultPrefix = "Designed & built by"
+
+// kinds lists the logo kinds in display order.
+var kinds = []string{LogoWordmark, LogoMark}
 
 // Brand gives the current brand files with absolute URLs.
 type Brand interface {
@@ -84,13 +97,40 @@ func New(d Deps) *Module {
 	return m
 }
 
+// Variant is the line for one logo kind (CreditVariant in types.ts).
+type Variant struct {
+	Prefix string `json:"prefix"` // 0..TextMax characters, one line
+	Suffix string `json:"suffix"` // 0..TextMax characters, one line
+	Style  string `json:"style"`  // "color" | "mono"
+}
+
 // Doc is the settings document "credit".
 type Doc struct {
-	Text      string     `json:"text"`
-	URL       string     `json:"url"`
-	Logo      string     `json:"logo"`    // "wordmark" | "mark"
-	Origins   []string   `json:"origins"` // normalised, never nil
+	URL      string             `json:"url"`
+	Logo     string             `json:"logo"`     // default variant: "wordmark" | "mark"
+	Variants map[string]Variant `json:"variants"` // keys "wordmark" and "mark"
+	Origins  []string           `json:"origins"`  // normalised, never nil
+	// UpdatedAt is nil until the first save.
 	UpdatedAt *time.Time `json:"updated_at"`
+}
+
+// variant returns d's variant for kind. A missing variant reads as the
+// default line, and an empty style as color.
+func (d Doc) variant(kind string) Variant {
+	v, ok := d.Variants[kind]
+	if !ok {
+		v = defaultVariant(defaultPrefix)
+	}
+	if v.Style == "" {
+		v.Style = StyleColor
+	}
+	return v
+}
+
+func defaultVariant(prefix string) Variant { return Variant{Prefix: prefix, Style: StyleColor} }
+
+func defaultVariants(prefix string) map[string]Variant {
+	return map[string]Variant{LogoWordmark: defaultVariant(prefix), LogoMark: defaultVariant(prefix)}
 }
 
 // Image is CreditImage in types.ts.
@@ -104,13 +144,16 @@ type Image struct {
 // Logo is CreditLogo in types.ts.
 type Logo struct {
 	Kind  string `json:"kind"`
+	Style string `json:"style"`
 	Light Image  `json:"light"`
 	Dark  Image  `json:"dark"`
 }
 
-// Credit is Credit in types.ts (the public view).
+// Credit is Credit in types.ts (the public view of one variant).
 type Credit struct {
-	Text      string     `json:"text"`
+	Text      string     `json:"text"` // deprecated: always the same as Prefix
+	Prefix    string     `json:"prefix"`
+	Suffix    string     `json:"suffix"`
 	URL       string     `json:"url"`
 	Alt       string     `json:"alt"`
 	Logo      Logo       `json:"logo"`
@@ -119,36 +162,53 @@ type Credit struct {
 
 // Limits is AdminCredit.limits.
 type Limits struct {
-	TextMax    int `json:"text_max"`
+	PrefixMax  int `json:"prefix_max"`
+	SuffixMax  int `json:"suffix_max"`
 	URLMax     int `json:"url_max"`
 	OriginsMax int `json:"origins_max"`
 }
 
 // AdminCredit is AdminCredit in types.ts.
 type AdminCredit struct {
-	Text      string          `json:"text"`
-	URL       string          `json:"url"`
-	Logo      string          `json:"logo"`
-	Origins   []string        `json:"origins"`
-	UpdatedAt *time.Time      `json:"updated_at"`
-	Endpoint  string          `json:"endpoint"`
-	Logos     map[string]Logo `json:"logos"`
-	Limits    Limits          `json:"limits"`
+	URL       string             `json:"url"`
+	Logo      string             `json:"logo"`
+	Variants  map[string]Variant `json:"variants"`
+	Origins   []string           `json:"origins"`
+	UpdatedAt *time.Time         `json:"updated_at"`
+	Endpoint  string             `json:"endpoint"`
+	// Logos is logos[kind][style], all four, for the previews.
+	Logos  map[string]map[string]Logo `json:"logos"`
+	Limits Limits                     `json:"limits"`
+}
+
+// VariantInput is one variant in a PUT body.
+type VariantInput struct {
+	Prefix string `json:"prefix"`
+	Suffix string `json:"suffix"`
+	Style  string `json:"style"`
 }
 
 // Input is CreditInput in types.ts.
 type Input struct {
-	Text    string   `json:"text"`
-	URL     string   `json:"url"`
-	Logo    string   `json:"logo"`
+	URL      string                  `json:"url"`
+	Logo     string                  `json:"logo"`
+	Variants map[string]VariantInput `json:"variants"`
+	// Text is the old single-line body. It is used only when Variants is
+	// absent, as the prefix of both variants (deprecated).
+	Text    *string  `json:"text"`
 	Origins []string `json:"origins"`
 }
 
-// slots maps a logo kind to its light and dark brand slots. There is no
-// inverse wordmark, so the wordmark uses the same file on both.
-var slots = map[string][2]string{
-	LogoWordmark: {"wordmark_primary", "wordmark_primary"},
-	LogoMark:     {"monogram_primary", "monogram_inverse"},
+// slots maps a logo kind and style to its light and dark brand slots.
+var slots = map[string]map[string][2]string{
+	LogoWordmark: {
+		StyleColor: {brand.WordmarkPrimary, brand.WordmarkInverse},
+		StyleMono:  {brand.WordmarkNavy, brand.WordmarkCream},
+	},
+	LogoMark: {
+		StyleColor: {brand.MonogramPrimary, brand.MonogramInverse},
+		StyleMono:  {brand.MonogramNavy, brand.MonogramCream},
+	},
 }
 
 // siteOrigin is PublicURL as scheme://host[:port].
@@ -183,22 +243,31 @@ func (m *Module) endpoint() string { return m.siteOrigin() + "/api/v1/credit" }
 
 // defaults is the document when nothing is stored.
 func (m *Module) defaults() Doc {
-	return Doc{Text: defaultText, URL: m.siteOrigin(), Logo: LogoWordmark, Origins: []string{}}
+	return Doc{URL: m.siteOrigin(), Logo: LogoWordmark, Variants: defaultVariants(defaultPrefix), Origins: []string{}}
 }
 
 // parseDoc reads a stored document leniently: a missing or broken field
-// gets its default, and a bad origin is dropped.
+// gets its default, and a bad origin is dropped. A document from before
+// the variants has a top-level "text"; it becomes the prefix of each
+// variant that is missing.
 func parseDoc(raw []byte, def Doc) Doc {
 	d := def
+	d.Variants = defaultVariants(defaultPrefix)
 	var m map[string]json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
 		return d
 	}
 	var s string
+	prefix := defaultPrefix
 	if json.Unmarshal(m["text"], &s) == nil {
-		if v, ok := validText(s); ok {
-			d.Text = v
+		if v, ok := validLine(s); ok {
+			prefix = v
 		}
+	}
+	var vars map[string]json.RawMessage
+	_ = json.Unmarshal(m["variants"], &vars)
+	for _, kind := range kinds {
+		d.Variants[kind] = parseVariant(vars[kind], prefix)
 	}
 	s = ""
 	if json.Unmarshal(m["url"], &s) == nil {
@@ -231,6 +300,35 @@ func parseDoc(raw []byte, def Doc) Doc {
 		d.UpdatedAt = &at
 	}
 	return d
+}
+
+// parseVariant reads one stored variant. A missing variant gives
+// legacyPrefix, no suffix and color; a variant that is there gives the
+// default line for a missing or broken prefix, and each other missing or
+// broken field gets its default.
+func parseVariant(raw json.RawMessage, legacyPrefix string) Variant {
+	var m map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil || m == nil {
+		return defaultVariant(legacyPrefix)
+	}
+	v := defaultVariant(defaultPrefix)
+	var s string
+	if json.Unmarshal(m["prefix"], &s) == nil {
+		if p, ok := validLine(s); ok {
+			v.Prefix = p
+		}
+	}
+	s = ""
+	if json.Unmarshal(m["suffix"], &s) == nil {
+		if p, ok := validLine(s); ok {
+			v.Suffix = p
+		}
+	}
+	s = ""
+	if json.Unmarshal(m["style"], &s) == nil && validStyle(s) {
+		v.Style = s
+	}
+	return v
 }
 
 // load returns the snapshot, reading the database on first use.
@@ -269,9 +367,9 @@ func (m *Module) image(ctx context.Context, slot string) (Image, error) {
 	return Image{URL: a.URL, Width: a.Width, Height: a.Height, ContentType: a.ContentType}, nil
 }
 
-// logo resolves kind to its light and dark files.
-func (m *Module) logo(ctx context.Context, kind string) (Logo, error) {
-	s := slots[kind]
+// logo resolves kind and style to their light and dark files.
+func (m *Module) logo(ctx context.Context, kind, style string) (Logo, error) {
+	s := slots[kind][style]
 	light, err := m.image(ctx, s[0])
 	if err != nil {
 		return Logo{}, err
@@ -280,33 +378,44 @@ func (m *Module) logo(ctx context.Context, kind string) (Logo, error) {
 	if err != nil {
 		return Logo{}, err
 	}
-	return Logo{Kind: kind, Light: light, Dark: dark}, nil
+	return Logo{Kind: kind, Style: style, Light: light, Dark: dark}, nil
 }
 
-// public builds the public view of d.
-func (m *Module) public(ctx context.Context, d Doc) (Credit, error) {
-	l, err := m.logo(ctx, d.Logo)
+// public builds the public view of d's variant kind. A valid style
+// overrides the variant's stored style; "" keeps it.
+func (m *Module) public(ctx context.Context, d Doc, kind, style string) (Credit, error) {
+	v := d.variant(kind)
+	if validStyle(style) {
+		v.Style = style
+	}
+	l, err := m.logo(ctx, kind, v.Style)
 	if err != nil {
 		return Credit{}, err
 	}
-	return Credit{Text: d.Text, URL: d.URL, Alt: m.alt(), Logo: l, UpdatedAt: d.UpdatedAt}, nil
+	return Credit{Text: v.Prefix, Prefix: v.Prefix, Suffix: v.Suffix, URL: d.URL, Alt: m.alt(), Logo: l,
+		UpdatedAt: d.UpdatedAt}, nil
 }
 
 // admin builds the admin view of d.
 func (m *Module) admin(ctx context.Context, d Doc) (AdminCredit, error) {
-	logos := make(map[string]Logo, len(slots))
-	for _, kind := range []string{LogoWordmark, LogoMark} {
-		l, err := m.logo(ctx, kind)
-		if err != nil {
-			return AdminCredit{}, err
+	variants := make(map[string]Variant, len(kinds))
+	logos := make(map[string]map[string]Logo, len(kinds))
+	for _, kind := range kinds {
+		variants[kind] = d.variant(kind)
+		logos[kind] = make(map[string]Logo, 2)
+		for _, style := range []string{StyleColor, StyleMono} {
+			l, err := m.logo(ctx, kind, style)
+			if err != nil {
+				return AdminCredit{}, err
+			}
+			logos[kind][style] = l
 		}
-		logos[kind] = l
 	}
 	origins := d.Origins
 	if origins == nil {
 		origins = []string{}
 	}
-	return AdminCredit{Text: d.Text, URL: d.URL, Logo: d.Logo, Origins: origins, UpdatedAt: d.UpdatedAt,
+	return AdminCredit{URL: d.URL, Logo: d.Logo, Variants: variants, Origins: origins, UpdatedAt: d.UpdatedAt,
 		Endpoint: m.endpoint(), Logos: logos,
-		Limits: Limits{TextMax: TextMax, URLMax: URLMax, OriginsMax: OriginsMax}}, nil
+		Limits: Limits{PrefixMax: TextMax, SuffixMax: TextMax, URLMax: URLMax, OriginsMax: OriginsMax}}, nil
 }

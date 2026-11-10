@@ -13,21 +13,23 @@ import (
 // Validation messages. Each starts with the field name; the admin app maps
 // a 422 to its field by that prefix.
 const (
-	msgText       = "text must be 1 to 80 characters on one line"
+	msgText       = "text must be at most 80 characters on one line"
 	msgURL        = "url must be an absolute https URL"
 	msgLogo       = "logo must be wordmark or mark"
+	msgVariants   = "variants must have wordmark and mark"
+	msgPrefixFmt  = "variants.%s.prefix must be at most 80 characters on one line"
+	msgSuffixFmt  = "variants.%s.suffix must be at most 80 characters on one line"
+	msgStyleFmt   = "variants.%s.style must be color or mono"
 	msgOriginsMax = "origins can hold at most 50 entries"
 	msgOriginFmt  = "origins[%d] %q must be an origin like https://example.com (http only for localhost), with no path"
 )
 
-// validate checks the input in field order and returns the normalised
-// document (without updated_at), or the first problem.
+// validate checks the input in field order (url, logo, variants, text,
+// origins) and returns the normalised document (without updated_at), or
+// the first problem.
 func (in Input) validate() (Doc, string) {
 	var d Doc
 	var ok bool
-	if d.Text, ok = validText(in.Text); !ok {
-		return Doc{}, msgText
-	}
 	if d.URL, ok = validURL(in.URL); !ok {
 		return Doc{}, msgURL
 	}
@@ -35,6 +37,22 @@ func (in Input) validate() (Doc, string) {
 		return Doc{}, msgLogo
 	}
 	d.Logo = in.Logo
+	if in.Variants != nil {
+		var problem string
+		if d.Variants, problem = validVariants(in.Variants); problem != "" {
+			return Doc{}, problem
+		}
+	} else {
+		// The old body: text is the prefix of both variants. With no text
+		// either, both variants get the default line.
+		prefix := defaultPrefix
+		if in.Text != nil {
+			if prefix, ok = validLine(*in.Text); !ok {
+				return Doc{}, msgText
+			}
+		}
+		d.Variants = defaultVariants(prefix)
+	}
 	origins := make([]string, 0, len(in.Origins))
 	for i, raw := range in.Origins {
 		o, ok := normalizeOrigin(raw)
@@ -50,13 +68,47 @@ func (in Input) validate() (Doc, string) {
 	return d, ""
 }
 
-// validText trims s and checks it is 1 to TextMax characters on one line:
+// validVariants checks that in has exactly the keys wordmark and mark, then
+// each variant's prefix, suffix and style, wordmark first.
+func validVariants(in map[string]VariantInput) (map[string]Variant, string) {
+	if len(in) != len(kinds) {
+		return nil, msgVariants
+	}
+	for _, kind := range kinds {
+		if _, ok := in[kind]; !ok {
+			return nil, msgVariants
+		}
+	}
+	out := make(map[string]Variant, len(kinds))
+	for _, kind := range kinds {
+		vi := in[kind]
+		var v Variant
+		var ok bool
+		if v.Prefix, ok = validLine(vi.Prefix); !ok {
+			return nil, fmt.Sprintf(msgPrefixFmt, kind)
+		}
+		if v.Suffix, ok = validLine(vi.Suffix); !ok {
+			return nil, fmt.Sprintf(msgSuffixFmt, kind)
+		}
+		v.Style = vi.Style
+		if v.Style == "" {
+			v.Style = StyleColor
+		}
+		if !validStyle(v.Style) {
+			return nil, fmt.Sprintf(msgStyleFmt, kind)
+		}
+		out[kind] = v
+	}
+	return out, ""
+}
+
+// validLine trims s and checks it is 0 to TextMax characters on one line:
 // no control characters, no line or paragraph separators and no format
 // characters (bidi overrides, zero-width characters).
-func validText(s string) (string, bool) {
+func validLine(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	n := utf8.RuneCountInString(s)
-	if n < 1 || n > TextMax || !utf8.ValidString(s) {
+	if n > TextMax || !utf8.ValidString(s) {
 		return "", false
 	}
 	for _, r := range s {
@@ -82,6 +134,8 @@ func validURL(s string) (string, bool) {
 }
 
 func validLogo(s string) bool { return s == LogoWordmark || s == LogoMark }
+
+func validStyle(s string) bool { return s == StyleColor || s == StyleMono }
 
 // localHosts may use plain http.
 var localHosts = map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
