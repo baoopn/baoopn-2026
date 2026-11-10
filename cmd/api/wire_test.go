@@ -70,6 +70,9 @@ func TestRouterMounts(t *testing.T) {
 		{"GET", "/api/admin/overview", "", http.StatusOK},
 		{"GET", "/api/admin/me", "", http.StatusOK},
 		{"GET", "/api/admin/config", "", http.StatusOK},
+		{"GET", "/api/v1/credit", "", http.StatusOK},
+		{"OPTIONS", "/api/v1/credit", "", http.StatusNoContent},
+		{"GET", "/api/admin/credit", "", http.StatusOK},
 	} {
 		req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
 		req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/141.0")
