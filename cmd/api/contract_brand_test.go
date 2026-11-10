@@ -33,7 +33,8 @@ func (c *harness) brandPut(slot, field, name string, content []byte) *httptest.R
 	return c.raw("PUT", "/api/admin/brand/"+slot, &b, map[string]string{"Content-Type": mw.FormDataContentType()})
 }
 
-var brandSlots = []string{"favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "monogram_primary", "monogram_inverse", "email_logo"}
+var brandSlots = []string{"favicon_ico", "favicon_svg", "apple_touch_icon", "wordmark_primary", "wordmark_inverse",
+	"wordmark_navy", "wordmark_cream", "monogram_primary", "monogram_inverse", "monogram_navy", "monogram_cream", "email_logo"}
 
 func TestContractBrand(t *testing.T) {
 	c := newHarness(t)
