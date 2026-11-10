@@ -22,10 +22,12 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/now-playing/stream` | – | Server-Sent Events, see below |
 | GET | `/listening/recent` | `limit` (1–20, default 6) | `RecentPlay[]` (cached 60 s) |
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
-| GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`; the defaults when the database is unreachable) |
-| GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
-| GET | `/brand/listening` | – | `ListeningBrand` (the same for the listening sub-brand; `Cache-Control: public, max-age=60`) |
-| GET | `/brand/listening/{slot}` | – | `302` to the listening slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
+| GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`, `Vary: Origin`; CORS for `BRAND_CORS_ORIGINS`; the defaults when the database is unreachable) |
+| GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for `BRAND_CORS_ORIGINS`); 404 `not_found` for an unknown slot |
+| OPTIONS | `/brand`, `/brand/{slot}` | – | `204` CORS preflight (headers only for a listed origin) |
+| GET | `/brand/listening` | – | `ListeningBrand` (the same for the listening sub-brand; `Cache-Control: public, max-age=60`, `Vary: Origin`; CORS for `BRAND_CORS_ORIGINS`) |
+| GET | `/brand/listening/{slot}` | – | `302` to the listening slot's current file (`Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for `BRAND_CORS_ORIGINS`); 404 `not_found` for an unknown slot |
+| OPTIONS | `/brand/listening`, `/brand/listening/{slot}` | – | `204` CORS preflight (headers only for a listed origin) |
 | GET | `/credit` | `?logo=wordmark\|mark&color=color\|mono` (both optional) | `Credit` (the footer credit for client sites; `logo` picks the variant instead of the stored default, `color` overrides that variant's style for this request; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
 | OPTIONS | `/credit` | – | `204` CORS preflight (headers only for a listed origin) |
 | GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
@@ -178,8 +180,13 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   store only reads, keeps and deletes its own keys, so a reset or prune of one brand never
   touches the other. A slot name outside the brand's table is 404 `not_found` (for example
   `monogram_primary` under `/brand/listening`). `GET /api/v1/brand/listening/` (no slot) and
-  `PUT /api/admin/brand/listening` are 404 too. The routes send no CORS headers: other sites
-  read them server side.
+  `PUT /api/admin/brand/listening` are 404 too. The public routes send CORS headers to the origins
+  in `BRAND_CORS_ORIGINS` (default `https://listening.baoopn.com`), with the same exact-match
+  rules as *Credit*. The admin routes never send them. The compose files turn an empty value
+  into the default; to send no CORS headers, set `BRAND_CORS_ORIGINS` empty in the API's own
+  environment, outside compose. The `/{slot}` `302` works for `<img>` and `<link>`, but a
+  `fetch()` that follows it also needs CORS from the media host (media.baoopn.com already
+  sends it).
 - **Admin fields:** each `AdminBrandAsset` has a `group` (`favicons`, `logos`, `icons`,
   `social` or `email`) that the admin page uses for its sections, and a `kind` of `icon`,
   `logo` or `image` (`image` is the social share image). The list is in table order, which
@@ -247,7 +254,8 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
 - **Caching:** `GET /api/v1/brand/listening` is cached 60 s and each `302` 300 s, so a
   client that reads the API sees a replaced file within a few minutes. The file URLs
   themselves never change and are cached for a year. listening.baoopn.com still serves its
-  own copies until it reads this API.
+  own copies until it reads this API. Do not add a Cloudflare cache rule for `/api/*`:
+  Cloudflare ignores `Vary: Origin` and would serve one origin's CORS headers to another.
 
 #### Both brands
 
@@ -357,7 +365,8 @@ steps for a client site are in `docs/credit.md`.
     `scheme://host[:port]`, writes the port without leading zeros, drops the default port
     (443 or 80) and keeps the first entry of any repeat.
   - Unknown fields give 400 `bad_request`.
-- **CORS:** only the two `/api/v1/credit` routes send CORS headers. The rest of the API stays
+- **CORS:** only the two `/api/v1/credit` routes and the public `/api/v1/brand` routes (with
+  their own list, `BRAND_CORS_ORIGINS`) send CORS headers. The rest of the API stays
   same-origin. The API compares the request's `Origin`, lowercased, with each listed origin
   and accepts only an exact match. It never matches `null` and never sends
   `Access-Control-Allow-Credentials`.

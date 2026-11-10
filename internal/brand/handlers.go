@@ -115,10 +115,12 @@ func (s *Store) Brand(st State) Brand {
 	return b
 }
 
-// mountPublic mounts GET <route> and GET <route>/{slot}.
+// mountPublic mounts GET and OPTIONS <route> and <route>/{slot}.
 func (s *Store) mountPublic(r chi.Router) {
 	r.Get(s.b.Route, s.handlePublic)
 	r.Get(s.b.Route+"/{slot}", s.handleRedirect)
+	r.Options(s.b.Route, s.handlePreflight)
+	r.Options(s.b.Route+"/{slot}", s.handlePreflight)
 }
 
 // mountAdmin mounts GET <route>, PUT and DELETE <route>/{slot}.
@@ -137,13 +139,39 @@ func (s *Store) publicState(r *http.Request) State {
 	return st
 }
 
+// setCORS sets Vary: Origin and, for a listed origin, the
+// Access-Control-Allow-Origin header. It never allows credentials.
+func (s *Store) setCORS(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Vary", "Origin")
+	if o := httpapi.AllowedOrigin(r, s.cors); o != "" {
+		h.Set("Access-Control-Allow-Origin", o)
+	}
+}
+
+// handlePreflight answers a CORS preflight with 204; only a listed origin
+// gets the Access-Control-* headers.
+func (s *Store) handlePreflight(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+	if o := httpapi.AllowedOrigin(r, s.cors); o != "" {
+		h.Set("Access-Control-Allow-Origin", o)
+		h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		h.Set("Access-Control-Allow-Headers", "Content-Type")
+		h.Set("Access-Control-Max-Age", "86400")
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Store) handlePublic(w http.ResponseWriter, r *http.Request) {
+	s.setCORS(w, r)
 	b := s.Brand(s.publicState(r))
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	httpapi.JSON(w, http.StatusOK, b)
 }
 
 func (s *Store) handleRedirect(w http.ResponseWriter, r *http.Request) {
+	s.setCORS(w, r) // before the lookup, so a 404 is readable too
 	def, ok := s.b.slot(chi.URLParam(r, "slot"))
 	if !ok {
 		httpapi.Error(w, http.StatusNotFound, "not_found", "unknown brand slot")

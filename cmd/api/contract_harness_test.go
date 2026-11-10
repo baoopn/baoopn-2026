@@ -198,7 +198,8 @@ func newHarness(t *testing.T, opts ...func(*httpapi.Deps)) *harness {
 	syncer := projects.NewSyncer(projects.SyncDeps{DB: pool, Log: log, User: "baoopn", HTTP: httpClient, APIBase: gh.URL})
 	projectsMod := projects.New(projects.Deps{DB: pool, Log: log, Syncer: syncer})
 	listeningMod := listening.New(listening.Deps{BaseURL: sp.URL, Log: log, HTTP: httpClient})
-	brandMod := brand.NewModule(brand.Deps{DB: pool, Log: log, Files: mediaStore})
+	brandMod := brand.NewModule(brand.Deps{DB: pool, Log: log, Files: mediaStore,
+		CORSOrigins: []string{"https://listening.baoopn.com"}})
 	brandMod.Ensure(ctx)
 	creditMod := credit.New(credit.Deps{DB: pool, Log: log, Brand: brandMod.Main, PublicURL: cfg.PublicURL})
 	contactMod := contact.New(contact.Deps{DB: pool, Log: log, Mailer: mailer, Settings: site,

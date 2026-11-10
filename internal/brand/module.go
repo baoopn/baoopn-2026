@@ -23,9 +23,11 @@ func (m *Module) Ensure(ctx context.Context) {
 	m.Listening.Ensure(ctx)
 }
 
-// Public mounts GET /brand, /brand/{slot}, /brand/listening and
-// /brand/listening/{slot}. chi matches the static "listening" segment
-// before {slot}, and no baoopn slot is named "listening".
+// Public mounts GET and OPTIONS (CORS preflight) on /brand, /brand/{slot},
+// /brand/listening and /brand/listening/{slot}. Every response carries
+// Vary: Origin, and a listed origin (Deps.CORSOrigins) gets CORS headers.
+// chi matches the static "listening" segment before {slot}, and no baoopn
+// slot is named "listening".
 func (m *Module) Public(r chi.Router) {
 	m.Main.mountPublic(r)
 	m.Listening.mountPublic(r)

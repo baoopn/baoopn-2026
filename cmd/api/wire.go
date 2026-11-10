@@ -70,7 +70,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		go migrateMedia(mediaStore, pool, cfg.MediaPublicURL, log)
 	}
 
-	brandMod := brand.NewModule(brand.Deps{DB: pool, Log: log, Files: mediaStore})
+	brandMod := brand.NewModule(brand.Deps{DB: pool, Log: log, Files: mediaStore, CORSOrigins: cfg.BrandCORSOrigins})
 	ensureBrand(ctx, brandMod)
 	creditMod := credit.New(credit.Deps{DB: pool, Log: log, Brand: brandMod.Main, PublicURL: cfg.PublicURL})
 

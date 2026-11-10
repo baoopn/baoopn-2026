@@ -5,11 +5,17 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
 )
+
+// defaultBrandCORS is BRAND_CORS_ORIGINS when the variable is not set.
+const defaultBrandCORS = "https://listening.baoopn.com"
 
 // Config is the API server configuration.
 type Config struct {
@@ -21,6 +27,10 @@ type Config struct {
 	// PublicURL is the site origin (https://baoopn.com); used for links in
 	// emails, Clerk authorized parties and the sitemap.
 	PublicURL string `env:"PUBLIC_URL" envDefault:"http://localhost:5173"`
+
+	// BrandCORSOrigins are the origins allowed to read the public
+	// /api/v1/brand routes cross-origin.
+	BrandCORSOrigins []string `env:"BRAND_CORS_ORIGINS" envSeparator:","`
 
 	DatabaseURL    string `env:"DATABASE_URL,required,unset"`
 	MigrateOnStart bool   `env:"MIGRATE_ON_START" envDefault:"true"`
@@ -176,6 +186,16 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("config: %w", err)
 	}
 	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
+	// env applies envDefault to an empty variable too, so the default is set
+	// here: unset means the default, empty means no origin.
+	if _, ok := os.LookupEnv("BRAND_CORS_ORIGINS"); !ok {
+		c.BrandCORSOrigins = []string{defaultBrandCORS}
+	}
+	origins, err := parseOrigins(c.BrandCORSOrigins)
+	if err != nil {
+		return c, err
+	}
+	c.BrandCORSOrigins = origins
 	c.SpotifyAPIURL = strings.TrimRight(c.SpotifyAPIURL, "/")
 	c.MediaPublicURL = strings.TrimRight(c.MediaPublicURL, "/")
 	if c.MediaPublicURL != "" {
@@ -204,4 +224,59 @@ func Load() (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// badOrigin is the error of parseOrigins for entry e.
+func badOrigin(e string) error {
+	return fmt.Errorf("config: BRAND_CORS_ORIGINS entry %q must be an origin like https://listening.example.com", e)
+}
+
+// canonicalPort reports whether p is empty or a port 1-65535 written
+// without a leading zero.
+func canonicalPort(p string) bool {
+	if p == "" {
+		return true
+	}
+	n, err := strconv.Atoi(p)
+	return err == nil && n >= 1 && n <= 65535 && strconv.Itoa(n) == p
+}
+
+// parseOrigins trims, checks and normalizes a list of origins: scheme and
+// host lowercased, the default port dropped, blanks and duplicates removed
+// (order kept). An empty input gives an empty, non-nil slice.
+func parseOrigins(in []string) ([]string, error) {
+	out := []string{}
+	for _, raw := range in {
+		e := strings.TrimSpace(raw)
+		if e == "" {
+			continue
+		}
+		if e == "*" || strings.EqualFold(e, "null") {
+			return nil, badOrigin(e)
+		}
+		u, err := url.Parse(e)
+		if err != nil {
+			return nil, badOrigin(e)
+		}
+		scheme := strings.ToLower(u.Scheme)
+		if (scheme != "http" && scheme != "https") || u.Host == "" || u.Hostname() == "" || u.User != nil ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+			return nil, badOrigin(e)
+		}
+		if strings.HasSuffix(u.Host, ":") || !canonicalPort(u.Port()) {
+			return nil, badOrigin(e)
+		}
+		host := strings.ToLower(u.Host)
+		switch {
+		case scheme == "https" && strings.HasSuffix(host, ":443"):
+			host = strings.TrimSuffix(host, ":443")
+		case scheme == "http" && strings.HasSuffix(host, ":80"):
+			host = strings.TrimSuffix(host, ":80")
+		}
+		o := scheme + "://" + host
+		if !slices.Contains(out, o) {
+			out = append(out, o)
+		}
+	}
+	return out, nil
 }
