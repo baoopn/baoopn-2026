@@ -47,8 +47,7 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 		k, err := a.verifyKey(ctx, secret)
 		if err != nil {
 			var apiErr *clerk.APIErrorResponse
-			if errors.As(err, &apiErr) && apiErr.HTTPStatusCode >= 400 && apiErr.HTTPStatusCode < 500 &&
-				apiErr.HTTPStatusCode != http.StatusTooManyRequests {
+			if errors.As(err, &apiErr) && keyRejected(apiErr.HTTPStatusCode) {
 				a.log.WarnContext(ctx, "clerk api key rejected",
 					slog.Int("status", apiErr.HTTPStatusCode), slog.String("clerk_trace_id", apiErr.TraceID))
 				httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
@@ -92,6 +91,17 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	u.Via = "api_key"
 	a.log.DebugContext(ctx, "admin api key accepted", slog.String("user", u.ID), slog.String("key_id", keyID))
 	next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, ctxKey{}, u)))
+}
+
+// keyRejected reports whether a Clerk error status means the key itself is
+// bad. 401 and 403 mean our own secret key is wrong and 429 is throttling,
+// so those are Clerk failures, not bad keys.
+func keyRejected(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return false
+	}
+	return status >= 400 && status < 500
 }
 
 // keyUsable reports whether a verified key may authenticate a user, and

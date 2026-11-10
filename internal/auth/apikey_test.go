@@ -3,8 +3,10 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -161,6 +163,9 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 	}{
 		"clerk 404": {&clerk.APIErrorResponse{HTTPStatusCode: 404, TraceID: "tr_1"}, 401, "unauthorized"},
 		"clerk 400": {&clerk.APIErrorResponse{HTTPStatusCode: 400}, 401, "unauthorized"},
+		"clerk 422": {&clerk.APIErrorResponse{HTTPStatusCode: 422}, 401, "unauthorized"},
+		"clerk 401": {&clerk.APIErrorResponse{HTTPStatusCode: 401, TraceID: "tr_2"}, 502, "auth_unavailable"},
+		"clerk 403": {&clerk.APIErrorResponse{HTTPStatusCode: 403}, 502, "auth_unavailable"},
 		"clerk 429": {&clerk.APIErrorResponse{HTTPStatusCode: 429}, 502, "auth_unavailable"},
 		"clerk 503": {&clerk.APIErrorResponse{HTTPStatusCode: 503}, 502, "auth_unavailable"},
 		"network":   {errors.New("dial tcp: ak_live_err refused"), 502, "auth_unavailable"},
@@ -174,6 +179,9 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 			}
 			if code, _ := errBody(t, rec); code != tc.code {
 				t.Fatalf("code = %s", code)
+			}
+			if tc.status == http.StatusBadGateway && !strings.Contains(h.logs.String(), "level=ERROR") {
+				t.Fatalf("502 not logged at Error: %s", h.logs.String())
 			}
 			h.assertNoSecret(t, "ak_live_err")
 		})
@@ -247,6 +255,39 @@ func TestAPIKeyCacheBounded(t *testing.T) {
 	}
 	if n := len(h.a.keyCache); n > keyCacheMax {
 		t.Fatalf("cache size = %d, max %d", n, keyCacheMax)
+	}
+}
+
+func TestAPIKeyCacheFullDropsExpiredFirst(t *testing.T) {
+	h := newKeyHarness(t)
+	live := h.clock.Add(time.Minute)
+	for i := range keyCacheMax - 1 {
+		h.a.storeKey(fmt.Sprintf("live_%d", i), keyCached{userID: "user_1", exp: live})
+	}
+	h.a.storeKey("stale", keyCached{userID: "user_1", exp: h.clock.Add(-time.Second)})
+	if n := len(h.a.keyCache); n != keyCacheMax {
+		t.Fatalf("setup size = %d", n)
+	}
+
+	// Full with one expired entry: only that entry goes.
+	h.a.storeKey("new", keyCached{userID: "user_1", exp: live})
+	if n := len(h.a.keyCache); n != keyCacheMax {
+		t.Fatalf("size after dropping expired = %d, want %d", n, keyCacheMax)
+	}
+	if _, _, ok := h.a.cachedKey("live_0"); !ok {
+		t.Fatal("live entry was dropped while an expired one could go")
+	}
+	if _, ok := h.a.keyCache[sha256.Sum256([]byte("stale"))]; ok {
+		t.Fatal("expired entry was kept")
+	}
+
+	// Full with only live entries: the cache is cleared.
+	h.a.storeKey("newer", keyCached{userID: "user_1", exp: live})
+	if n := len(h.a.keyCache); n != 1 {
+		t.Fatalf("size after clear = %d, want 1", n)
+	}
+	if _, _, ok := h.a.cachedKey("newer"); !ok {
+		t.Fatal("new entry missing after clear")
 	}
 }
 
