@@ -566,8 +566,13 @@ export type BrandSlot =
 	| 'favicon_svg'
 	| 'apple_touch_icon'
 	| 'wordmark_primary'
+	| 'wordmark_inverse'
+	| 'wordmark_navy'
+	| 'wordmark_cream'
 	| 'monogram_primary'
 	| 'monogram_inverse'
+	| 'monogram_navy'
+	| 'monogram_cream'
 	| 'email_logo';
 
 export interface BrandAsset {
@@ -601,8 +606,12 @@ export interface AdminBrandAsset extends BrandAsset {
 }
 
 // Credit line for client sites (GET /api/v1/credit, /api/admin/credit).
-// The public route sends CORS headers only to the listed origins.
+// The public route sends CORS headers only to the listed origins. The line is
+// prefix + linked logo + suffix, set separately for each logo variant; a client
+// site picks the variant with ?logo=wordmark|mark.
 export type CreditLogoKind = 'wordmark' | 'mark';
+/** color: filled tile. mono: glyph only, navy on light pages, cream on dark. */
+export type CreditLogoStyle = 'color' | 'mono';
 
 export interface CreditImage {
 	/** Absolute URL. */
@@ -614,12 +623,16 @@ export interface CreditImage {
 
 export interface CreditLogo {
 	kind: CreditLogoKind;
+	style: CreditLogoStyle;
 	light: CreditImage;
 	dark: CreditImage;
 }
 
 export interface Credit {
+	/** @deprecated same as prefix */
 	text: string;
+	prefix: string;
+	suffix: string;
 	url: string;
 	alt: string;
 	logo: CreditLogo;
@@ -627,23 +640,32 @@ export interface Credit {
 	updated_at: string | null;
 }
 
+/** One logo variant's line: prefix and suffix are 0 to 80 characters. */
+export interface CreditVariant {
+	prefix: string;
+	suffix: string;
+	style: CreditLogoStyle;
+}
+
 export interface AdminCredit {
-	text: string;
 	url: string;
+	/** Default variant, used when a site does not add ?logo=. */
 	logo: CreditLogoKind;
+	variants: Record<CreditLogoKind, CreditVariant>;
 	/** Normalised origins, for example https://example.com. */
 	origins: string[];
 	updated_at: string | null;
 	/** Absolute URL of the public endpoint. */
 	endpoint: string;
-	logos: Record<CreditLogoKind, CreditLogo>;
-	limits: { text_max: number; url_max: number; origins_max: number };
+	/** logos[kind][style], all four, for the previews. */
+	logos: Record<CreditLogoKind, Record<CreditLogoStyle, CreditLogo>>;
+	limits: { prefix_max: number; suffix_max: number; url_max: number; origins_max: number };
 }
 
 export interface CreditInput {
-	text: string;
 	url: string;
 	logo: CreditLogoKind;
+	variants: Record<CreditLogoKind, CreditVariant>;
 	origins: string[];
 }
 

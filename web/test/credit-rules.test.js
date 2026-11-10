@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
 	MESSAGES,
 	ORIGINS_MAX,
+	STYLES,
 	TEXT_MAX,
 	fieldFromMessage,
 	normalizeOrigin,
@@ -69,37 +70,89 @@ test('normalizeOrigin rejects anything that is not a bare origin', () => {
 	}
 });
 
+const variant = (over = {}) => ({ prefix: 'Designed & built by', suffix: '', style: 'color', ...over });
 const valid = () => ({
-	text: 'Designed & built by',
 	url: 'https://baoopn.com',
 	logo: 'wordmark',
+	variants: { wordmark: variant(), mark: variant() },
 	origins: /** @type {string[]} */ ([])
 });
+/** valid() with one variant changed. */
+const withVariant = (/** @type {'wordmark' | 'mark'} */ kind, over = {}) => {
+	const f = valid();
+	f.variants[kind] = variant(over);
+	return f;
+};
 
 test('validateForm passes a valid form and trims the values', () => {
-	const r = validateForm({ ...valid(), text: '  Built by  ', url: ' https://baoopn.com/ ' });
+	const f = valid();
+	f.url = ' https://baoopn.com/ ';
+	f.variants.mark = { prefix: '  by  ', suffix: ' baoopn ', style: 'mono' };
+	const r = validateForm(f);
 	assert.deepEqual(r.errors, {});
 	assert.deepEqual(r.input, {
-		text: 'Built by',
 		url: 'https://baoopn.com/',
 		logo: 'wordmark',
+		variants: {
+			wordmark: { prefix: 'Designed & built by', suffix: '', style: 'color' },
+			mark: { prefix: 'by', suffix: 'baoopn', style: 'mono' }
+		},
 		origins: []
 	});
 });
 
-test('validateForm enforces the text limits', () => {
-	assert.equal(validateForm({ ...valid(), text: '' }).errors.text, MESSAGES.text);
-	assert.equal(validateForm({ ...valid(), text: 'two\nlines' }).errors.text, MESSAGES.text);
-	// Line and paragraph separators, bidi controls, zero-width space, BOM.
-	const bad = [0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069, 0x200b, 0xfeff].map((c) => String.fromCodePoint(c));
-	for (const ch of bad) {
-		const text = `Built ${ch}by`;
-		assert.equal(validateForm({ ...valid(), text }).errors.text, MESSAGES.text, JSON.stringify(ch));
+test('validateForm allows an empty prefix and suffix', () => {
+	const r = validateForm(withVariant('wordmark', { prefix: '', suffix: '   ' }));
+	assert.deepEqual(r.errors, {});
+	assert.deepEqual(r.input.variants.wordmark, { prefix: '', suffix: '', style: 'color' });
+});
+
+test('validateForm enforces the prefix and suffix limits per variant', () => {
+	// Line and paragraph separators, bidi controls, zero-width space, BOM, newline.
+	const bad = ['\n', ...[0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069, 0x200b, 0xfeff].map((c) => String.fromCodePoint(c))];
+	for (const kind of /** @type {const} */ (['wordmark', 'mark'])) {
+		for (const field of /** @type {const} */ (['prefix', 'suffix'])) {
+			const key = `variants.${kind}.${field}`;
+			for (const ch of bad) {
+				const r = validateForm(withVariant(kind, { [field]: `Built ${ch}by` }));
+				assert.deepEqual(r.errors, { [key]: MESSAGES[field] }, `${key} ${JSON.stringify(ch)}`);
+			}
+			const long = validateForm(withVariant(kind, { [field]: 'x'.repeat(TEXT_MAX + 1) }));
+			assert.deepEqual(long.errors, { [key]: MESSAGES[field] }, key);
+			assert.deepEqual(validateForm(withVariant(kind, { [field]: 'x'.repeat(TEXT_MAX) })).errors, {});
+			// Runes, not UTF-16 units: 80 emoji fit.
+			assert.deepEqual(validateForm(withVariant(kind, { [field]: '🎨'.repeat(TEXT_MAX) })).errors, {});
+		}
 	}
-	assert.equal(validateForm({ ...valid(), text: 'x'.repeat(TEXT_MAX + 1) }).errors.text, MESSAGES.text);
-	assert.equal(validateForm({ ...valid(), text: 'x'.repeat(TEXT_MAX) }).errors.text, undefined);
-	// Runes, not UTF-16 units: 80 emoji fit.
-	assert.equal(validateForm({ ...valid(), text: '🎨'.repeat(TEXT_MAX) }).errors.text, undefined);
+});
+
+test('validateForm accepts only the two styles, and reads an empty style as color', () => {
+	assert.deepEqual(STYLES, ['color', 'mono']);
+	assert.deepEqual(validateForm(withVariant('mark', { style: 'mono' })).errors, {});
+	const empty = validateForm(withVariant('mark', { style: '' }));
+	assert.deepEqual(empty.errors, {});
+	assert.equal(empty.input.variants.mark.style, 'color');
+	for (const style of ['big', 'Mono', 'COLOR']) {
+		assert.deepEqual(
+			validateForm(withVariant('mark', { style })).errors,
+			{ 'variants.mark.style': MESSAGES.style },
+			style
+		);
+	}
+});
+
+test('validateForm lists errors in the order the API checks them', () => {
+	const f = valid();
+	f.url = 'http://x';
+	f.variants.mark = { prefix: 'a\nb', suffix: 'c\nd', style: 'big' };
+	f.variants.wordmark = { prefix: '', suffix: 'x'.repeat(TEXT_MAX + 1), style: 'color' };
+	assert.deepEqual(Object.keys(validateForm(f).errors), [
+		'url',
+		'variants.wordmark.suffix',
+		'variants.mark.prefix',
+		'variants.mark.suffix',
+		'variants.mark.style'
+	]);
 });
 
 test('validateForm accepts only absolute https URLs without userinfo', () => {
@@ -131,7 +184,6 @@ test('validateForm caps the origin list after dedupe', () => {
 });
 
 test('fieldFromMessage maps each API 422 message to its field', () => {
-	assert.equal(fieldFromMessage('text must be 1 to 80 characters on one line'), 'text');
 	assert.equal(fieldFromMessage('url must be an absolute https URL'), 'url');
 	assert.equal(fieldFromMessage('logo must be wordmark or mark'), 'logo');
 	assert.equal(fieldFromMessage('origins can hold at most 50 entries'), 'origins');
@@ -141,8 +193,23 @@ test('fieldFromMessage maps each API 422 message to its field', () => {
 		),
 		'origins[3]'
 	);
+	for (const kind of ['wordmark', 'mark']) {
+		assert.equal(
+			fieldFromMessage(`variants.${kind}.prefix must be at most 80 characters on one line`),
+			`variants.${kind}.prefix`
+		);
+		assert.equal(
+			fieldFromMessage(`variants.${kind}.suffix must be at most 80 characters on one line`),
+			`variants.${kind}.suffix`
+		);
+		assert.equal(fieldFromMessage(`variants.${kind}.style must be color or mono`), `variants.${kind}.style`);
+	}
+	assert.equal(fieldFromMessage('variants must have wordmark and mark'), 'variants.wordmark.prefix');
+	assert.equal(fieldFromMessage('text must be at most 80 characters on one line'), 'variants.wordmark.prefix');
+	assert.equal(fieldFromMessage('variants.big.prefix must be short'), null);
 	assert.equal(fieldFromMessage('something else went wrong'), null);
 	assert.equal(fieldFromMessage('urls are fine'), null);
+	assert.equal(fieldFromMessage('texts are fine'), null);
 });
 
 test('snippet embeds the endpoint and builds nodes without innerHTML', () => {
@@ -159,6 +226,15 @@ test('snippet embeds the endpoint and builds nodes without innerHTML', () => {
 	assert.ok(s.includes('(prefers-color-scheme: dark)'));
 	assert.ok(s.includes("rel = 'noopener'"));
 	assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(s));
+});
+
+test('snippet lays out prefix, then a link holding the logo and the suffix', () => {
+	const s = snippet('https://baoopn.com/api/v1/credit?logo=mark');
+	assert.ok(s.includes('fetch("https://baoopn.com/api/v1/credit?logo=mark")'));
+	assert.ok(s.includes("if (data.suffix) link.append(document.createTextNode(' ' + data.suffix));"));
+	assert.ok(s.includes("if (data.prefix) line.append(document.createTextNode(data.prefix + ' '));"));
+	assert.ok(s.indexOf('link.append(picture)') < s.indexOf('data.suffix'));
+	assert.ok(!s.includes('data.text'));
 });
 
 test('snippet cannot be broken out of with a hostile endpoint', () => {

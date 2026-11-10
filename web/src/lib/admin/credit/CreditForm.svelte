@@ -1,26 +1,39 @@
+<script module lang="ts">
+	import type { CreditInput, CreditLogoKind, CreditVariant } from '#lib/api/types.js';
+
+	/** Unsaved changes; each variant field is kept on its own. */
+	export type CreditEdits = Partial<Omit<CreditInput, 'variants'>> & {
+		variants?: Partial<Record<CreditLogoKind, Partial<CreditVariant>>>;
+	};
+</script>
+
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { LoaderCircle, Save } from '@lucide/svelte';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import type { AdminCredit, CreditInput, CreditLogoKind } from '#lib/api/types.js';
+	import type { AdminCredit } from '#lib/api/types.js';
 	import Segmented from '../components/Segmented.svelte';
 	import { ApiRequestError } from '../api';
 	import { guardUnsaved } from '../guard.svelte';
 	import { errorMessage } from '../format';
 	import { toasts } from '../toast.svelte';
 	import OriginsEditor from './OriginsEditor.svelte';
-	import { MESSAGES, fieldFromMessage, validateForm } from './rules.js';
+	import VariantCard from './VariantCard.svelte';
+	import { LOGOS, MESSAGES, fieldFromMessage, validateForm } from './rules.js';
 	import { saveCreditMutation } from './queries';
 
 	let {
 		credit,
 		form,
+		alt,
 		edits = $bindable()
 	}: {
 		credit: AdminCredit;
 		/** Saved values with the local edits on top. */
 		form: CreditInput;
-		edits: Partial<CreditInput>;
+		/** Alt text the public endpoint sends with the logo. */
+		alt: string;
+		edits: CreditEdits;
 	} = $props();
 
 	const qc = useQueryClient();
@@ -29,37 +42,60 @@
 	let errors = $state<Record<string, string>>({});
 	let formError = $state<string | null>(null);
 
+	const variantDirty = (kind: CreditLogoKind) => {
+		const a = form.variants[kind];
+		const b = credit.variants[kind];
+		return a.prefix !== b.prefix || a.suffix !== b.suffix || a.style !== b.style;
+	};
 	const dirty = $derived(
-		form.text !== credit.text ||
-			form.url !== credit.url ||
+		form.url !== credit.url ||
 			form.logo !== credit.logo ||
+			LOGOS.some(variantDirty) ||
 			form.origins.join('\n') !== credit.origins.join('\n')
 	);
 	guardUnsaved(() => dirty && !saveM.isPending);
 
-	const textLength = $derived([...form.text.trim()].length);
 	const rowErrors = $derived(
 		Object.fromEntries(Object.entries(errors).filter(([k]) => k.startsWith('origins[')))
 	);
 
-	const logoOptions: { value: CreditLogoKind; label: string }[] = [
-		{ value: 'wordmark', label: 'Wordmark' },
-		{ value: 'mark', label: 'Mark' }
-	];
+	const variantLabels: Record<CreditLogoKind, string> = { wordmark: 'Wordmark', mark: 'Mark' };
+	const logoOptions = LOGOS.map((value) => ({ value, label: variantLabels[value] }));
 
-	function edit<K extends keyof CreditInput>(k: K, value: CreditInput[K]) {
+	/** Errors for one variant card, keyed by field. */
+	function variantErrors(kind: CreditLogoKind): Partial<Record<keyof CreditVariant, string>> {
+		const p = `variants.${kind}.`;
+		return {
+			prefix: errors[p + 'prefix'],
+			suffix: errors[p + 'suffix'],
+			style: errors[p + 'style']
+		};
+	}
+
+	function clearErrors(match: (key: string) => boolean) {
+		errors = Object.fromEntries(Object.entries(errors).filter(([k]) => !match(k)));
+	}
+
+	function edit<K extends 'url' | 'logo' | 'origins'>(k: K, value: CreditInput[K]) {
 		edits = { ...edits, [k]: value };
-		const next = { ...errors };
-		for (const key of Object.keys(next)) {
-			// Row indexes shift when the list changes, so drop every origin error.
-			if (key === k || (k === 'origins' && key.startsWith('origins'))) delete next[key];
-		}
-		errors = next;
+		// Row indexes shift when the list changes, so drop every origin error.
+		clearErrors((key) => key === k || (k === 'origins' && key.startsWith('origins')));
+	}
+
+	function editVariant<K extends keyof CreditVariant>(
+		kind: CreditLogoKind,
+		field: K,
+		value: CreditVariant[K]
+	) {
+		edits = {
+			...edits,
+			variants: { ...edits.variants, [kind]: { ...edits.variants?.[kind], [field]: value } }
+		};
+		clearErrors((key) => key === `variants.${kind}.${field}`);
 	}
 
 	/** Field errors from the API are about these inputs. */
 	const ids: Record<string, string> = {
-		text: 'credit-text',
 		url: 'credit-url',
 		origins: 'credit-origin-new'
 	};
@@ -69,7 +105,15 @@
 			document.querySelector<HTMLElement>('#credit-logo-group [aria-checked="true"]')?.focus();
 			return;
 		}
-		document.getElementById(ids[key.startsWith('origins') ? 'origins' : key])?.focus();
+		const v = /^variants\.(wordmark|mark)\.(prefix|suffix|style)$/.exec(key);
+		if (v && v[2] === 'style') {
+			document
+				.querySelector<HTMLElement>(`#credit-${v[1]}-style-group [aria-checked="true"]`)
+				?.focus();
+			return;
+		}
+		const id = v ? `credit-${v[1]}-${v[2]}` : ids[key.startsWith('origins') ? 'origins' : key];
+		document.getElementById(id)?.focus();
 	}
 
 	function discard() {
@@ -81,7 +125,9 @@
 	/** Plain-English copy for a field the API rejected. */
 	function messageFor(key: string, apiMessage: string): string {
 		if (key.startsWith('origins[')) return MESSAGES.origin;
-		if (key === 'text' || key === 'url' || key === 'logo' || key === 'origins') return MESSAGES[key];
+		if (key === 'url' || key === 'logo' || key === 'origins') return MESSAGES[key];
+		const field = key.split('.')[2];
+		if (field === 'prefix' || field === 'suffix' || field === 'style') return MESSAGES[field];
 		return apiMessage;
 	}
 
@@ -117,41 +163,15 @@
 <section class="card flex min-w-0 flex-col gap-5 p-4 sm:p-5" aria-labelledby="credit-form-h">
 	<div>
 		<h2 id="credit-form-h" class="eyebrow">Credit line</h2>
-		<p class="hint mt-1">Client sites show this text and logo, linked to the URL below.</p>
+		<p class="hint mt-1">
+			Client sites show a prefix, the logo and a suffix. The logo and suffix link to the URL
+			below. Each logo variant has its own text and style.
+		</p>
 	</div>
 
 	<form class="flex min-w-0 flex-col gap-5" onsubmit={save} novalidate aria-labelledby="credit-form-h">
 		<!-- Locked while saving, so no edit typed mid-request is lost when the save clears the edits. -->
 		<fieldset class="flex min-w-0 flex-col gap-5" disabled={saveM.isPending}>
-			<div>
-				<div class="flex items-center justify-between gap-2">
-					<label class="field-label" for="credit-text">Text</label>
-					<span
-						class={[
-							'font-mono text-xs',
-							textLength > credit.limits.text_max ? 'text-danger' : 'text-ink-soft'
-						]}
-					>
-						{textLength} / {credit.limits.text_max}
-					</span>
-				</div>
-				<input
-					id="credit-text"
-					class="input"
-					type="text"
-					autocomplete="off"
-					value={form.text}
-					oninput={(e) => edit('text', e.currentTarget.value)}
-					aria-invalid={!!errors.text}
-					aria-describedby="credit-text-msg"
-				/>
-				{#if errors.text}
-					<p id="credit-text-msg" class="field-error" role="alert">{errors.text}</p>
-				{:else}
-					<p id="credit-text-msg" class="hint">Appears before the logo, for example "Designed &amp; built by".</p>
-				{/if}
-			</div>
-
 			<div>
 				<label class="field-label" for="credit-url">Link</label>
 				<input
@@ -175,21 +195,37 @@
 			</div>
 
 			<div>
-				<p class="field-label">Logo</p>
+				<p class="field-label">Default logo</p>
 				<div id="credit-logo-group">
 					<Segmented
 						options={logoOptions}
 						value={form.logo}
-						label="Logo"
+						label="Default logo"
 						onchange={(v) => edit('logo', v)}
 					/>
 				</div>
 				{#if errors.logo}
 					<p class="field-error" role="alert">{errors.logo}</p>
 				{:else}
-					<p class="hint">The wordmark spells out the name. The mark is the small badge.</p>
+					<p class="hint">Used when a site does not add ?logo=.</p>
 				{/if}
 			</div>
+
+			{#each LOGOS as kind (kind)}
+				<VariantCard
+					{kind}
+					label={variantLabels[kind]}
+					variant={form.variants[kind]}
+					logos={credit.logos[kind]}
+					url={form.url}
+					{alt}
+					prefixMax={credit.limits.prefix_max}
+					suffixMax={credit.limits.suffix_max}
+					errors={variantErrors(kind)}
+					isDefault={form.logo === kind}
+					onedit={(field, value) => editVariant(kind, field, value)}
+				/>
+			{/each}
 
 			<OriginsEditor
 				origins={form.origins}
