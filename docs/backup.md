@@ -436,10 +436,13 @@ outage, resume after a long pause, a new daily time, a lost final write,
 old requests, a recipient with SQL in it, a database without the status
 tables, a read-only database role, runs left over by a stopped container,
 the 200-run limit, CLI runs, a restore without status rows, a quick
-`docker stop` and the idle mode. It takes a few minutes, since the service
-checks the database every 30 seconds.
+`docker stop` and the idle mode. It takes under three minutes.
+`BACKUP_TICK_SECONDS` (1 to 30, default 30) and `BACKUP_STATUS_PROBE_SECONDS`
+are test-only knobs that `status.sh` uses to shorten its waits; do not set
+them in production.
 
-CI runs both on every pull request.
+CI runs both on every pull request that changes the backup files, the
+migrations, the compose files or the CI workflow, and on every push to `main`.
 
 ```bash
 make backup-test

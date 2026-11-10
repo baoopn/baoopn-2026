@@ -61,7 +61,7 @@ on_stop() {
 # idle REASON: backups are off or only partly configured. Stay up and
 # healthy (no crash loop) and repeat the warning once a day. REASON names
 # variables, never their values. With the status tables, report the idle
-# state every minute and fail run-now requests.
+# state every minute (every two ticks) and fail run-now requests.
 idle() {
 	status_write idle "$1"
 	last_warn=
@@ -75,7 +75,7 @@ idle() {
 		apply_settings
 		heartbeat idle "$1"
 		fail_queued "$1"
-		sleep_for 60
+		sleep_for $((TICK * 2))
 	done
 }
 
@@ -135,10 +135,11 @@ run_job() {
 	esac
 }
 
-# sleep_tick: up to 30 s, less when the next run or retry is sooner.
+# sleep_tick: up to one tick (30 s), less when the next run or retry is
+# sooner.
 sleep_tick() {
 	now=$(date -u +%s)
-	s=30
+	s=$TICK
 	[ $((NEXT - now)) -ge "$s" ] || s=$((NEXT - now))
 	[ -z "$RETRY_AT" ] || [ $((RETRY_AT - now)) -ge "$s" ] || s=$((RETRY_AT - now))
 	[ "$s" -ge 1 ] || s=1
@@ -174,6 +175,16 @@ cmd_run() {
 	is_uint "$RETRY_MINUTES" || RETRY_MINUTES=30
 	status_init
 	status_interrupted
+	# BACKUP_TICK_SECONDS is for tests only: it can shorten the tick, never
+	# lengthen it.
+	TICK=${BACKUP_TICK_SECONDS:-30}
+	case $TICK in
+	[1-9] | [12][0-9] | 30) ;;
+	*)
+		err "BACKUP_TICK_SECONDS must be a whole number from 1 to 30; using 30"
+		TICK=30
+		;;
+	esac
 
 	# Nothing set at all: an install that does not use off-site backups.
 	config_untouched && idle "no BACKUP_AGE_RECIPIENT and no destination are set"
@@ -214,7 +225,8 @@ cmd_run() {
 		fi
 	fi
 
-	# One tick every 30 s: settings, heartbeat, run-now requests, schedule.
+	# One tick every 30 s (shorter in tests, BACKUP_TICK_SECONDS): settings,
+	# heartbeat, run-now requests, schedule.
 	while :; do
 		status_reprobe
 		apply_settings
