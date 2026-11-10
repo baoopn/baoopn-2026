@@ -14,6 +14,7 @@ import (
 	"github.com/baoopn/baoopn-2026/internal/brand"
 	"github.com/baoopn/baoopn-2026/internal/config"
 	"github.com/baoopn/baoopn-2026/internal/contact"
+	"github.com/baoopn/baoopn-2026/internal/credit"
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
 	"github.com/baoopn/baoopn-2026/internal/listening"
 	"github.com/baoopn/baoopn-2026/internal/logging"
@@ -71,6 +72,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 
 	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
 	ensureBrand(ctx, brandMod)
+	creditMod := credit.New(credit.Deps{DB: pool, Log: log, Brand: brandMod, PublicURL: cfg.PublicURL})
 
 	profileMod := profile.New(profile.Deps{DB: pool, Log: log, GitHubUser: cfg.GitHubUser,
 		GitHubToken: cfg.GitHubToken, HTTP: httpClient, Seed: seed.FS})
@@ -100,7 +102,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 
 	return &modules{
 		list: []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod,
-			contactMod, site, brandMod, rec, ov, backupsMod},
+			contactMod, site, brandMod, creditMod, rec, ov, backupsMod},
 		media:   mediaStore.Handler(),
 		store:   mediaStore,
 		rec:     rec,

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import {
+		BadgeCheck,
 		ChartLine,
 		DatabaseBackup,
 		ExternalLink,
@@ -35,6 +36,7 @@
 		{ href: '/admin/analytics', label: 'Analytics', icon: ChartLine, exact: false },
 		{ href: '/admin/profile', label: 'Profile', icon: UserRound, exact: false },
 		{ href: '/admin/backups', label: 'Backups', icon: DatabaseBackup, exact: false },
+		{ href: '/admin/credit', label: 'Credit', icon: BadgeCheck, exact: false },
 		{ href: '/admin/settings', label: 'Settings', icon: Settings, exact: false }
 	];
 

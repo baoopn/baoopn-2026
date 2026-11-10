@@ -25,6 +25,7 @@ import (
 	"github.com/baoopn/baoopn-2026/internal/brand"
 	"github.com/baoopn/baoopn-2026/internal/config"
 	"github.com/baoopn/baoopn-2026/internal/contact"
+	"github.com/baoopn/baoopn-2026/internal/credit"
 	"github.com/baoopn/baoopn-2026/internal/httpapi"
 	"github.com/baoopn/baoopn-2026/internal/listening"
 	"github.com/baoopn/baoopn-2026/internal/mail"
@@ -199,6 +200,7 @@ func newHarness(t *testing.T, opts ...func(*httpapi.Deps)) *harness {
 	listeningMod := listening.New(listening.Deps{BaseURL: sp.URL, Log: log, HTTP: httpClient})
 	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
 	brandMod.Ensure(ctx)
+	creditMod := credit.New(credit.Deps{DB: pool, Log: log, Brand: brandMod, PublicURL: cfg.PublicURL})
 	contactMod := contact.New(contact.Deps{DB: pool, Log: log, Mailer: mailer, Settings: site,
 		PublicURL: cfg.PublicURL, EmailLogo: emailLogo(brandMod, cfg.PublicURL, log),
 		InboundDomain: ctInboundDomain, InboundSecret: ctInboundSecret, HTTP: httpClient})
@@ -209,7 +211,7 @@ func newHarness(t *testing.T, opts ...func(*httpapi.Deps)) *harness {
 	pass := func(next http.Handler) http.Handler { return next }
 	deps := httpapi.Deps{Log: log, DB: pool, AdminAuth: pass, Media: mediaStore.Handler(),
 		ClientIP:    httpapi.TrustedClientIP(""),
-		Modules:     []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod, contactMod, site, brandMod, rec, ov},
+		Modules:     []httpapi.Module{profileMod, projectsMod, blogMod, mediaStore, listeningMod, contactMod, site, brandMod, creditMod, rec, ov},
 		AdminConfig: adminConfigHandler(cfg)}
 	for _, o := range opts {
 		o(&deps)

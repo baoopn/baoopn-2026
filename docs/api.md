@@ -24,6 +24,8 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
 | GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`; the defaults when the database is unreachable) |
 | GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
+| GET | `/credit` | `?logo=wordmark\|mark` (optional) | `Credit` (the footer credit for client sites; `logo` overrides the stored logo kind for this request; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
+| OPTIONS | `/credit` | – | `204` CORS preflight (headers only for a listed origin) |
 | GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
 
 ### Now-playing stream — `GET /api/v1/listening/now-playing/stream`
@@ -111,6 +113,8 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/brand` | – | `AdminBrandAsset[]` (slot order) |
 | PUT | `/brand/{slot}` | multipart `file` (request ≤ 1 MiB) — see *Brand assets* | `AdminBrandAsset` (`custom: true`; the same bytes as the current file change nothing) |
 | DELETE | `/brand/{slot}` | – | `AdminBrandAsset` (`custom: false`, back to the default; idempotent); 404 `not_found` for an unknown slot |
+| GET | `/credit` | – | `AdminCredit` (see *Credit*) |
+| PUT | `/credit` | `CreditInput` | `AdminCredit`; 422 `validation` with a message that starts with the field name |
 | GET | `/backups` | – | `BackupStatus` (see *Backups*) |
 | PUT | `/backups/settings` | `BackupSettingsInput` (a missing field is `null`) | `BackupStatus`; 422 `validation` names the field and its range |
 | DELETE | `/backups/settings` | – | `BackupStatus` (the four overrides are cleared; `paused` stays) |
@@ -207,6 +211,58 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   no absolute http(s) URL, the emails show the text badge instead. The logo is a remote image
   shared by all recipients, so its URL carries no per-recipient data, but fetching it can still
   reveal that a mail was opened.
+
+### Credit
+
+Client sites built by Bao show a "Designed & built by" line with the baoopn logo in their
+footers. `GET /api/v1/credit` gives them the text, the link and the current logo files, so a
+new text or a replaced brand logo reaches every client site without a deploy there. The
+snippet and the setup steps for a client site are in `docs/credit.md`.
+
+- **Storage:** the `credit` settings document holds `text`, `url`, `logo`, `origins` and
+  `updated_at`. It needs no table of its own. The API keeps the document in memory (one API
+  instance) and replaces it after each save.
+- **Defaults** (no document yet, or one field broken by a hand edit): text
+  `Designed & built by`, url the origin of `PUBLIC_URL`, logo `wordmark`, no origins,
+  `updated_at` null. A broken origin in a stored document is dropped.
+- **Logo:** `logo` picks the brand files. `wordmark` uses `wordmark_primary` on light and
+  dark backgrounds (there is no inverse wordmark). `mark` uses `monogram_primary` on light
+  and `monogram_inverse` on dark. The URLs are absolute (`MEDIA_PUBLIC_URL/brand/…`, else
+  `PUBLIC_URL/media/brand/…`), and each version has its own URL. `alt` is the host of
+  `PUBLIC_URL` without `www.`.
+- **Fields** (`PUT /api/admin/credit` checks them in this order and reports the first problem):
+  - `text`: 1 to 80 characters after trimming, on one line: no control characters, no line or
+    paragraph separators (U+2028, U+2029) and no format characters such as bidi overrides
+    or zero-width spaces.
+  - `url`: an absolute `https` URL with a host and no user info, at most 500 bytes.
+  - `logo`: `wordmark` or `mark`.
+  - `origins`: at most 50 after removing repeats (`null` means none). Each entry is a bare
+    origin: `https://host[:port]`, or `http` for `localhost`, `127.0.0.1` and `[::1]` only.
+    No path other than `/`, no query, no fragment, no user info, no `*` and no `%`. The host
+    is dot-separated labels of letters, digits and `-` (an IDN must be in punycode,
+    `xn--…`) or a bracketed IPv6 address without a zone. A port must be 1 to 65535; an
+    empty port (`https://a.com:`) is rejected. The API stores each entry as lowercase
+    `scheme://host[:port]`, writes the port without leading zeros, drops the default port
+    (443 or 80) and keeps the first entry of any repeat.
+  - Unknown fields give 400 `bad_request`.
+- **CORS:** only the two `/api/v1/credit` routes send CORS headers. The rest of the API stays
+  same-origin. The API compares the request's `Origin`, lowercased, with each listed origin
+  and accepts only an exact match. It never matches `null` and never sends
+  `Access-Control-Allow-Credentials`.
+  - `GET` always sends `Vary: Origin`. For a listed origin it also sends
+    `Access-Control-Allow-Origin: <origin>`. Any other origin still gets the body, but the
+    browser hides it from the page.
+  - `OPTIONS` answers `204` with no body and always sends
+    `Vary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers`. For a
+    listed origin it adds `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods: GET,
+    OPTIONS`, `Access-Control-Allow-Headers: Content-Type` and `Access-Control-Max-Age: 86400`.
+- **Errors:** when the database is unreachable, `GET /api/v1/credit` serves the defaults
+  (with no origins) and `Cache-Control: public, max-age=60`, and the next request reads the
+  database again; the admin routes answer 500. When a logo URL cannot be built, the public
+  GET answers 500 `internal` with `Cache-Control: no-store` and no CORS header.
+- **Cloudflare:** never add a Cache Rule for `/api/*`. Cloudflare ignores `Vary: Origin`, so
+  a cached answer would carry one client's `Access-Control-Allow-Origin` to every other
+  client. Cloudflare does not cache this JSON by default.
 
 ### Backups
 
