@@ -70,9 +70,9 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		go migrateMedia(mediaStore, pool, cfg.MediaPublicURL, log)
 	}
 
-	brandMod := brand.New(brand.Deps{DB: pool, Log: log, Files: mediaStore})
+	brandMod := brand.NewModule(brand.Deps{DB: pool, Log: log, Files: mediaStore})
 	ensureBrand(ctx, brandMod)
-	creditMod := credit.New(credit.Deps{DB: pool, Log: log, Brand: brandMod, PublicURL: cfg.PublicURL})
+	creditMod := credit.New(credit.Deps{DB: pool, Log: log, Brand: brandMod.Main, PublicURL: cfg.PublicURL})
 
 	profileMod := profile.New(profile.Deps{DB: pool, Log: log, GitHubUser: cfg.GitHubUser,
 		GitHubToken: cfg.GitHubToken, HTTP: httpClient, Seed: seed.FS})
@@ -92,7 +92,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	listeningMod := listening.New(listening.Deps{BaseURL: cfg.SpotifyAPIURL, Log: log, HTTP: httpClient})
 
 	contactMod := contact.New(contact.Deps{DB: pool, Log: log, Mailer: mailer, Settings: site,
-		PublicURL: cfg.PublicURL, EmailLogo: emailLogo(brandMod, cfg.PublicURL, log), InboundDomain: cfg.InboundDomain, InboundSecret: cfg.InboundSecret,
+		PublicURL: cfg.PublicURL, EmailLogo: emailLogo(brandMod.Main, cfg.PublicURL, log), InboundDomain: cfg.InboundDomain, InboundSecret: cfg.InboundSecret,
 		TurnstileSecret: cfg.TurnstileSecret, HTTP: httpClient})
 
 	rec := analytics.New(analytics.Deps{DB: pool, Log: log,
@@ -111,9 +111,9 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	}, nil
 }
 
-// ensureBrand uploads the default brand files (30 s at most). It only logs:
-// a storage outage must not stop the boot.
-func ensureBrand(ctx context.Context, b *brand.Store) {
+// ensureBrand uploads the default brand files of both brands (30 s at
+// most). It only logs: a storage outage must not stop the boot.
+func ensureBrand(ctx context.Context, b *brand.Module) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	b.Ensure(ctx)

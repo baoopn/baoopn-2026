@@ -1,4 +1,5 @@
 import { beforeNavigate } from '$app/navigation';
+import { skipsGuard } from './guard-rules.js';
 
 /**
  * Warn before leaving a form with unsaved changes: in-app navigation asks with
@@ -8,7 +9,7 @@ import { beforeNavigate } from '$app/navigation';
  */
 export function guardUnsaved(isDirty: () => boolean, message = 'Discard unsaved changes?'): void {
 	beforeNavigate((nav) => {
-		if (!isDirty()) return;
+		if (skipsGuard(nav, isDirty())) return;
 		if (nav.type === 'leave') {
 			nav.cancel();
 			return;

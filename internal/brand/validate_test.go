@@ -266,3 +266,87 @@ func TestSVGAccept(t *testing.T) {
 		t.Errorf("wordmark: %+v %v", info, err)
 	}
 }
+
+// TestListeningDefaults: every listening default passes its own rules with
+// the kit's real size, and its key is a valid, media-stem-free brand key.
+func TestListeningDefaults(t *testing.T) {
+	sizes := map[string][2]int{
+		FaviconICO: {48, 48}, FaviconSVG: {200, 200}, AppleTouchIcon: {180, 180}, "favicon_16": {16, 16},
+		"favicon_32": {32, 32}, "favicon_48": {48, 48}, "icon_192": {192, 192}, "icon_512": {512, 512},
+		"icon_maskable_512": {512, 512}, "mark_primary": {200, 200}, "mark_inverse": {200, 200},
+		"mark_navy": {160, 151}, "mark_cream": {160, 151}, WordmarkPrimary: {320, 132}, WordmarkInverse: {320, 132},
+		WordmarkNavy: {254, 121}, WordmarkCream: {254, 121}, "og_image": {1200, 630}, EmailLogo: {640, 264},
+	}
+	for _, d := range listeningSlots {
+		data, err := listeningBrand.defaultFile(d)
+		if err != nil {
+			t.Fatalf("%s: %v", d.File, err)
+		}
+		info, err := validate(d, data)
+		if err != nil {
+			t.Errorf("%s: default %s fails: %v", d.Slot, d.File, err)
+			continue
+		}
+		want, ok := sizes[d.Slot]
+		if !ok && d.Group == "icons" {
+			want, ok = [2]int{200, 200}, true
+		}
+		if !ok || info.Width != want[0] || info.Height != want[1] {
+			t.Errorf("%s: %dx%d, want %v", d.Slot, info.Width, info.Height, want)
+		}
+		key := listeningBrand.keyFor(d, data)
+		if !media.BrandKeyRe.MatchString(key) || !listeningBrand.owns(key) || baoopnBrand.owns(key) {
+			t.Errorf("%s: key %q", d.Slot, key)
+		}
+		if st := mediarefs.Stems(key); len(st) != 0 {
+			t.Errorf("%s: key %q has media stems %v", d.Slot, key, st)
+		}
+	}
+}
+
+func TestListeningRules(t *testing.T) {
+	ls := func(name string) slotDef {
+		t.Helper()
+		d, ok := listeningSlot(name)
+		if !ok {
+			t.Fatalf("no listening slot %s", name)
+		}
+		return d
+	}
+	pngWH := func(w, h int) []byte {
+		var b bytes.Buffer
+		_ = png.Encode(&b, image.NewRGBA(image.Rect(0, 0, w, h)))
+		return b.Bytes()
+	}
+	const animated = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><line x1="55" y1="105" x2="55" y2="150">` +
+		`<animate attributeName="y1" values="105;70;120;105" dur="1.1s" repeatCount="indefinite"/></line></svg>`
+	if _, err := validate(ls("icon_now_playing_navy"), []byte(animated)); err != nil {
+		t.Errorf("animated now-playing: %v", err)
+	}
+	hrefAnim := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><a><animate attributeName="href" to="https://x"/></a></svg>`
+	if _, err := validate(ls("icon_now_playing_navy"), []byte(hrefAnim)); err == nil {
+		t.Error("animate of href accepted")
+	}
+	if _, err := validate(ls("icon_maskable_512"), pngWH(512, 512)); err != nil {
+		t.Errorf("maskable 512: %v", err)
+	}
+	if !strings.Contains(ls("icon_maskable_512").Rule, "central 80% circle") {
+		t.Errorf("maskable rule = %q", ls("icon_maskable_512").Rule)
+	}
+	if _, err := validate(ls("og_image"), pngWH(1200, 630)); err != nil {
+		t.Errorf("og 1200x630: %v", err)
+	}
+	if p := problemOf(t, func() error { _, err := validate(ls("og_image"), pngWH(1200, 628)); return err }()); p.Status != http.StatusUnprocessableEntity {
+		t.Errorf("og 1200x628 = %d", p.Status)
+	}
+	if p := problemOf(t, func() error { _, err := validate(ls("favicon_16"), pngWH(32, 32)); return err }()); p.Status != http.StatusUnprocessableEntity {
+		t.Errorf("favicon_16 32x32 = %d", p.Status)
+	}
+	wide := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 24.5 160 151"><path d="M0 0h1"/></svg>`)
+	if _, err := validate(ls("mark_navy"), wide); err != nil {
+		t.Errorf("mark_navy non-square: %v", err)
+	}
+	if _, err := validate(ls("mark_primary"), wide); err == nil {
+		t.Error("mark_primary accepted a non-square viewBox")
+	}
+}

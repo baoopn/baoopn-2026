@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="baoopn listening mark">
+  <title>baoopn listening mark</title>
+  <rect width="200" height="200" rx="21" fill="#fff5eb"/>
+  <g fill="none" stroke="#0b0537" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M59 111.5a25 25 0 1 1 0 50a25 25 0 1 1 0-50z"/>
+    <path d="M141 111.5a25 25 0 1 1 0 50a25 25 0 1 1 0-50z"/>
+    <path d="M34 136.5V104.5a66 66 0 0 1 132 0V136.5"/>
+  </g>
+</svg>

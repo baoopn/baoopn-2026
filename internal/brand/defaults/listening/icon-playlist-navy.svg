@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="playlist">
+  <title>playlist</title>
+  <g fill="none" stroke="#0b0537" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M40 39H160"/>
+    <path d="M40 74H160"/>
+    <path d="M40 109H95"/>
+    <path d="M135 126a18 18 0 1 0 0 36a18 18 0 1 0 0-36z"/>
+    <path d="M153 144V104"/>
+  </g>
+</svg>

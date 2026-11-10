@@ -97,6 +97,11 @@ func newTestStore(t *testing.T) (*Store, *fakeFiles, *memDoc, *clock) {
 	f := newFakeFiles()
 	c := &clock{t: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
 	s := New(Deps{Log: slog.New(slog.DiscardHandler), Files: f, Now: c.now})
+	return s, f, attachDoc(s), c
+}
+
+// attachDoc gives s an in-memory settings document.
+func attachDoc(s *Store) *memDoc {
 	doc := &memDoc{}
 	s.load = func(context.Context) (State, error) { return doc.st.clone(), nil }
 	s.save = func(_ context.Context, st State) error {
@@ -107,7 +112,7 @@ func newTestStore(t *testing.T) (*Store, *fakeFiles, *memDoc, *clock) {
 		doc.st = st.clone()
 		return nil
 	}
-	return s, f, doc, c
+	return doc
 }
 
 func TestEnsureUploadsDefaultsOnce(t *testing.T) {

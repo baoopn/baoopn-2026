@@ -1,11 +1,14 @@
-// Package brand serves the site's brand assets (favicons, apple touch icon,
-// wordmark, monograms) from the media bucket and lets the admin replace them.
+// Package brand serves the brand assets (favicons, app icons, logos) of the
+// site (brand "baoopn") and of the listening sub-brand (brand "listening")
+// from the media bucket and lets the admin replace them.
 //
-// Files are content-addressed (brand/<stem>.<16 hex>.<ext>) and never go
-// through the media table or the WebP queue. The defaults are embedded and
-// uploaded at startup (Ensure); overrides and retired keys live in the
-// settings document "brand". A retired file is deleted 7 days after it was
-// replaced, so pages and caches that still name it keep working meanwhile.
+// Files are content-addressed (brand/<stem>.<16 hex>.<ext>, or
+// brand/listening/<stem>.<16 hex>.<ext>) and never go through the media
+// table or the WebP queue. The defaults are embedded and uploaded at startup
+// (Ensure); overrides and retired keys live in one settings document per
+// brand ("brand" and "brand_listening"). A retired file is deleted 7 days
+// after it was replaced, so pages and caches that still name it keep working
+// meanwhile. Each brand's store only ever reads, keeps or deletes its own keys.
 package brand
 
 import (
@@ -21,11 +24,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/baoopn/baoopn-2026/internal/logging"
-	"github.com/baoopn/baoopn-2026/internal/media"
 	"github.com/baoopn/baoopn-2026/internal/settings"
 )
 
-// Key is the settings key of the State document.
+// Key is the settings key of the baoopn brand's State document.
 const Key = "brand"
 
 // retireAfter is how long a replaced file stays in storage.
@@ -93,8 +95,10 @@ var (
 	ErrStorage = errors.New("brand: storage unavailable")
 )
 
-// Store reads and writes the brand state, cached in memory (one API instance).
+// Store reads and writes one brand's state, cached in memory (one API
+// instance).
 type Store struct {
+	b        *brandDef
 	log      *slog.Logger
 	files    Files
 	now      func() time.Time
@@ -109,37 +113,46 @@ type Store struct {
 	save func(ctx context.Context, st State) error
 }
 
-// New returns the store.
-func New(d Deps) *Store {
+// New returns the baoopn brand's store.
+func New(d Deps) *Store { return NewBrand(d, Baoopn) }
+
+// NewBrand returns the store of the brand named name. It panics on an
+// unknown name (a programming error).
+func NewBrand(d Deps, name string) *Store {
+	b, ok := brandByName(name)
+	if !ok {
+		panic("brand: unknown brand " + name)
+	}
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	s := &Store{log: d.Log, files: d.Files, now: d.Now, defaults: map[string]defaultAsset{}}
-	for _, def := range slots {
-		data, err := defaultFile(def)
+	s := &Store{b: b, log: d.Log, files: d.Files, now: d.Now, defaults: map[string]defaultAsset{}}
+	for _, def := range b.Slots {
+		data, err := b.defaultFile(def)
 		if err != nil {
 			panic(fmt.Sprintf("brand: embedded default %s: %v", def.File, err)) // build error
 		}
 		info, err := validate(def, data)
 		if err != nil {
-			d.Log.Error("brand: embedded default fails validation", slog.String("slot", def.Slot), logging.Err(err))
+			d.Log.Error("brand: embedded default fails validation", slog.String("brand", b.Name),
+				slog.String("slot", def.Slot), logging.Err(err))
 		}
-		s.defaults[def.Slot] = defaultAsset{key: keyFor(def, data), data: data, info: info}
+		s.defaults[def.Slot] = defaultAsset{key: b.keyFor(def, data), data: data, info: info}
 	}
 	s.load = func(ctx context.Context) (State, error) {
 		var st State
-		_, err := settings.Get(ctx, d.DB, Key, &st)
+		_, err := settings.Get(ctx, d.DB, b.SettingsKey, &st)
 		return st, err
 	}
-	s.save = func(ctx context.Context, st State) error { return settings.Put(ctx, d.DB, Key, st) }
+	s.save = func(ctx context.Context, st State) error { return settings.Put(ctx, d.DB, b.SettingsKey, st) }
 	return s
 }
 
 // loadState reads the document from the database, dropping anything a
-// hand edit broke.
+// hand edit broke (and any key of another brand).
 func (s *Store) loadState(ctx context.Context) (State, error) {
 	st, err := s.load(ctx)
 	if err != nil {
@@ -147,7 +160,7 @@ func (s *Store) loadState(ctx context.Context) (State, error) {
 	}
 	st = st.clone()
 	for slot, c := range st.Custom {
-		if def, ok := slotByName(slot); !ok || !media.BrandKeyRe.MatchString(c.Key) || c.ContentType != def.Type {
+		if def, ok := s.b.slot(slot); !ok || !s.b.owns(c.Key) || c.ContentType != def.Type {
 			delete(st.Custom, slot)
 		}
 	}
@@ -199,7 +212,7 @@ func (s *Store) state(ctx context.Context) (State, error) {
 
 // protected reports whether key is a slot's current file or a default.
 func (s *Store) protected(st State, key string) bool {
-	for _, def := range slots {
+	for _, def := range s.b.Slots {
 		if s.defaults[def.Slot].key == key {
 			return true
 		}
@@ -221,7 +234,7 @@ func (s *Store) retire(st *State, slot string, now time.Time) {
 // Replace validates data and makes it slot's current file. Bytes identical
 // to the current file change nothing.
 func (s *Store) Replace(ctx context.Context, slot, original string, data []byte) (AdminAsset, error) {
-	def, ok := slotByName(slot)
+	def, ok := s.b.slot(slot)
 	if !ok {
 		return AdminAsset{}, ErrUnknownSlot
 	}
@@ -229,7 +242,7 @@ func (s *Store) Replace(ctx context.Context, slot, original string, data []byte)
 	if err != nil {
 		return AdminAsset{}, err
 	}
-	key := keyFor(def, data)
+	key := s.b.keyFor(def, data)
 	if key == s.defaults[slot].key {
 		return s.Reset(ctx, slot) // the default's own bytes: back to the default
 	}
@@ -271,7 +284,7 @@ func (s *Store) Replace(ctx context.Context, slot, original string, data []byte)
 
 // Reset puts slot back to its default. It is idempotent.
 func (s *Store) Reset(ctx context.Context, slot string) (AdminAsset, error) {
-	def, ok := slotByName(slot)
+	def, ok := s.b.slot(slot)
 	if !ok {
 		return AdminAsset{}, ErrUnknownSlot
 	}
@@ -305,7 +318,7 @@ func (s *Store) Reset(ctx context.Context, slot string) (AdminAsset, error) {
 // never fails on them.
 func (s *Store) Ensure(ctx context.Context) {
 	storageOK := true
-	for _, def := range slots {
+	for _, def := range s.b.Slots {
 		d := s.defaults[def.Slot]
 		ok, err := s.files.BrandFileExists(ctx, d.key)
 		if err != nil {
@@ -333,7 +346,7 @@ func (s *Store) Ensure(ctx context.Context) {
 		return
 	}
 	next, changed := st.clone(), false
-	for _, def := range slots {
+	for _, def := range s.b.Slots {
 		c, ok := st.Custom[def.Slot]
 		if !ok || !storageOK {
 			continue
@@ -377,8 +390,8 @@ func (s *Store) prune(ctx context.Context) {
 	changed := false
 	for _, r := range st.Retired {
 		switch {
-		case s.protected(st, r.Key) || !media.BrandKeyRe.MatchString(r.Key):
-			changed = true // in use again (or junk): forget it, never delete
+		case s.protected(st, r.Key) || !s.b.owns(r.Key):
+			changed = true // in use again (or junk, or another brand's): forget it, never delete
 		case now.Sub(r.RetiredAt) < retireAfter:
 			keep = append(keep, r)
 		default:
