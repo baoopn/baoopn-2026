@@ -393,7 +393,7 @@ func TestAbsoluteAsset(t *testing.T) {
 	s, f, _, _ := newTestStore(t)
 	key := s.defaults[EmailLogo].key
 	a, err := s.AbsoluteAsset(ctx, EmailLogo, "https://site.example.com/")
-	if err != nil || a.URL != "https://media.example.com/"+key || a.Width != 480 || a.Height != 198 {
+	if err != nil || a.URL != "https://media.example.com/"+key || a.Width != 640 || a.Height != 264 {
 		t.Fatalf("absolute media URL: %+v %v", a, err)
 	}
 	f.base = "/media/" // no MEDIA_PUBLIC_URL: the site serves /media/*
