@@ -24,9 +24,9 @@ Paste this into the client site's footer. The admin page shows the same
 snippet with a **Copy** button.
 
 ```html
-<p class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>
+<p id="baoopn-credit" class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>
 <script type="module">
-	const fallback = document.querySelector('.baoopn-credit');
+	const fallback = document.getElementById('baoopn-credit');
 	try {
 		if (!fallback) throw new Error('no credit line');
 		const res = await fetch("https://baoopn.com/api/v1/credit");
@@ -52,6 +52,7 @@ snippet with a **Copy** button.
 		link.rel = 'noopener';
 		link.append(picture);
 		const line = document.createElement('p');
+		line.id = 'baoopn-credit';
 		line.className = 'baoopn-credit';
 		line.append(document.createTextNode(data.text + ' '), link);
 		fallback.replaceWith(line);
@@ -68,8 +69,14 @@ stays.
 
 ## Content Security Policy
 
-If the client site sets a Content Security Policy, allow both hosts:
+If the client site sets a Content Security Policy, it must allow the script
+and both hosts:
 
+- `script-src` must allow the inline module script. A policy such as
+  `script-src 'self'` blocks it, and the static line stays. Add a nonce to the
+  script tag, or allow a hash of the exact script. You can also save the script
+  body as a `.js` file on the client site and load it with
+  `<script type="module" src="...">`.
 - `connect-src` must allow `https://baoopn.com`, where the script fetches the
   credit.
 - `img-src` must allow the host that serves the logo, which is the media host

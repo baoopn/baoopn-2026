@@ -62,6 +62,13 @@
 			<code class="font-mono">connect-src</code> must allow
 			<code class="font-mono break-all">{apiOrigin}</code>.
 		</li>
+		<li>
+			The snippet is an inline module script, so a CSP with
+			<code class="font-mono">script-src 'self'</code> blocks it and the static line stays. Allow it
+			with a nonce on the script tag or a hash of the exact script. Or save the script body as a
+			<code class="font-mono">.js</code> file on the client site and load it with
+			<code class="font-mono">src</code>.
+		</li>
 		<li>The static line stays in place when the script cannot load the credit.</li>
 	</ul>
 </section>
