@@ -245,8 +245,9 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   safe zone, so keep the mark inside the central 80% circle yourself. The admin page shows a
   copy clipped to a circle next to the full image.
 - **Caching:** `GET /api/v1/brand/listening` is cached 60 s and each `302` 300 s, so a
-  replaced file reaches listening.baoopn.com within a few minutes. The file URLs themselves
-  never change and are cached for a year.
+  client that reads the API sees a replaced file within a few minutes. The file URLs
+  themselves never change and are cached for a year. listening.baoopn.com still serves its
+  own copies until it reads this API.
 
 #### Both brands
 
