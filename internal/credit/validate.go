@@ -2,6 +2,7 @@ package credit
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -49,8 +50,9 @@ func (in Input) validate() (Doc, string) {
 	return d, ""
 }
 
-// validText trims s and checks it is 1 to TextMax characters with no
-// control characters (so no line breaks).
+// validText trims s and checks it is 1 to TextMax characters on one line:
+// no control characters, no line or paragraph separators and no format
+// characters (bidi overrides, zero-width characters).
 func validText(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	n := utf8.RuneCountInString(s)
@@ -58,7 +60,7 @@ func validText(s string) (string, bool) {
 		return "", false
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
 			return "", false
 		}
 	}
@@ -85,10 +87,12 @@ func validLogo(s string) bool { return s == LogoWordmark || s == LogoMark }
 var localHosts = map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
 
 // normalizeOrigin checks raw is a bare origin and returns it as
-// scheme://host[:port], lowercase, without a default port.
+// scheme://host[:port], lowercase, without a default port. The host is
+// dot-separated labels of [a-z0-9-] (an IDN must be punycode) or a
+// bracketed IPv6 literal without a zone.
 func normalizeOrigin(raw string) (string, bool) {
 	s := strings.TrimSpace(raw)
-	if s == "" || len(s) > originMax || strings.ContainsAny(s, "*?#") {
+	if s == "" || len(s) > originMax || strings.ContainsAny(s, "*?#%") {
 		return "", false
 	}
 	for i := 0; i < len(s); i++ {
@@ -97,34 +101,64 @@ func normalizeOrigin(raw string) (string, bool) {
 		}
 	}
 	p, err := url.Parse(s)
-	if err != nil || p.Opaque != "" || p.User != nil || p.Hostname() == "" ||
+	if err != nil || p.Opaque != "" || p.User != nil || strings.HasSuffix(p.Host, ":") ||
 		(p.Path != "" && p.Path != "/") || p.RawQuery != "" || p.Fragment != "" {
 		return "", false
 	}
 	scheme := strings.ToLower(p.Scheme)
-	host := strings.ToLower(p.Hostname())
+	host, ok := validHost(p)
+	if !ok {
+		return "", false
+	}
 	switch {
 	case scheme == "https":
-	case scheme == "http" && localHosts[host]:
+	case scheme == "http" && localHosts[strings.Trim(host, "[]")]:
 	default:
 		return "", false
 	}
-	if port := p.Port(); port != "" {
+	port := p.Port()
+	if port != "" {
 		n, err := strconv.Atoi(port)
 		if err != nil || n < 1 || n > 65535 {
 			return "", false
 		}
+		port = strconv.Itoa(n)
 	}
-	return scheme + "://" + hostPort(scheme, p), true
+	return scheme + "://" + hostPort(scheme, host, port), true
 }
 
-// hostPort is p's lowercase host with the scheme's default port dropped.
-func hostPort(scheme string, p *url.URL) string {
-	host := strings.ToLower(p.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
+// validHost returns p's host in lowercase (an IPv6 literal in brackets),
+// or false when it is not an LDH name or an IPv6 literal without a zone.
+func validHost(p *url.URL) (string, bool) {
+	h := strings.ToLower(p.Hostname())
+	if h == "" {
+		return "", false
 	}
-	port := p.Port()
+	if strings.HasPrefix(p.Host, "[") {
+		a, err := netip.ParseAddr(h)
+		if err != nil || !a.Is6() || a.Zone() != "" {
+			return "", false
+		}
+		return "[" + h + "]", true
+	}
+	for _, label := range strings.Split(h, ".") {
+		if label == "" {
+			return "", false
+		}
+		for i := 0; i < len(label); i++ {
+			if !ldh(label[i]) {
+				return "", false
+			}
+		}
+	}
+	return h, true
+}
+
+// ldh reports whether c may appear in a host label: a-z, 0-9 or '-'.
+func ldh(c byte) bool { return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' }
+
+// hostPort joins host and port, dropping the scheme's default port.
+func hostPort(scheme, host, port string) string {
 	if port == "" || (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
 		return host
 	}

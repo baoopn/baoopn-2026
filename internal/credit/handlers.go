@@ -61,13 +61,16 @@ func (m *Module) handlePublic(w http.ResponseWriter, r *http.Request) {
 	d, cache := m.publicDoc(r)
 	h := w.Header()
 	h.Set("Vary", "Origin")
-	if o := allowedOrigin(r, d.Origins); o != "" {
-		h.Set("Access-Control-Allow-Origin", o)
-	}
 	c, err := m.public(r.Context(), d)
 	if err != nil {
+		// No CORS header and no caching: a client page sees a failed fetch
+		// and keeps its fallback text.
+		h.Set("Cache-Control", "no-store")
 		m.internal(w, r, "brand logo", err)
 		return
+	}
+	if o := allowedOrigin(r, d.Origins); o != "" {
+		h.Set("Access-Control-Allow-Origin", o)
 	}
 	h.Set("Cache-Control", cache)
 	httpapi.JSON(w, http.StatusOK, c)

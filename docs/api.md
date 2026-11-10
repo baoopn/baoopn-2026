@@ -231,15 +231,19 @@ snippet and the setup steps for a client site are in `docs/credit.md`.
   `PUBLIC_URL/media/brand/…`), and each version has its own URL. `alt` is the host of
   `PUBLIC_URL` without `www.`.
 - **Fields** (`PUT /api/admin/credit` checks them in this order and reports the first problem):
-  - `text`: 1 to 80 characters after trimming, on one line (no control characters).
+  - `text`: 1 to 80 characters after trimming, on one line: no control characters, no line or
+    paragraph separators (U+2028, U+2029) and no format characters such as bidi overrides
+    or zero-width spaces.
   - `url`: an absolute `https` URL with a host and no user info, at most 500 bytes.
   - `logo`: `wordmark` or `mark`.
   - `origins`: at most 50 after removing repeats (`null` means none). Each entry is a bare
     origin: `https://host[:port]`, or `http` for `localhost`, `127.0.0.1` and `[::1]` only.
-    No path other than `/`, no query, no fragment, no user info and no `*`. An IDN host
-    must be in punycode (`xn--…`). The API stores each entry as lowercase
-    `scheme://host[:port]`, drops the default port (443 or 80) and keeps the first entry of
-    any repeat.
+    No path other than `/`, no query, no fragment, no user info, no `*` and no `%`. The host
+    is dot-separated labels of letters, digits and `-` (an IDN must be in punycode,
+    `xn--…`) or a bracketed IPv6 address without a zone. A port must be 1 to 65535; an
+    empty port (`https://a.com:`) is rejected. The API stores each entry as lowercase
+    `scheme://host[:port]`, writes the port without leading zeros, drops the default port
+    (443 or 80) and keeps the first entry of any repeat.
   - Unknown fields give 400 `bad_request`.
 - **CORS:** only the two `/api/v1/credit` routes send CORS headers. The rest of the API stays
   same-origin. The API compares the request's `Origin`, lowercased, with each listed origin
@@ -253,7 +257,9 @@ snippet and the setup steps for a client site are in `docs/credit.md`.
     listed origin it adds `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods: GET,
     OPTIONS`, `Access-Control-Allow-Headers: Content-Type` and `Access-Control-Max-Age: 86400`.
 - **Errors:** when the database is unreachable, `GET /api/v1/credit` serves the defaults
-  (with no origins) and `Cache-Control: public, max-age=60`; the admin routes answer 500.
+  (with no origins) and `Cache-Control: public, max-age=60`, and the next request reads the
+  database again; the admin routes answer 500. When a logo URL cannot be built, the public
+  GET answers 500 `internal` with `Cache-Control: no-store` and no CORS header.
 - **Cloudflare:** never add a Cache Rule for `/api/*`. Cloudflare ignores `Vary: Origin`, so
   a cached answer would carry one client's `Access-Control-Allow-Origin` to every other
   client. Cloudflare does not cache this JSON by default.

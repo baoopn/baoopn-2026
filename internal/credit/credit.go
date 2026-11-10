@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +61,9 @@ type Module struct {
 	d    Deps
 	mu   sync.Mutex // serialises saves of the settings document
 	snap atomic.Pointer[Doc]
+	// read and write reach the settings document (tests replace them).
+	read  func(ctx context.Context) ([]byte, error)
+	write func(ctx context.Context, d Doc) error
 }
 
 // New builds the module.
@@ -70,7 +74,14 @@ func New(d Deps) *Module {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
-	return &Module{d: d}
+	m := &Module{d: d}
+	m.read = func(ctx context.Context) ([]byte, error) {
+		var raw json.RawMessage
+		_, err := settings.Get(ctx, m.d.DB, Key, &raw)
+		return raw, err
+	}
+	m.write = func(ctx context.Context, d Doc) error { return settings.Put(ctx, m.d.DB, Key, d) }
+	return m
 }
 
 // Doc is the settings document "credit".
@@ -147,7 +158,16 @@ func (m *Module) siteOrigin() string {
 	if err != nil || p.Host == "" {
 		return strings.TrimRight(raw, "/")
 	}
-	return strings.ToLower(p.Scheme) + "://" + hostPort(strings.ToLower(p.Scheme), p)
+	scheme := strings.ToLower(p.Scheme)
+	host := strings.ToLower(p.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := p.Port()
+	if n, err := strconv.Atoi(port); err == nil {
+		port = strconv.Itoa(n)
+	}
+	return scheme + "://" + hostPort(scheme, host, port)
 }
 
 // alt is the site's host name without a leading "www.".
@@ -218,8 +238,8 @@ func (m *Module) load(ctx context.Context) (Doc, error) {
 	if d := m.snap.Load(); d != nil {
 		return *d, nil
 	}
-	var raw json.RawMessage
-	if _, err := settings.Get(ctx, m.d.DB, Key, &raw); err != nil {
+	raw, err := m.read(ctx)
+	if err != nil {
 		return Doc{}, err
 	}
 	d := parseDoc(raw, m.defaults())
@@ -234,7 +254,7 @@ func (m *Module) load(ctx context.Context) (Doc, error) {
 func (m *Module) save(ctx context.Context, d Doc) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := settings.Put(ctx, m.d.DB, Key, d); err != nil {
+	if err := m.write(ctx, d); err != nil {
 		return err
 	}
 	m.snap.Store(&d)
