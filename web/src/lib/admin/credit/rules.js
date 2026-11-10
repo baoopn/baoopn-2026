@@ -233,3 +233,211 @@ export function snippet(endpoint) {
 </script>
 `;
 }
+
+/**
+ * The endpoint as a JS string literal that is safe inside a script block:
+ * "<" is escaped so the value cannot close a <script> tag.
+ * @param {string} endpoint
+ */
+const endpointLiteral = (endpoint) => JSON.stringify(String(endpoint)).replace(/</g, '\\u003c');
+
+/** Response types shared by the framework components. */
+const CREDIT_TYPES = `type CreditImage = { url: string; width: number; height: number };
+type Credit = {
+	prefix: string;
+	suffix: string;
+	url: string;
+	alt: string;
+	logo: { light: CreditImage; dark: CreditImage };
+};`;
+
+/** Fetch body shared by the framework components: keeps only data with an https link and both logos. */
+const ACCEPT = `if (!res.ok) throw new Error('credit unavailable');
+		const { data } = await res.json();
+		if (!/^https:\\/\\//.test(data.url) || !data.logo?.light || !data.logo?.dark) {
+			throw new Error('bad credit');
+		}`;
+
+/** @typedef {{ name: string; code: string }} FrameworkSnippet */
+
+/**
+ * BaoopnCredit.tsx: a React 18/19 function component. It shows the static
+ * line until the credit loads, and keeps it on any error.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with the query
+ * @returns {string}
+ */
+export function reactSnippet(endpoint) {
+	return `'use client';
+// 'use client' lets the Next.js App Router run this in the browser. Other React apps ignore it.
+import { useEffect, useState } from 'react';
+
+const ENDPOINT = ${endpointLiteral(endpoint)};
+
+${CREDIT_TYPES}
+
+const width = (img: CreditImage) => Math.round((20 * img.width) / (img.height || 1));
+
+export default function BaoopnCredit() {
+	const [credit, setCredit] = useState<Credit | null>(null);
+
+	useEffect(() => {
+		const controller = new AbortController();
+		(async () => {
+			const res = await fetch(ENDPOINT, { signal: controller.signal });
+			${ACCEPT.replace(/\n\t\t/g, '\n\t\t\t')}
+			setCredit(data);
+		})().catch(() => {
+			// Keep the static line.
+		});
+		return () => controller.abort();
+	}, []);
+
+	if (!credit) {
+		return (
+			<p className="baoopn-credit">
+				Designed &amp; built by <a href="https://baoopn.com">baoopn</a>
+			</p>
+		);
+	}
+
+	const { light, dark } = credit.logo;
+	return (
+		<p className="baoopn-credit">
+			{credit.prefix && credit.prefix + ' '}
+			<a href={credit.url} rel="noopener">
+				<picture>
+					<source
+						media="(prefers-color-scheme: dark)"
+						srcSet={dark.url}
+						width={width(dark)}
+						height={20}
+					/>
+					<img src={light.url} alt={credit.alt} width={width(light)} height={20} />
+				</picture>
+				{credit.suffix && ' ' + credit.suffix}
+			</a>
+		</p>
+	);
+}
+`;
+}
+
+/**
+ * BaoopnCredit.vue: a Vue 3 single-file component with <script setup>.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with the query
+ * @returns {string}
+ */
+export function vueSnippet(endpoint) {
+	return `<script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue';
+
+const ENDPOINT = ${endpointLiteral(endpoint)};
+
+${CREDIT_TYPES}
+
+const width = (img: CreditImage) => Math.round((20 * img.width) / (img.height || 1));
+
+const credit = ref<Credit | null>(null);
+let controller: AbortController | undefined;
+
+onMounted(async () => {
+	controller = new AbortController();
+	try {
+		const res = await fetch(ENDPOINT, { signal: controller.signal });
+		${ACCEPT.replace(/\n\t\t/g, '\n\t\t')}
+		credit.value = data;
+	} catch {
+		// Keep the static line.
+	}
+});
+
+onUnmounted(() => controller?.abort());
+</script>
+
+<template>
+	<p v-if="credit" class="baoopn-credit">
+		{{ credit.prefix ? credit.prefix + ' ' : '' }}<a :href="credit.url" rel="noopener"
+			><picture
+				><source
+					media="(prefers-color-scheme: dark)"
+					:srcset="credit.logo.dark.url"
+					:width="width(credit.logo.dark)"
+					height="20" /><img
+					:src="credit.logo.light.url"
+					:alt="credit.alt"
+					:width="width(credit.logo.light)"
+					height="20" /></picture
+			>{{ credit.suffix ? ' ' + credit.suffix : '' }}</a
+		>
+	</p>
+	<p v-else class="baoopn-credit">
+		Designed &amp; built by <a href="https://baoopn.com">baoopn</a>
+	</p>
+</template>
+`;
+}
+
+/**
+ * BaoopnCredit.svelte: a Svelte 5 component with runes. onMount fetches once in
+ * the browser and aborts the request on unmount.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with the query
+ * @returns {string}
+ */
+export function svelteSnippet(endpoint) {
+	return `<script lang="ts">
+	import { onMount } from 'svelte';
+
+	const ENDPOINT = ${endpointLiteral(endpoint)};
+
+	${CREDIT_TYPES.replace(/\n/g, '\n\t')}
+
+	const width = (img: CreditImage) => Math.round((20 * img.width) / (img.height || 1));
+
+	let credit = $state.raw<Credit | null>(null);
+
+	onMount(() => {
+		const controller = new AbortController();
+		(async () => {
+			const res = await fetch(ENDPOINT, { signal: controller.signal });
+			${ACCEPT.replace(/\n\t\t/g, '\n\t\t\t')}
+			credit = data;
+		})().catch(() => {
+			// Keep the static line.
+		});
+		return () => controller.abort();
+	});
+</script>
+
+{#if credit}
+	<p class="baoopn-credit">
+		{credit.prefix ? credit.prefix + ' ' : ''}<a href={credit.url} rel="noopener"
+			><picture
+				><source
+					media="(prefers-color-scheme: dark)"
+					srcset={credit.logo.dark.url}
+					width={width(credit.logo.dark)}
+					height="20"
+				/><img
+					src={credit.logo.light.url}
+					alt={credit.alt}
+					width={width(credit.logo.light)}
+					height="20"
+				/></picture
+			>{credit.suffix ? ' ' + credit.suffix : ''}</a
+		>
+	</p>
+{:else}
+	<p class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>
+{/if}
+`;
+}
+
+/** @typedef {'html' | 'react' | 'vue' | 'svelte'} Framework */
+
+/** @type {Record<Framework, { file: string; build: (endpoint: string) => string }>} */
+export const FRAMEWORKS = {
+	html: { file: 'credit.html', build: snippet },
+	react: { file: 'BaoopnCredit.tsx', build: reactSnippet },
+	vue: { file: 'BaoopnCredit.vue', build: vueSnippet },
+	svelte: { file: 'BaoopnCredit.svelte', build: svelteSnippet }
+};

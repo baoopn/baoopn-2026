@@ -124,6 +124,10 @@
 
 	/** Plain-English copy for a field the API rejected. */
 	function messageFor(key: string, apiMessage: string): string {
+		// A "variants ..." or "text ..." message is about the shape of the
+		// body, not the prefix length, so show the API's own words.
+		const token = apiMessage.split(' ', 1)[0];
+		if (token === 'variants' || token === 'text') return apiMessage;
 		if (key.startsWith('origins[')) return MESSAGES.origin;
 		if (key === 'url' || key === 'logo' || key === 'origins') return MESSAGES[key];
 		const field = key.split('.')[2];
