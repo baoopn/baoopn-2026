@@ -20,7 +20,12 @@ const ACCEPT = [
 	['http://127.0.0.1:8080', 'http://127.0.0.1:8080'],
 	['http://[::1]:3000', 'http://[::1]:3000'],
 	['http://localhost:80', 'http://localhost'],
-	['  https://example.com  ', 'https://example.com']
+	['  https://example.com  ', 'https://example.com'],
+	['https://a.com:0443', 'https://a.com'],
+	['https://a.com:08443', 'https://a.com:8443'],
+	['https://a.com:65535', 'https://a.com:65535'],
+	['https://xn--bcher-kva.de', 'https://xn--bcher-kva.de'],
+	['https://[2001:DB8::1]:8443', 'https://[2001:db8::1]:8443']
 ];
 
 const REJECT = [
@@ -39,6 +44,14 @@ const REJECT = [
 	'a.com',
 	'https://',
 	'https://a.com:',
+	'https://a.com:0',
+	'https://a.com:99999',
+	'https://a_b.com',
+	'https://a..com',
+	'https://a.com.',
+	'https://a!b.com',
+	'https://[fe80::1%25eth0]',
+	'https://a.com:abc',
 	'https://' + 'a'.repeat(200) + '.com'
 ];
 
@@ -77,6 +90,12 @@ test('validateForm passes a valid form and trims the values', () => {
 test('validateForm enforces the text limits', () => {
 	assert.equal(validateForm({ ...valid(), text: '' }).errors.text, MESSAGES.text);
 	assert.equal(validateForm({ ...valid(), text: 'two\nlines' }).errors.text, MESSAGES.text);
+	// Line and paragraph separators, bidi controls, zero-width space, BOM.
+	const bad = [0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069, 0x200b, 0xfeff].map((c) => String.fromCodePoint(c));
+	for (const ch of bad) {
+		const text = `Built ${ch}by`;
+		assert.equal(validateForm({ ...valid(), text }).errors.text, MESSAGES.text, JSON.stringify(ch));
+	}
 	assert.equal(validateForm({ ...valid(), text: 'x'.repeat(TEXT_MAX + 1) }).errors.text, MESSAGES.text);
 	assert.equal(validateForm({ ...valid(), text: 'x'.repeat(TEXT_MAX) }).errors.text, undefined);
 	// Runes, not UTF-16 units: 80 emoji fit.
@@ -132,10 +151,11 @@ test('snippet embeds the endpoint and builds nodes without innerHTML', () => {
 	assert.ok(s.includes(JSON.stringify(endpoint)));
 	assert.ok(
 		s.startsWith(
-			'<p class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>'
+			'<p id="baoopn-credit" class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>'
 		)
 	);
 	assert.ok(s.includes('<script type="module">'));
+	assert.ok(s.includes("document.getElementById('baoopn-credit')"));
 	assert.ok(s.includes('(prefers-color-scheme: dark)'));
 	assert.ok(s.includes("rel = 'noopener'"));
 	assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(s));

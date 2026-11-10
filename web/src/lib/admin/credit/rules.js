@@ -29,20 +29,24 @@ export const MESSAGES = {
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** Go's unicode.IsControl: C0, DEL and C1. */
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+/** Text must stay on one line and render in order: no controls, line or
+ * paragraph separators (Zl, Zp), or format characters (Cf, which holds the
+ * bidi controls). */
+const TEXT_BAD = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const NON_ASCII = /[^\u0000-\u007f]/;
 /** scheme://authority with an optional single "/" and nothing after it. */
 const ORIGIN_SHAPE = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)\/?$/;
-const NAME_HOST = /^([A-Za-z0-9._~!$&'()+,;=-]+)(?::(\d+))?$/;
-const IP6_HOST = /^(\[[0-9A-Fa-f:.]+\])(?::(\d+))?$/;
-/** @type {Record<string, string>} */
-const DEFAULT_PORT = { https: '443', http: '80' };
+/** Host (LDH labels separated by dots, or a bracketed IPv6 literal without a zone) and optional port. */
+const HOST_PORT = /^([a-z0-9-]+(?:\.[a-z0-9-]+)*|\[[0-9a-f:.]+\])(?::(\d+))?$/;
+/** @type {Record<string, number>} */
+const DEFAULT_PORT = { https: 443, http: 80 };
 
 /** @param {string} s */
 const byteLength = (s) => new TextEncoder().encode(s).length;
 
 /**
  * Normalise one client origin the way the API stores it:
- * lowercase scheme://host[:port], default port dropped.
+ * lowercase scheme://host[:port], port as a plain number, default port dropped.
  * @param {string} raw
  * @returns {{ origin: string } | { error: string }}
  */
@@ -55,13 +59,17 @@ export function normalizeOrigin(raw) {
 	const m = ORIGIN_SHAPE.exec(s);
 	if (!m) return bad;
 	const scheme = m[1].toLowerCase();
-	const hp = IP6_HOST.exec(m[2]) ?? NAME_HOST.exec(m[2]);
+	const hp = HOST_PORT.exec(m[2].toLowerCase());
 	if (!hp) return bad;
-	const host = hp[1].toLowerCase();
-	let port = hp[2] ?? '';
+	const host = hp[1];
 	if (scheme !== 'https' && !(scheme === 'http' && LOCAL_HOSTS.has(host))) return bad;
-	if (port === DEFAULT_PORT[scheme]) port = '';
-	return { origin: `${scheme}://${host}${port ? ':' + port : ''}` };
+	let port = '';
+	if (hp[2] !== undefined) {
+		const n = Number(hp[2]);
+		if (!Number.isInteger(n) || n < 1 || n > 65535) return bad;
+		if (n !== DEFAULT_PORT[scheme]) port = ':' + n;
+	}
+	return { origin: `${scheme}://${host}${port}` };
 }
 
 /**
@@ -95,7 +103,7 @@ export function validateForm(form) {
 
 	const text = String(form.text ?? '').trim();
 	const runes = [...text].length;
-	if (runes < 1 || runes > TEXT_MAX || CONTROL.test(text)) errors.text = MESSAGES.text;
+	if (runes < 1 || runes > TEXT_MAX || TEXT_BAD.test(text)) errors.text = MESSAGES.text;
 
 	const url = String(form.url ?? '').trim();
 	const urlError = checkUrl(url);
@@ -142,9 +150,9 @@ export function fieldFromMessage(message) {
 export function snippet(endpoint) {
 	// JSON string literal; "<" escaped so the value cannot close the script.
 	const url = JSON.stringify(String(endpoint)).replace(/</g, '\\u003c');
-	return `<p class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>
+	return `<p id="baoopn-credit" class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>
 <script type="module">
-	const fallback = document.querySelector('.baoopn-credit');
+	const fallback = document.getElementById('baoopn-credit');
 	try {
 		if (!fallback) throw new Error('no credit line');
 		const res = await fetch(${url});
@@ -170,6 +178,7 @@ export function snippet(endpoint) {
 		link.rel = 'noopener';
 		link.append(picture);
 		const line = document.createElement('p');
+		line.id = 'baoopn-credit';
 		line.className = 'baoopn-credit';
 		line.append(document.createTextNode(data.text + ' '), link);
 		fallback.replaceWith(line);

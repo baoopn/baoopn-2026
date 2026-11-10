@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { LoaderCircle, Save } from '@lucide/svelte';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import type { AdminCredit, CreditInput, CreditLogoKind } from '#lib/api/types.js';
@@ -104,6 +105,8 @@
 				const f = fieldFromMessage(err.message);
 				if (f) {
 					errors = { [f]: messageFor(f, err.message) };
+					// Wait for the fieldset to re-enable, or focus() is ignored.
+					await tick();
 					focusField(f);
 				} else formError = err.message;
 			} else toasts.error('Could not save the credit', errorMessage(err));
@@ -118,100 +121,103 @@
 	</div>
 
 	<form class="flex min-w-0 flex-col gap-5" onsubmit={save} novalidate aria-labelledby="credit-form-h">
-		<div>
-			<div class="flex items-center justify-between gap-2">
-				<label class="field-label" for="credit-text">Text</label>
-				<span
-					class={[
-						'font-mono text-xs',
-						textLength > credit.limits.text_max ? 'text-danger' : 'text-ink-soft'
-					]}
-				>
-					{textLength} / {credit.limits.text_max}
-				</span>
-			</div>
-			<input
-				id="credit-text"
-				class="input"
-				type="text"
-				autocomplete="off"
-				value={form.text}
-				oninput={(e) => edit('text', e.currentTarget.value)}
-				aria-invalid={!!errors.text}
-				aria-describedby="credit-text-msg"
-			/>
-			{#if errors.text}
-				<p id="credit-text-msg" class="field-error" role="alert">{errors.text}</p>
-			{:else}
-				<p id="credit-text-msg" class="hint">Appears before the logo, for example "Designed &amp; built by".</p>
-			{/if}
-		</div>
-
-		<div>
-			<label class="field-label" for="credit-url">Link</label>
-			<input
-				id="credit-url"
-				class="input font-mono"
-				type="url"
-				inputmode="url"
-				autocomplete="off"
-				spellcheck="false"
-				maxlength={credit.limits.url_max}
-				value={form.url}
-				oninput={(e) => edit('url', e.currentTarget.value)}
-				aria-invalid={!!errors.url}
-				aria-describedby="credit-url-msg"
-			/>
-			{#if errors.url}
-				<p id="credit-url-msg" class="field-error" role="alert">{errors.url}</p>
-			{:else}
-				<p id="credit-url-msg" class="hint">The logo links here. It must start with https://.</p>
-			{/if}
-		</div>
-
-		<div>
-			<p class="field-label">Logo</p>
-			<div id="credit-logo-group">
-				<Segmented
-					options={logoOptions}
-					value={form.logo}
-					label="Logo"
-					onchange={(v) => edit('logo', v)}
+		<!-- Locked while saving, so no edit typed mid-request is lost when the save clears the edits. -->
+		<fieldset class="flex min-w-0 flex-col gap-5" disabled={saveM.isPending}>
+			<div>
+				<div class="flex items-center justify-between gap-2">
+					<label class="field-label" for="credit-text">Text</label>
+					<span
+						class={[
+							'font-mono text-xs',
+							textLength > credit.limits.text_max ? 'text-danger' : 'text-ink-soft'
+						]}
+					>
+						{textLength} / {credit.limits.text_max}
+					</span>
+				</div>
+				<input
+					id="credit-text"
+					class="input"
+					type="text"
+					autocomplete="off"
+					value={form.text}
+					oninput={(e) => edit('text', e.currentTarget.value)}
+					aria-invalid={!!errors.text}
+					aria-describedby="credit-text-msg"
 				/>
+				{#if errors.text}
+					<p id="credit-text-msg" class="field-error" role="alert">{errors.text}</p>
+				{:else}
+					<p id="credit-text-msg" class="hint">Appears before the logo, for example "Designed &amp; built by".</p>
+				{/if}
 			</div>
-			{#if errors.logo}
-				<p class="field-error" role="alert">{errors.logo}</p>
-			{:else}
-				<p class="hint">The wordmark spells out the name. The mark is the small badge.</p>
-			{/if}
-		</div>
 
-		<OriginsEditor
-			origins={form.origins}
-			max={credit.limits.origins_max}
-			errors={rowErrors}
-			listError={errors.origins}
-			onchange={(list) => edit('origins', list)}
-		/>
+			<div>
+				<label class="field-label" for="credit-url">Link</label>
+				<input
+					id="credit-url"
+					class="input font-mono"
+					type="url"
+					inputmode="url"
+					autocomplete="off"
+					spellcheck="false"
+					maxlength={credit.limits.url_max}
+					value={form.url}
+					oninput={(e) => edit('url', e.currentTarget.value)}
+					aria-invalid={!!errors.url}
+					aria-describedby="credit-url-msg"
+				/>
+				{#if errors.url}
+					<p id="credit-url-msg" class="field-error" role="alert">{errors.url}</p>
+				{:else}
+					<p id="credit-url-msg" class="hint">The logo links here. It must start with https://.</p>
+				{/if}
+			</div>
 
-		{#if formError}<p class="field-error" role="alert">{formError}</p>{/if}
+			<div>
+				<p class="field-label">Logo</p>
+				<div id="credit-logo-group">
+					<Segmented
+						options={logoOptions}
+						value={form.logo}
+						label="Logo"
+						onchange={(v) => edit('logo', v)}
+					/>
+				</div>
+				{#if errors.logo}
+					<p class="field-error" role="alert">{errors.logo}</p>
+				{:else}
+					<p class="hint">The wordmark spells out the name. The mark is the small badge.</p>
+				{/if}
+			</div>
 
-		<div class="flex flex-wrap items-center gap-3">
-			<button type="submit" class="btn btn-primary" disabled={!dirty || saveM.isPending}>
-				{#if saveM.isPending}<LoaderCircle
-						class="size-4 animate-spin"
-						aria-hidden="true"
-					/>{:else}<Save class="size-4" aria-hidden="true" />{/if}
-				Save
-			</button>
-			{#if dirty}
-				<button type="button" class="btn btn-secondary" onclick={discard}>
-					Discard changes
+			<OriginsEditor
+				origins={form.origins}
+				max={credit.limits.origins_max}
+				errors={rowErrors}
+				listError={errors.origins}
+				onchange={(list) => edit('origins', list)}
+			/>
+
+			{#if formError}<p class="field-error" role="alert">{formError}</p>{/if}
+
+			<div class="flex flex-wrap items-center gap-3">
+				<button type="submit" class="btn btn-primary" disabled={!dirty || saveM.isPending}>
+					{#if saveM.isPending}<LoaderCircle
+							class="size-4 animate-spin"
+							aria-hidden="true"
+						/>{:else}<Save class="size-4" aria-hidden="true" />{/if}
+					Save
 				</button>
-			{/if}
-			<p class="font-mono text-xs" role="status">
-				{#if dirty}<span class="text-warn">Unsaved changes</span>{/if}
-			</p>
-		</div>
+				{#if dirty}
+					<button type="button" class="btn btn-secondary" onclick={discard}>
+						Discard changes
+					</button>
+				{/if}
+				<p class="font-mono text-xs" role="status">
+					{#if dirty}<span class="text-warn">Unsaved changes</span>{/if}
+				</p>
+			</div>
+		</fieldset>
 	</form>
 </section>
