@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Globe, LogOut, Menu, Monitor, Moon, Sun } from '@lucide/svelte';
+	import { Globe, KeyRound, LogOut, Menu, Monitor, Moon, Sun } from '@lucide/svelte';
 	import BrandMark from '../BrandMark.svelte';
 	import Popover from './Popover.svelte';
 	import { auth } from '../../auth.svelte';
@@ -88,6 +88,9 @@
 					API <span class="font-mono text-ink">{auth.config.version}</span>
 				</p>
 			{/if}
+			<a href="/admin/account" class="btn btn-ghost w-full justify-start" onclick={close}>
+				<KeyRound class="size-4" aria-hidden="true" /> Account
+			</a>
 			<button
 				type="button"
 				class="btn btn-ghost w-full justify-start"

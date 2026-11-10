@@ -7,6 +7,7 @@
 		FolderGit2,
 		Headphones,
 		Inbox,
+		KeyRound,
 		LayoutDashboard,
 		NotebookPen,
 		Settings,
@@ -37,7 +38,8 @@
 		{ href: '/admin/profile', label: 'Profile', icon: UserRound, exact: false },
 		{ href: '/admin/backups', label: 'Backups', icon: DatabaseBackup, exact: false },
 		{ href: '/admin/credit', label: 'Credit', icon: BadgeCheck, exact: false },
-		{ href: '/admin/settings', label: 'Settings', icon: Settings, exact: false }
+		{ href: '/admin/settings', label: 'Settings', icon: Settings, exact: false },
+		{ href: '/admin/account', label: 'Account', icon: KeyRound, exact: false }
 	];
 
 	function isActive(href: string, exact: boolean): boolean {
