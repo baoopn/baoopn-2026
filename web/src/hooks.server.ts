@@ -8,6 +8,7 @@ import {
 	windowLimiter,
 	withSecurityHeaders
 } from '#lib/server/security-headers.js';
+import { preloadAsset, robotsHeader } from '#lib/site/seo.js';
 
 /**
  * The SvelteKit server is the only public service. It proxies /api/* and
@@ -115,9 +116,18 @@ export const handle: Handle = async ({ event, resolve }) => {
 	} else if (pathname.startsWith('/api/') || pathname.startsWith('/media/')) {
 		response = await proxy(event);
 	} else {
-		response = await resolve(event, {
-			preload: ({ type }) => type === 'font' || type === 'js' || type === 'css'
-		});
+		response = await resolve(event, { preload: preloadAsset });
+		const robots = robotsHeader(pathname);
+		if (robots) {
+			try {
+				response.headers.set('X-Robots-Tag', robots);
+			} catch {
+				// resolve() output is normally mutable; a Response passed through from
+				// fetch() (immutable headers) is copied first, as withSecurityHeaders does.
+				response = new Response(response.body, response);
+				response.headers.set('X-Robots-Tag', robots);
+			}
+		}
 	}
 	return withSecurityHeaders(response, https);
 };

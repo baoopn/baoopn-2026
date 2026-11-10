@@ -12,6 +12,7 @@
 	import { LISTENING_URL } from '#lib/links.js';
 	import { reveal } from '#lib/site/motion.js';
 	import { brandSize, brandSrc } from '#lib/brand.js';
+	import { graph, personNode, sameAs, websiteNode } from '#lib/site/seo.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -22,22 +23,27 @@
 	let avatarFailed = $state(false);
 	const monogram = $derived(brandSize(data.brand, 'monogram_primary', 640, 640));
 
-	const person = $derived({
-		'@context': 'https://schema.org',
-		'@type': 'Person',
-		name: profile.name,
-		jobTitle: profile.headline,
-		url: page.url.origin + '/',
-		image: absolute(page.url.origin, profile.avatar_url),
-		email: profile.email ? `mailto:${profile.email}` : undefined,
-		address: profile.location
-			? { '@type': 'PostalAddress', addressLocality: profile.location }
-			: undefined,
-		sameAs: profile.socials.map((s) => safeUrl(s.url)).filter((u) => u?.startsWith('http'))
+	const schema = $derived.by(() => {
+		const origin = page.url.origin;
+		return graph([
+			websiteNode(origin, {
+				name: profile.name,
+				alternateName: profile.seo.title,
+				description: profile.seo.description
+			}),
+			personNode(origin, {
+				name: profile.name,
+				headline: profile.headline,
+				image: absolute(origin, profile.avatar_url),
+				email: profile.email,
+				location: profile.location,
+				sameAs: sameAs(profile.socials)
+			})
+		]);
 	});
 </script>
 
-<Seo schema={person} type="profile" />
+<Seo {schema} type="profile" />
 
 {#snippet sectionHead(no: string, title: string, id: string, href?: string, cta?: string)}
 	<div

@@ -48,6 +48,10 @@
 	});
 </script>
 
+<svelte:head>
+	<meta name="robots" content="noindex, nofollow" />
+</svelte:head>
+
 <QueryClientProvider client={queryClient}>
 	<div class="admin">
 		<a

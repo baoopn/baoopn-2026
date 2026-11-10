@@ -6,7 +6,9 @@
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import Seo from '#lib/site/components/Seo.svelte';
 	import SocialIcon from '#lib/site/components/SocialIcon.svelte';
-	import { count, dateLong, safeImage, safeUrl, spotFor } from '#lib/site/format.js';
+	import { absolute, count, dateLong, safeImage, safeUrl, spotFor } from '#lib/site/format.js';
+	import { page } from '$app/state';
+	import { breadcrumbs, graph, projectNode } from '#lib/site/seo.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -38,9 +40,38 @@
 	});
 	const tags = $derived([...new Set([...p.tech, ...p.topics])]);
 	const pct = (n: number) => (n >= 10 ? n.toFixed(0) : n.toFixed(1)) + '%';
+
+	const projectPath = $derived(`/projects/${encodeURIComponent(p.slug)}`);
+	const schema = $derived.by(() => {
+		const path = projectPath;
+		const origin = page.url.origin;
+		return graph([
+			projectNode(origin, {
+				url: origin + path,
+				name: p.title,
+				description: p.summary,
+				// Google rejects SVG here, so a vector logo falls back to the site image.
+				image:
+					absolute(origin, p.cover_url) ??
+					(/\.svg($|\?)/i.test(p.logo_url) ? undefined : absolute(origin, p.logo_url)) ??
+					absolute(origin, data.profile.seo.og_image) ??
+					absolute(origin, data.profile.avatar_url),
+				repo: repo?.startsWith('http') ? repo : undefined,
+				author: data.profile.name,
+				languages: Object.keys(p.languages ?? {}),
+				keywords: tags,
+				created: p.created_at,
+				modified: p.pushed_at
+			}),
+			breadcrumbs(origin, [
+				['Projects', '/projects'],
+				[p.title, path]
+			])
+		]);
+	});
 </script>
 
-<Seo title={p.title} description={p.summary} image={p.cover_url} />
+<Seo title={p.title} description={p.summary} image={p.cover_url} path={projectPath} {schema} />
 
 <article class="mx-auto max-w-6xl px-4 sm:px-6">
 	<header class="pt-10 sm:pt-14">
