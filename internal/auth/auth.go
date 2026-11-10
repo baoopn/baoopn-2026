@@ -1,5 +1,6 @@
-// Package auth verifies Clerk session tokens for the admin API and enforces
-// the admin allow-list (user IDs, public_metadata.role, or verified emails).
+// Package auth verifies Clerk session tokens and Clerk user API keys for the
+// admin API and enforces the admin allow-list (user IDs, public_metadata.role,
+// or verified emails).
 // The Clerk session token should carry the custom claims
 // {"role": "{{user.public_metadata.role}}", "email": "{{user.primary_email_address}}"}.
 package auth
@@ -31,6 +32,8 @@ type User struct {
 	Name     string `json:"name"`
 	ImageURL string `json:"image_url"`
 	Role     string `json:"role,omitempty"`
+	// Via is how the request authenticated: "session" or "api_key".
+	Via string `json:"-"`
 }
 
 type ctxKey struct{}
@@ -63,8 +66,13 @@ type Authenticator struct {
 	allowLoopback   bool
 	log             *slog.Logger
 
-	mu    sync.Mutex
-	cache map[string]cached
+	verifyKey keyVerifier
+	fetchUser userFetcher
+	now       func() time.Time
+
+	mu       sync.Mutex
+	cache    map[string]cached
+	keyCache map[[32]byte]keyCached
 }
 
 // Config configures the authenticator.
@@ -95,14 +103,16 @@ func New(c Config, log *slog.Logger) *Authenticator {
 		}
 	}
 	a := &Authenticator{emails: emails, userIDs: ids, role: c.AdminRole, allowLoopback: c.Dev,
-		log: log, cache: map[string]cached{}}
+		log: log, cache: map[string]cached{}, keyCache: map[[32]byte]keyCached{},
+		verifyKey: verifyAPIKey, fetchUser: user.Get, now: time.Now}
 	if u, err := url.Parse(c.PublicURL); err == nil && u.Host != "" {
 		a.parties = []string{u.Scheme + "://" + u.Host}
 	}
 	return a
 }
 
-// Middleware requires a valid session token for an allow-listed user.
+// Middleware requires a valid session token or user API key for an
+// allow-listed user.
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	verify := clerkhttp.WithHeaderAuthorization(
 		clerkhttp.AuthorizationFailureHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +123,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		clerkhttp.CustomClaimsConstructor(func(context.Context) any { return &tokenClaims{} }),
 		clerkhttp.AuthorizedParty(a.partyAllowed),
 	)
-	return verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	session := verify(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := clerk.SessionClaimsFromContext(r.Context())
 		if !ok || claims.Subject == "" {
 			httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "sign in required")
@@ -145,8 +155,16 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			httpapi.Error(w, http.StatusForbidden, "forbidden", "this account is not an admin")
 			return
 		}
+		u.Via = "session"
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, u)))
 	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && strings.HasPrefix(tok, apiKeyPrefix) {
+			a.apiKeyAuth(w, r, next, tok)
+			return
+		}
+		session.ServeHTTP(w, r)
+	})
 }
 
 func (a *Authenticator) partyAllowed(azp string) bool {
@@ -180,13 +198,13 @@ func (a *Authenticator) allowed(u User) bool {
 // lookup fetches the Clerk profile, cached in memory for 5 minutes.
 func (a *Authenticator) lookup(ctx context.Context, id string) (User, error) {
 	a.mu.Lock()
-	if c, ok := a.cache[id]; ok && time.Now().Before(c.exp) {
+	if c, ok := a.cache[id]; ok && a.now().Before(c.exp) {
 		a.mu.Unlock()
 		return c.u, nil
 	}
 	a.mu.Unlock()
 
-	cu, err := user.Get(ctx, id)
+	cu, err := a.fetchUser(ctx, id)
 	if err != nil {
 		return User{}, err
 	}
@@ -218,7 +236,7 @@ func (a *Authenticator) lookup(ctx context.Context, id string) (User, error) {
 		return u, errNoVerifiedEmail
 	}
 	a.mu.Lock()
-	a.cache[id] = cached{u: u, exp: time.Now().Add(5 * time.Minute)}
+	a.cache[id] = cached{u: u, exp: a.now().Add(5 * time.Minute)}
 	a.mu.Unlock()
 	return u, nil
 }
