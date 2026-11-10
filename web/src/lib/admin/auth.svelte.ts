@@ -71,6 +71,25 @@ export function clerkAppearance() {
 	};
 }
 
+/**
+ * Appearance for the mounted UserProfile on /admin/account. Built fresh from
+ * clerkAppearance() so the shared object is never changed. The colours are CSS
+ * vars, so light and dark mode follow the theme without a remount.
+ */
+export function userProfileAppearance() {
+	const base = clerkAppearance();
+	return {
+		...base,
+		elements: {
+			...base.elements,
+			rootBox: { ...base.elements.rootBox, width: '100%', maxWidth: '100%' },
+			cardBox: { ...base.elements.cardBox, width: '100%', maxWidth: '100%' },
+			navbar: { borderRight: '1px solid var(--rule)' },
+			scrollBox: { background: 'var(--paper)' }
+		}
+	};
+}
+
 class AuthState {
 	status = $state<AuthStatus>('idle');
 	user = $state<AdminUser | null>(null);
