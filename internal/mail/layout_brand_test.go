@@ -49,7 +49,7 @@ const testLogo = "https://media.example.test/brand/email-logo.0123456789abcdef.p
 func TestEmailLogo(t *testing.T) {
 	for _, personal := range []bool{false, true} {
 		b := testBrand
-		b.LogoURL, b.LogoWidth, b.LogoHeight = testLogo, 480, 198
+		b.LogoURL, b.LogoWidth, b.LogoHeight = testLogo, 640, 264
 		_, html := render(t, Doc{Brand: b, Personal: personal, Preheader: "Hello there", Kicker: "K", Title: "T",
 			Blocks: []Block{{Kind: Para, Text: "Hello there"}}, Footer: "F"})
 		checkSafe(t, b, html)

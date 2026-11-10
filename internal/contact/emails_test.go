@@ -31,7 +31,7 @@ const goldenLogo = "https://media.example.test/brand/email-logo.0123456789abcdef
 
 func goldenBrandWithLogo() bmail.Brand {
 	b := bmail.BrandOf("https://example.test")
-	b.LogoURL, b.LogoWidth, b.LogoHeight = goldenLogo, 480, 198
+	b.LogoURL, b.LogoWidth, b.LogoHeight = goldenLogo, 640, 264
 	return b
 }
 
