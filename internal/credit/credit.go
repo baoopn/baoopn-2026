@@ -1,0 +1,292 @@
+// Package credit serves the "Designed & built by" line that client sites
+// show in their footers, and stores its settings document "credit".
+//
+// GET /api/v1/credit answers cross-origin reads for the origins in the
+// document only; the rest of the API stays same-origin.
+package credit
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/url"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/baoopn/baoopn-2026/internal/brand"
+	"github.com/baoopn/baoopn-2026/internal/settings"
+)
+
+// Key is the settings key of the credit document.
+const Key = "credit"
+
+// Limits of the document (CreditLimits in types.ts).
+const (
+	TextMax    = 80
+	URLMax     = 500
+	OriginsMax = 50
+	originMax  = 200
+)
+
+// Logo kinds.
+const (
+	LogoWordmark = "wordmark"
+	LogoMark     = "mark"
+)
+
+const defaultText = "Designed & built by"
+
+// Brand gives the current brand files with absolute URLs.
+type Brand interface {
+	AbsoluteAsset(ctx context.Context, slot, siteURL string) (brand.Asset, error)
+}
+
+// Deps are the module's dependencies.
+type Deps struct {
+	DB        *pgxpool.Pool
+	Log       *slog.Logger
+	Brand     Brand
+	PublicURL string
+	// Now is the clock (tests); nil means time.Now.
+	Now func() time.Time
+}
+
+// Module serves /api/v1/credit and /api/admin/credit.
+type Module struct {
+	d    Deps
+	mu   sync.Mutex // serialises saves of the settings document
+	snap atomic.Pointer[Doc]
+}
+
+// New builds the module.
+func New(d Deps) *Module {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.Log == nil {
+		d.Log = slog.Default()
+	}
+	return &Module{d: d}
+}
+
+// Doc is the settings document "credit".
+type Doc struct {
+	Text      string     `json:"text"`
+	URL       string     `json:"url"`
+	Logo      string     `json:"logo"`    // "wordmark" | "mark"
+	Origins   []string   `json:"origins"` // normalised, never nil
+	UpdatedAt *time.Time `json:"updated_at"`
+}
+
+// Image is CreditImage in types.ts.
+type Image struct {
+	URL         string `json:"url"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	ContentType string `json:"content_type"`
+}
+
+// Logo is CreditLogo in types.ts.
+type Logo struct {
+	Kind  string `json:"kind"`
+	Light Image  `json:"light"`
+	Dark  Image  `json:"dark"`
+}
+
+// Credit is Credit in types.ts (the public view).
+type Credit struct {
+	Text      string     `json:"text"`
+	URL       string     `json:"url"`
+	Alt       string     `json:"alt"`
+	Logo      Logo       `json:"logo"`
+	UpdatedAt *time.Time `json:"updated_at"`
+}
+
+// Limits is AdminCredit.limits.
+type Limits struct {
+	TextMax    int `json:"text_max"`
+	URLMax     int `json:"url_max"`
+	OriginsMax int `json:"origins_max"`
+}
+
+// AdminCredit is AdminCredit in types.ts.
+type AdminCredit struct {
+	Text      string          `json:"text"`
+	URL       string          `json:"url"`
+	Logo      string          `json:"logo"`
+	Origins   []string        `json:"origins"`
+	UpdatedAt *time.Time      `json:"updated_at"`
+	Endpoint  string          `json:"endpoint"`
+	Logos     map[string]Logo `json:"logos"`
+	Limits    Limits          `json:"limits"`
+}
+
+// Input is CreditInput in types.ts.
+type Input struct {
+	Text    string   `json:"text"`
+	URL     string   `json:"url"`
+	Logo    string   `json:"logo"`
+	Origins []string `json:"origins"`
+}
+
+// slots maps a logo kind to its light and dark brand slots. There is no
+// inverse wordmark, so the wordmark uses the same file on both.
+var slots = map[string][2]string{
+	LogoWordmark: {"wordmark_primary", "wordmark_primary"},
+	LogoMark:     {"monogram_primary", "monogram_inverse"},
+}
+
+// siteOrigin is PublicURL as scheme://host[:port].
+func (m *Module) siteOrigin() string {
+	raw := strings.TrimSpace(m.d.PublicURL)
+	p, err := url.Parse(raw)
+	if err != nil || p.Host == "" {
+		return strings.TrimRight(raw, "/")
+	}
+	return strings.ToLower(p.Scheme) + "://" + hostPort(strings.ToLower(p.Scheme), p)
+}
+
+// alt is the site's host name without a leading "www.".
+func (m *Module) alt() string {
+	p, err := url.Parse(m.siteOrigin())
+	if err != nil || p.Hostname() == "" {
+		return m.siteOrigin()
+	}
+	return strings.TrimPrefix(p.Hostname(), "www.")
+}
+
+func (m *Module) endpoint() string { return m.siteOrigin() + "/api/v1/credit" }
+
+// defaults is the document when nothing is stored.
+func (m *Module) defaults() Doc {
+	return Doc{Text: defaultText, URL: m.siteOrigin(), Logo: LogoWordmark, Origins: []string{}}
+}
+
+// parseDoc reads a stored document leniently: a missing or broken field
+// gets its default, and a bad origin is dropped.
+func parseDoc(raw []byte, def Doc) Doc {
+	d := def
+	var m map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
+		return d
+	}
+	var s string
+	if json.Unmarshal(m["text"], &s) == nil {
+		if v, ok := validText(s); ok {
+			d.Text = v
+		}
+	}
+	s = ""
+	if json.Unmarshal(m["url"], &s) == nil {
+		if v, ok := validURL(s); ok {
+			d.URL = v
+		}
+	}
+	s = ""
+	if json.Unmarshal(m["logo"], &s) == nil && validLogo(s) {
+		d.Logo = s
+	}
+	var list []any
+	if json.Unmarshal(m["origins"], &list) == nil {
+		var strs []string
+		for _, v := range list {
+			if o, ok := v.(string); ok {
+				if n, ok := normalizeOrigin(o); ok {
+					strs = append(strs, n)
+				}
+			}
+		}
+		d.Origins = dedupe(strs)
+		if len(d.Origins) > OriginsMax {
+			d.Origins = d.Origins[:OriginsMax]
+		}
+	}
+	var at time.Time
+	if json.Unmarshal(m["updated_at"], &at) == nil && !at.IsZero() {
+		at = at.UTC()
+		d.UpdatedAt = &at
+	}
+	return d
+}
+
+// load returns the snapshot, reading the database on first use.
+func (m *Module) load(ctx context.Context) (Doc, error) {
+	if d := m.snap.Load(); d != nil {
+		return *d, nil
+	}
+	var raw json.RawMessage
+	if _, err := settings.Get(ctx, m.d.DB, Key, &raw); err != nil {
+		return Doc{}, err
+	}
+	d := parseDoc(raw, m.defaults())
+	// A save that finished meanwhile wins over this older read.
+	if !m.snap.CompareAndSwap(nil, &d) {
+		return *m.snap.Load(), nil
+	}
+	return d, nil
+}
+
+// save stores doc and replaces the snapshot.
+func (m *Module) save(ctx context.Context, d Doc) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := settings.Put(ctx, m.d.DB, Key, d); err != nil {
+		return err
+	}
+	m.snap.Store(&d)
+	return nil
+}
+
+func (m *Module) image(ctx context.Context, slot string) (Image, error) {
+	a, err := m.d.Brand.AbsoluteAsset(ctx, slot, m.d.PublicURL)
+	if err != nil {
+		return Image{}, err
+	}
+	return Image{URL: a.URL, Width: a.Width, Height: a.Height, ContentType: a.ContentType}, nil
+}
+
+// logo resolves kind to its light and dark files.
+func (m *Module) logo(ctx context.Context, kind string) (Logo, error) {
+	s := slots[kind]
+	light, err := m.image(ctx, s[0])
+	if err != nil {
+		return Logo{}, err
+	}
+	dark, err := m.image(ctx, s[1])
+	if err != nil {
+		return Logo{}, err
+	}
+	return Logo{Kind: kind, Light: light, Dark: dark}, nil
+}
+
+// public builds the public view of d.
+func (m *Module) public(ctx context.Context, d Doc) (Credit, error) {
+	l, err := m.logo(ctx, d.Logo)
+	if err != nil {
+		return Credit{}, err
+	}
+	return Credit{Text: d.Text, URL: d.URL, Alt: m.alt(), Logo: l, UpdatedAt: d.UpdatedAt}, nil
+}
+
+// admin builds the admin view of d.
+func (m *Module) admin(ctx context.Context, d Doc) (AdminCredit, error) {
+	logos := make(map[string]Logo, len(slots))
+	for _, kind := range []string{LogoWordmark, LogoMark} {
+		l, err := m.logo(ctx, kind)
+		if err != nil {
+			return AdminCredit{}, err
+		}
+		logos[kind] = l
+	}
+	origins := d.Origins
+	if origins == nil {
+		origins = []string{}
+	}
+	return AdminCredit{Text: d.Text, URL: d.URL, Logo: d.Logo, Origins: origins, UpdatedAt: d.UpdatedAt,
+		Endpoint: m.endpoint(), Logos: logos,
+		Limits: Limits{TextMax: TextMax, URLMax: URLMax, OriginsMax: OriginsMax}}, nil
+}

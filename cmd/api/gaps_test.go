@@ -24,6 +24,7 @@ var adminEndpoints = []struct{ method, path string }{
 	{"POST", "/threads/1/messages/1/retry"}, {"GET", "/inbox/events"}, {"GET", "/analytics"}, {"GET", "/settings"},
 	{"PUT", "/settings"}, {"POST", "/settings/test-email"},
 	{"GET", "/brand"}, {"PUT", "/brand/favicon_ico"}, {"DELETE", "/brand/favicon_ico"},
+	{"GET", "/credit"}, {"PUT", "/credit"},
 }
 
 // Every admin route sits behind AdminAuth; only /config is open.
