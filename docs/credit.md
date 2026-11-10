@@ -1,10 +1,27 @@
 # Credit line for client sites
 
-Client sites built by baoopn can show a small credit in their footer: a line of
-text and the baoopn logo, linked to baoopn.com. The site loads the current
-credit from `GET https://baoopn.com/api/v1/credit`, so a change to the text,
-link or brand logo reaches every client site on its own.
+Client sites built by baoopn can show a small credit in their footer. The line
+has three parts: a prefix, the baoopn logo, and a suffix. The logo links to
+baoopn.com, and the suffix sits inside that link, next to the logo. For
+example: "Designed & built by [logo]" or "by [logo] baoopn". The site loads the
+current credit from `GET https://baoopn.com/api/v1/credit`, so a change to the
+text, link or brand logo reaches every client site on its own.
 [api.md](api.md#credit) lists the fields and the CORS rules.
+
+## Logo variants
+
+The credit has two variants, **Wordmark** and **Mark**. The admin page sets
+each one on its own card:
+
+- **Prefix**: the text before the logo, up to 80 characters on one line. It
+  can be empty.
+- **Style**: **Color** shows the filled tile. **Mono** shows the glyph only,
+  navy on light pages and cream on dark ones.
+- **Suffix**: the text after the logo, up to 80 characters on one line. It can
+  be empty.
+
+Each card shows the line on a light and a dark background as you type.
+**Default logo** picks the variant a site gets when it does not ask for one.
 
 ## Add a client site
 
@@ -51,10 +68,12 @@ snippet with a **Copy** button.
 		link.href = data.url;
 		link.rel = 'noopener';
 		link.append(picture);
+		if (data.suffix) link.append(document.createTextNode(' ' + data.suffix));
 		const line = document.createElement('p');
 		line.id = 'baoopn-credit';
 		line.className = 'baoopn-credit';
-		line.append(document.createTextNode(data.text + ' '), link);
+		if (data.prefix) line.append(document.createTextNode(data.prefix + ' '));
+		line.append(link);
 		fallback.replaceWith(line);
 	} catch {
 		// Keep the static line.
@@ -63,9 +82,35 @@ snippet with a **Copy** button.
 ```
 
 The first line works without JavaScript. The script fetches the credit and
-swaps in the logo. It builds every element with DOM methods and never parses
+swaps in the prefix, logo and suffix. An empty prefix or suffix adds no text.
+It builds every element with DOM methods and never parses
 HTML from the response. If the request fails for any reason, the static line
 stays.
+
+## Framework components
+
+The admin page also gives the credit as a component for sites built with a
+framework. Pick **React**, **Vue** or **Svelte** in the **Framework** switch
+above the snippet:
+
+- **React**: `BaoopnCredit.tsx`, a function component for React 18 or 19. It
+  starts with `'use client';`, so it also works in the Next.js App Router.
+- **Vue**: `BaoopnCredit.vue`, a Vue 3 component with `<script setup>`.
+- **Svelte**: `BaoopnCredit.svelte`, a Svelte 5 component with runes.
+
+All three are written in TypeScript. For a plain JavaScript React app, rename
+the file to `BaoopnCredit.jsx` and remove the types. Next.js lint may warn about
+the `<img>` tag (`@next/next/no-img-element`). The tag sits inside a
+`<picture>` for the dark logo, so keep it.
+
+Save the code under that file name and render the component in the site's
+footer. Each one shows the same static line until the credit loads, keeps it
+if the request fails, and accepts only an `https` link. The framework escapes
+all text, so no component renders HTML from the response. The **Logo** and
+**Style** switches add the same `?logo=` and `?color=` query to every
+framework, so copy the code from the admin page after you pick them. The
+`connect-src` and `img-src` rules below apply to the components too. They need
+no inline script, so `script-src` does not change.
 
 ## Content Security Policy
 
@@ -82,12 +127,31 @@ and both hosts:
 - `img-src` must allow the host that serves the logo, which is the media host
   (for example `https://media.baoopn.com`). The admin page names the exact host.
 
-## Pick the logo for one site
+## Pick the logo and style for one site
 
-The admin page sets the logo for every client site. A site that needs the
-other one can ask for it with `?logo=mark` (the monogram, with a light and an
-inverse file) or `?logo=wordmark`. Any other value is ignored and the stored
-logo is used.
+A site asks for one variant by adding `?logo=wordmark` or `?logo=mark` to the
+fetch URL in the snippet, for example
+`fetch("https://baoopn.com/api/v1/credit?logo=mark")`. It then gets that
+variant's prefix, suffix and style. Without `?logo=`, or with any other value
+(the match is exact and lowercase), it gets the default variant. The
+**Wordmark** and **Mark** switch above the snippet on the admin page adds the
+query for you.
+
+A site can also override the variant's style with `?color=color` (the filled
+tile) or `?color=mono` (the glyph only, navy on light pages and cream on dark
+ones). The two params work together, for example
+`fetch("https://baoopn.com/api/v1/credit?logo=mark&color=mono")`. Without
+`?color=`, or with any other value (the match is exact and lowercase), the site
+gets the style saved on the variant. The override applies to that request only
+and never changes the saved settings. `logo.style` in the response names the
+style the site got. On the admin page, the **Style** switch above the snippet
+adds `&color=` for **Color** or **Mono**, and adds nothing for **Saved**.
+
+The response still has a `text` field with the same value as `prefix`. A
+snippet copied before the prefix and suffix existed reads `text`, so it still
+shows the prefix and the logo, but it never shows the suffix. To show a suffix,
+a site needs the new snippet or one of the framework components. `text` is
+deprecated; new code reads `prefix` and `suffix`.
 
 ## Caching and limits
 

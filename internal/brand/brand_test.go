@@ -383,8 +383,40 @@ func TestBrandView(t *testing.T) {
 	if a := b.Assets[FaviconICO]; a.Width != 48 || a.Height != 48 {
 		t.Errorf("favicon_ico size %dx%d", a.Width, a.Height)
 	}
-	if a := s.admin(State{}, mustSlot(t, MonogramInverse)); a.Preview != "dark" || a.Kind != "logo" {
-		t.Errorf("inverse = %+v", a)
+	for slot, want := range map[string]string{
+		MonogramInverse: "dark", WordmarkInverse: "dark", WordmarkNavy: "light", WordmarkCream: "dark",
+		MonogramNavy: "light", MonogramCream: "dark", WordmarkPrimary: "both",
+	} {
+		if a := s.admin(State{}, mustSlot(t, slot)); a.Preview != want || a.Kind != "logo" {
+			t.Errorf("%s = %+v, want preview %s", slot, a, want)
+		}
+	}
+}
+
+// TestDefaultsValid: every slot's default passes its own rules, and the
+// glyph-only SVGs (viewBox with a non-zero origin) get their size from the
+// viewBox width and height.
+func TestDefaultsValid(t *testing.T) {
+	sizes := map[string][2]int{
+		WordmarkPrimary: {320, 132}, WordmarkInverse: {320, 132}, WordmarkNavy: {254, 109}, WordmarkCream: {254, 109},
+		MonogramNavy: {160, 78}, MonogramCream: {160, 78},
+	}
+	for _, d := range slots {
+		data, err := defaultFile(d)
+		if err != nil {
+			t.Fatalf("%s: %v", d.Slot, err)
+		}
+		info, err := validate(d, data)
+		if err != nil {
+			t.Errorf("%s: %v", d.Slot, err)
+			continue
+		}
+		if want, ok := sizes[d.Slot]; ok && (info.Width != want[0] || info.Height != want[1]) {
+			t.Errorf("%s: %dx%d, want %dx%d", d.Slot, info.Width, info.Height, want[0], want[1])
+		}
+	}
+	if len(slots) != 12 {
+		t.Errorf("slots = %d, want 12", len(slots))
 	}
 }
 

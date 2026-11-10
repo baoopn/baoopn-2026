@@ -17,8 +17,13 @@ const (
 	FaviconSVG      = "favicon_svg"
 	AppleTouchIcon  = "apple_touch_icon"
 	WordmarkPrimary = "wordmark_primary"
+	WordmarkInverse = "wordmark_inverse"
+	WordmarkNavy    = "wordmark_navy"
+	WordmarkCream   = "wordmark_cream"
 	MonogramPrimary = "monogram_primary"
 	MonogramInverse = "monogram_inverse"
+	MonogramNavy    = "monogram_navy"
+	MonogramCream   = "monogram_cream"
 	EmailLogo       = "email_logo"
 )
 
@@ -66,11 +71,26 @@ var slots = []slotDef{
 	{Slot: WordmarkPrimary, File: "wordmark-primary.svg", Stem: "wordmark-primary", Ext: "svg", Type: typeSVG, Max: 256 << 10,
 		Label: "Wordmark", Kind: "logo", Rule: "SVG with a viewBox", Preview: "both",
 		Accept: []string{"image/svg+xml"}},
+	{Slot: WordmarkInverse, File: "wordmark-inverse.svg", Stem: "wordmark-inverse", Ext: "svg", Type: typeSVG, Max: 256 << 10,
+		Label: "Wordmark (inverse, for dark backgrounds)", Kind: "logo", Rule: "SVG with a viewBox", Preview: "dark",
+		Accept: []string{"image/svg+xml"}},
+	{Slot: WordmarkNavy, File: "wordmark-navy.svg", Stem: "wordmark-navy", Ext: "svg", Type: typeSVG, Max: 256 << 10,
+		Label: "Wordmark (navy glyph, for light backgrounds)", Kind: "logo", Rule: "SVG with a viewBox", Preview: "light",
+		Accept: []string{"image/svg+xml"}},
+	{Slot: WordmarkCream, File: "wordmark-cream.svg", Stem: "wordmark-cream", Ext: "svg", Type: typeSVG, Max: 256 << 10,
+		Label: "Wordmark (cream glyph, for dark backgrounds)", Kind: "logo", Rule: "SVG with a viewBox", Preview: "dark",
+		Accept: []string{"image/svg+xml"}},
 	{Slot: MonogramPrimary, File: "monogram-primary.svg", Stem: "monogram-primary", Ext: "svg", Type: typeSVG, Max: 256 << 10, Square: true,
 		Label: "Monogram", Kind: "logo", Rule: "SVG with a square viewBox", Preview: "both",
 		Accept: []string{"image/svg+xml"}},
 	{Slot: MonogramInverse, File: "monogram-inverse.svg", Stem: "monogram-inverse", Ext: "svg", Type: typeSVG, Max: 256 << 10, Square: true,
 		Label: "Monogram (inverse, for dark backgrounds)", Kind: "logo", Rule: "SVG with a square viewBox", Preview: "dark",
+		Accept: []string{"image/svg+xml"}},
+	{Slot: MonogramNavy, File: "monogram-navy.svg", Stem: "monogram-navy", Ext: "svg", Type: typeSVG, Max: 256 << 10,
+		Label: "Monogram (navy glyph, for light backgrounds)", Kind: "logo", Rule: "SVG with a viewBox", Preview: "light",
+		Accept: []string{"image/svg+xml"}},
+	{Slot: MonogramCream, File: "monogram-cream.svg", Stem: "monogram-cream", Ext: "svg", Type: typeSVG, Max: 256 << 10,
+		Label: "Monogram (cream glyph, for dark backgrounds)", Kind: "logo", Rule: "SVG with a viewBox", Preview: "dark",
 		Accept: []string{"image/svg+xml"}},
 	{Slot: EmailLogo, File: "email-logo.png", Stem: "email-logo", Ext: "png", Type: typePNG, Max: 256 << 10,
 		PNG:   pngRule{MinW: 240, MaxW: 1200, MinH: 60, MaxH: 600, MinAspect: 1500, MaxAspect: 4000},

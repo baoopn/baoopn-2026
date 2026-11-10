@@ -1,12 +1,18 @@
-// Credit form rules, mirroring the API's validation (credit contract §1).
+// Credit form rules, mirroring the API's validation (credit contract §12).
 // Plain JS so `node --test` can load it. The API stays the final judge; these
 // checks catch mistakes before a round trip.
 
 /** @typedef {'wordmark' | 'mark'} CreditLogoKind */
-/** @typedef {{ text: string; url: string; logo: string; origins: string[] }} CreditForm */
-/** @typedef {{ text: string; url: string; logo: CreditLogoKind; origins: string[] }} CreditInput */
-/** Keys: text, url, logo, origins (the list) and origins[<i>] (one row). */
-/** @typedef {Record<string, string>} CreditErrors */
+/** @typedef {'color' | 'mono'} CreditLogoStyle */
+/** @typedef {{ prefix: string; suffix: string; style: CreditLogoStyle }} CreditVariant */
+/** @typedef {{ prefix?: string; suffix?: string; style?: string }} CreditVariantForm */
+/** @typedef {{ url: string; logo: string; variants: Partial<Record<CreditLogoKind, CreditVariantForm>>; origins: string[] }} CreditForm */
+/** @typedef {{ url: string; logo: CreditLogoKind; variants: Record<CreditLogoKind, CreditVariant>; origins: string[] }} CreditInput */
+/**
+ * Keys: url, logo, variants.<kind>.prefix|suffix|style, origins (the list)
+ * and origins[<i>] (one row).
+ * @typedef {Record<string, string>} CreditErrors
+ */
 
 export const TEXT_MAX = 80;
 export const URL_MAX = 500;
@@ -15,9 +21,13 @@ export const ORIGIN_MAX_BYTES = 200;
 
 /** @type {CreditLogoKind[]} */
 export const LOGOS = ['wordmark', 'mark'];
+/** @type {CreditLogoStyle[]} */
+export const STYLES = ['color', 'mono'];
 
 export const MESSAGES = {
-	text: `Enter 1 to ${TEXT_MAX} characters on one line.`,
+	prefix: `Use at most ${TEXT_MAX} characters on one line.`,
+	suffix: `Use at most ${TEXT_MAX} characters on one line.`,
+	style: 'Pick Color or Mono.',
 	url: 'Enter an absolute https URL, for example https://baoopn.com.',
 	logo: 'Pick Wordmark or Mark.',
 	origin: 'Use an origin like https://example.com, with no path. Only localhost can use http.',
@@ -92,8 +102,21 @@ function checkUrl(raw) {
 }
 
 /**
- * Check the form and build the PUT body. Origins are normalised and
- * deduplicated (first one wins), as the API does.
+ * Trim one line of prefix or suffix text and check it: 0 to 80 runes, no
+ * line breaks, controls or format characters.
+ * @param {unknown} raw
+ * @returns {{ value: string; ok: boolean }}
+ */
+function checkLine(raw) {
+	const value = String(raw ?? '').trim();
+	return { value, ok: [...value].length <= TEXT_MAX && !TEXT_BAD.test(value) };
+}
+
+/**
+ * Check the form and build the PUT body. Errors are added in the order the
+ * API checks them: url, logo, each variant (wordmark, then mark: prefix,
+ * suffix, style), origins. Origins are normalised and deduplicated (first one
+ * wins), as the API does.
  * @param {CreditForm} form
  * @returns {{ input: CreditInput; errors: CreditErrors }}
  */
@@ -101,16 +124,29 @@ export function validateForm(form) {
 	/** @type {CreditErrors} */
 	const errors = {};
 
-	const text = String(form.text ?? '').trim();
-	const runes = [...text].length;
-	if (runes < 1 || runes > TEXT_MAX || TEXT_BAD.test(text)) errors.text = MESSAGES.text;
-
 	const url = String(form.url ?? '').trim();
 	const urlError = checkUrl(url);
 	if (urlError) errors.url = urlError;
 
 	const logo = /** @type {CreditLogoKind} */ (form.logo);
 	if (!LOGOS.includes(logo)) errors.logo = MESSAGES.logo;
+
+	/** @type {Record<CreditLogoKind, CreditVariant>} */
+	const variants = {
+		wordmark: { prefix: '', suffix: '', style: 'color' },
+		mark: { prefix: '', suffix: '', style: 'color' }
+	};
+	for (const kind of LOGOS) {
+		const v = form.variants?.[kind] ?? {};
+		const prefix = checkLine(v.prefix);
+		if (!prefix.ok) errors[`variants.${kind}.prefix`] = MESSAGES.prefix;
+		const suffix = checkLine(v.suffix);
+		if (!suffix.ok) errors[`variants.${kind}.suffix`] = MESSAGES.suffix;
+		// The API reads an empty style as color.
+		const style = /** @type {CreditLogoStyle} */ (v.style || 'color');
+		if (!STYLES.includes(style)) errors[`variants.${kind}.style`] = MESSAGES.style;
+		variants[kind] = { prefix: prefix.value, suffix: suffix.value, style };
+	}
 
 	/** @type {string[]} */
 	const origins = [];
@@ -121,30 +157,37 @@ export function validateForm(form) {
 	});
 	if (origins.length > ORIGINS_MAX) errors.origins = MESSAGES.origins;
 
-	return { input: { text, url, logo, origins }, errors };
+	return { input: { url, logo, variants, origins }, errors };
 }
+
+const VARIANT_FIELD = /^variants\.(wordmark|mark)\.(prefix|suffix|style)$/;
 
 /**
  * Which field a 422 message from the API is about, or null. The API starts
- * each message with the field name: "text ...", "url ...", "logo ...",
- * "origins[3] ..." (one row) or "origins ..." (the list).
+ * each message with the field name: "url ...", "logo ...",
+ * "variants.mark.style ...", "origins[3] ..." (one row) or "origins ..." (the
+ * list). "variants ..." (a missing variant) and the deprecated "text ..."
+ * point at the first prefix input.
  * @param {string} message
- * @returns {string | null} text, url, logo, origins or origins[<i>]
+ * @returns {string | null} url, logo, variants.<kind>.<field>, origins or origins[<i>]
  */
 export function fieldFromMessage(message) {
 	const msg = String(message ?? '');
 	const row = /^origins\[(\d+)\]/.exec(msg);
 	if (row) return `origins[${row[1]}]`;
-	for (const f of ['text', 'url', 'logo', 'origins']) {
-		if (msg === f || msg.startsWith(f + ' ')) return f;
-	}
+	const token = msg.split(' ', 1)[0];
+	if (VARIANT_FIELD.test(token)) return token;
+	if (token === 'variants' || token === 'text') return 'variants.wordmark.prefix';
+	if (token === 'url' || token === 'logo' || token === 'origins') return token;
 	return null;
 }
 
 /**
  * Embed HTML for a client site footer: a static line that works without
- * JavaScript, then a module script that swaps in the current credit.
- * @param {string} endpoint absolute URL of GET /api/v1/credit
+ * JavaScript, then a module script that swaps in the current credit: prefix,
+ * then a link holding the logo and the suffix.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with ?logo= when
+ *   the site wants one variant
  * @returns {string}
  */
 export function snippet(endpoint) {
@@ -177,10 +220,12 @@ export function snippet(endpoint) {
 		link.href = data.url;
 		link.rel = 'noopener';
 		link.append(picture);
+		if (data.suffix) link.append(document.createTextNode(' ' + data.suffix));
 		const line = document.createElement('p');
 		line.id = 'baoopn-credit';
 		line.className = 'baoopn-credit';
-		line.append(document.createTextNode(data.text + ' '), link);
+		if (data.prefix) line.append(document.createTextNode(data.prefix + ' '));
+		line.append(link);
 		fallback.replaceWith(line);
 	} catch {
 		// Keep the static line.
@@ -188,3 +233,211 @@ export function snippet(endpoint) {
 </script>
 `;
 }
+
+/**
+ * The endpoint as a JS string literal that is safe inside a script block:
+ * "<" is escaped so the value cannot close a <script> tag.
+ * @param {string} endpoint
+ */
+const endpointLiteral = (endpoint) => JSON.stringify(String(endpoint)).replace(/</g, '\\u003c');
+
+/** Response types shared by the framework components. */
+const CREDIT_TYPES = `type CreditImage = { url: string; width: number; height: number };
+type Credit = {
+	prefix: string;
+	suffix: string;
+	url: string;
+	alt: string;
+	logo: { light: CreditImage; dark: CreditImage };
+};`;
+
+/** Fetch body shared by the framework components: keeps only data with an https link and both logos. */
+const ACCEPT = `if (!res.ok) throw new Error('credit unavailable');
+		const { data } = await res.json();
+		if (!/^https:\\/\\//.test(data.url) || !data.logo?.light || !data.logo?.dark) {
+			throw new Error('bad credit');
+		}`;
+
+/** @typedef {{ name: string; code: string }} FrameworkSnippet */
+
+/**
+ * BaoopnCredit.tsx: a React 18/19 function component. It shows the static
+ * line until the credit loads, and keeps it on any error.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with the query
+ * @returns {string}
+ */
+export function reactSnippet(endpoint) {
+	return `'use client';
+// 'use client' lets the Next.js App Router run this in the browser. Other React apps ignore it.
+import { useEffect, useState } from 'react';
+
+const ENDPOINT = ${endpointLiteral(endpoint)};
+
+${CREDIT_TYPES}
+
+const width = (img: CreditImage) => Math.round((20 * img.width) / (img.height || 1));
+
+export default function BaoopnCredit() {
+	const [credit, setCredit] = useState<Credit | null>(null);
+
+	useEffect(() => {
+		const controller = new AbortController();
+		(async () => {
+			const res = await fetch(ENDPOINT, { signal: controller.signal });
+			${ACCEPT.replace(/\n\t\t/g, '\n\t\t\t')}
+			setCredit(data);
+		})().catch(() => {
+			// Keep the static line.
+		});
+		return () => controller.abort();
+	}, []);
+
+	if (!credit) {
+		return (
+			<p className="baoopn-credit">
+				Designed &amp; built by <a href="https://baoopn.com">baoopn</a>
+			</p>
+		);
+	}
+
+	const { light, dark } = credit.logo;
+	return (
+		<p className="baoopn-credit">
+			{credit.prefix && credit.prefix + ' '}
+			<a href={credit.url} rel="noopener">
+				<picture>
+					<source
+						media="(prefers-color-scheme: dark)"
+						srcSet={dark.url}
+						width={width(dark)}
+						height={20}
+					/>
+					<img src={light.url} alt={credit.alt} width={width(light)} height={20} />
+				</picture>
+				{credit.suffix && ' ' + credit.suffix}
+			</a>
+		</p>
+	);
+}
+`;
+}
+
+/**
+ * BaoopnCredit.vue: a Vue 3 single-file component with <script setup>.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with the query
+ * @returns {string}
+ */
+export function vueSnippet(endpoint) {
+	return `<script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue';
+
+const ENDPOINT = ${endpointLiteral(endpoint)};
+
+${CREDIT_TYPES}
+
+const width = (img: CreditImage) => Math.round((20 * img.width) / (img.height || 1));
+
+const credit = ref<Credit | null>(null);
+let controller: AbortController | undefined;
+
+onMounted(async () => {
+	controller = new AbortController();
+	try {
+		const res = await fetch(ENDPOINT, { signal: controller.signal });
+		${ACCEPT.replace(/\n\t\t/g, '\n\t\t')}
+		credit.value = data;
+	} catch {
+		// Keep the static line.
+	}
+});
+
+onUnmounted(() => controller?.abort());
+</script>
+
+<template>
+	<p v-if="credit" class="baoopn-credit">
+		{{ credit.prefix ? credit.prefix + ' ' : '' }}<a :href="credit.url" rel="noopener"
+			><picture
+				><source
+					media="(prefers-color-scheme: dark)"
+					:srcset="credit.logo.dark.url"
+					:width="width(credit.logo.dark)"
+					height="20" /><img
+					:src="credit.logo.light.url"
+					:alt="credit.alt"
+					:width="width(credit.logo.light)"
+					height="20" /></picture
+			>{{ credit.suffix ? ' ' + credit.suffix : '' }}</a
+		>
+	</p>
+	<p v-else class="baoopn-credit">
+		Designed &amp; built by <a href="https://baoopn.com">baoopn</a>
+	</p>
+</template>
+`;
+}
+
+/**
+ * BaoopnCredit.svelte: a Svelte 5 component with runes. onMount fetches once in
+ * the browser and aborts the request on unmount.
+ * @param {string} endpoint absolute URL of GET /api/v1/credit, with the query
+ * @returns {string}
+ */
+export function svelteSnippet(endpoint) {
+	return `<script lang="ts">
+	import { onMount } from 'svelte';
+
+	const ENDPOINT = ${endpointLiteral(endpoint)};
+
+	${CREDIT_TYPES.replace(/\n/g, '\n\t')}
+
+	const width = (img: CreditImage) => Math.round((20 * img.width) / (img.height || 1));
+
+	let credit = $state.raw<Credit | null>(null);
+
+	onMount(() => {
+		const controller = new AbortController();
+		(async () => {
+			const res = await fetch(ENDPOINT, { signal: controller.signal });
+			${ACCEPT.replace(/\n\t\t/g, '\n\t\t\t')}
+			credit = data;
+		})().catch(() => {
+			// Keep the static line.
+		});
+		return () => controller.abort();
+	});
+</script>
+
+{#if credit}
+	<p class="baoopn-credit">
+		{credit.prefix ? credit.prefix + ' ' : ''}<a href={credit.url} rel="noopener"
+			><picture
+				><source
+					media="(prefers-color-scheme: dark)"
+					srcset={credit.logo.dark.url}
+					width={width(credit.logo.dark)}
+					height="20"
+				/><img
+					src={credit.logo.light.url}
+					alt={credit.alt}
+					width={width(credit.logo.light)}
+					height="20"
+				/></picture
+			>{credit.suffix ? ' ' + credit.suffix : ''}</a
+		>
+	</p>
+{:else}
+	<p class="baoopn-credit">Designed &amp; built by <a href="https://baoopn.com">baoopn</a></p>
+{/if}
+`;
+}
+
+/** @typedef {'html' | 'react' | 'vue' | 'svelte'} Framework */
+
+/** @type {Record<Framework, { file: string; build: (endpoint: string) => string }>} */
+export const FRAMEWORKS = {
+	html: { file: 'credit.html', build: snippet },
+	react: { file: 'BaoopnCredit.tsx', build: reactSnippet },
+	vue: { file: 'BaoopnCredit.vue', build: vueSnippet },
+	svelte: { file: 'BaoopnCredit.svelte', build: svelteSnippet }
+};

@@ -1,20 +1,64 @@
 <script lang="ts">
 	import { Copy } from '@lucide/svelte';
+	import type { CreditLogoKind, CreditLogoStyle } from '#lib/api/types.js';
+	import Segmented from '../components/Segmented.svelte';
 	import { toasts } from '../toast.svelte';
-	import { snippet } from './rules.js';
+	import { FRAMEWORKS, type Framework } from './rules.js';
 
 	let {
 		endpoint,
-		logoUrl
+		logoUrl,
+		defaultLogo
 	}: {
 		endpoint: string;
 		/** One of the logo URLs, to name its host in the CSP note. */
 		logoUrl: string;
+		/** The variant the switch starts on. */
+		defaultLogo: CreditLogoKind;
 	} = $props();
 
-	const code = $derived(snippet(endpoint));
+	const logoOptions: { value: CreditLogoKind; label: string }[] = [
+		{ value: 'wordmark', label: 'Wordmark' },
+		{ value: 'mark', label: 'Mark' }
+	];
+
+	/** saved adds no color param, so the site gets the variant's saved style. */
+	const styleOptions: { value: 'saved' | CreditLogoStyle; label: string }[] = [
+		{ value: 'saved', label: 'Saved' },
+		{ value: 'color', label: 'Color' },
+		{ value: 'mono', label: 'Mono' }
+	];
+	let style = $state<'saved' | CreditLogoStyle>('saved');
+
+	const frameworkOptions: { value: Framework; label: string }[] = [
+		{ value: 'html', label: 'HTML' },
+		{ value: 'react', label: 'React' },
+		{ value: 'vue', label: 'Vue' },
+		{ value: 'svelte', label: 'Svelte' }
+	];
+	let framework = $state<Framework>('html');
+
+	/** null until the admin picks one, so the switch follows the default logo. */
+	let picked = $state<CreditLogoKind | null>(null);
+	const kind = $derived(picked ?? defaultLogo);
+	const file = $derived(FRAMEWORKS[framework].file);
+	const code = $derived(FRAMEWORKS[framework].build(withQuery(endpoint, kind, style)));
+	const query = $derived(`?logo=${kind}` + (style === 'saved' ? '' : `&color=${style}`));
 	const apiOrigin = $derived(originOf(endpoint));
 	const logoOrigin = $derived(originOf(logoUrl));
+
+	/** The endpoint with ?logo=<kind>, plus &color=<style> unless the saved style is wanted. */
+	function withQuery(u: string, logo: CreditLogoKind, color: 'saved' | CreditLogoStyle): string {
+		try {
+			const url = new URL(u);
+			url.searchParams.set('logo', logo);
+			if (color === 'saved') url.searchParams.delete('color');
+			else url.searchParams.set('color', color);
+			return url.href;
+		} catch {
+			return `${u}?logo=${logo}` + (color === 'saved' ? '' : `&color=${color}`);
+		}
+	}
 
 	function originOf(u: string): string {
 		try {
@@ -38,7 +82,14 @@
 	<div class="flex items-start justify-between gap-3">
 		<div class="min-w-0">
 			<h2 id="credit-embed-h" class="eyebrow">Embed snippet</h2>
-			<p class="hint mt-1">Paste this into the client site footer.</p>
+			<p class="hint mt-1">
+				{#if framework === 'html'}
+					Paste this into the client site footer.
+				{:else}
+					Save this as <code class="font-mono">{file}</code> and render it in the client site
+					footer.
+				{/if}
+			</p>
 		</div>
 		<button type="button" class="btn btn-secondary btn-sm shrink-0" onclick={copy}>
 			<Copy class="size-4" aria-hidden="true" />
@@ -46,11 +97,40 @@
 		</button>
 	</div>
 
+	<div>
+		<p class="field-label">Framework</p>
+		<Segmented options={frameworkOptions} bind:value={framework} label="Snippet framework" />
+	</div>
+
+	<div>
+		<p class="field-label">Logo</p>
+		<Segmented
+			options={logoOptions}
+			value={kind}
+			label="Snippet logo"
+			onchange={(v) => (picked = v)}
+		/>
+	</div>
+
+	<div>
+		<p class="field-label">Style</p>
+		<Segmented
+			options={styleOptions}
+			bind:value={style}
+			label="Snippet style"
+		/>
+		<p class="hint">
+			Saved uses the style set on the variant. Color and Mono override it for this site.
+		</p>
+		<p class="hint">The snippet adds <code class="font-mono">{query}</code> to the fetch URL.</p>
+	</div>
+
+	<p class="-mb-3 font-mono text-xs text-ink-soft">{file}</p>
 	<!-- Focusable so keyboard users can scroll the snippet. -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<pre
 		class="max-h-96 max-w-full min-w-0 overflow-auto rounded-lg border border-rule bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink"
-		aria-label="Embed snippet"
+		aria-label="Embed snippet, {file}"
 		tabindex="0"><code>{code}</code></pre>
 
 	<ul class="hint mt-0 flex list-disc flex-col gap-1 pl-5">
@@ -62,13 +142,20 @@
 			<code class="font-mono">connect-src</code> must allow
 			<code class="font-mono break-all">{apiOrigin}</code>.
 		</li>
-		<li>
-			The snippet is an inline module script, so a CSP with
-			<code class="font-mono">script-src 'self'</code> blocks it and the static line stays. Allow it
-			with a nonce on the script tag or a hash of the exact script. Or save the script body as a
-			<code class="font-mono">.js</code> file on the client site and load it with
-			<code class="font-mono">src</code>.
-		</li>
-		<li>The static line stays in place when the script cannot load the credit.</li>
+		{#if framework === 'html'}
+			<li>
+				The snippet is an inline module script, so a CSP with
+				<code class="font-mono">script-src 'self'</code> blocks it and the static line stays. Allow
+				it with a nonce on the script tag or a hash of the exact script. Or save the script body as
+				a <code class="font-mono">.js</code> file on the client site and load it with
+				<code class="font-mono">src</code>.
+			</li>
+			<li>The static line stays in place when the script cannot load the credit.</li>
+		{:else}
+			<li>
+				The component shows the static line until the credit loads, and keeps it when the request
+				fails.
+			</li>
+		{/if}
 	</ul>
 </section>
