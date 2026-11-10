@@ -21,12 +21,12 @@ func defaultFile(d slotDef) ([]byte, error)     { return baoopnBrand.defaultFile
 func listeningSlot(name string) (slotDef, bool) { return listeningBrand.slot(name) }
 
 // newPair is a baoopn and a listening store sharing one file storage, each
-// with its own settings document.
-func newPair(t *testing.T) (main, lis *Store, f *fakeFiles, mainDoc, lisDoc *memDoc, c *clock) {
+// with its own settings document. cors is Deps.CORSOrigins.
+func newPair(t *testing.T, cors ...string) (main, lis *Store, f *fakeFiles, mainDoc, lisDoc *memDoc, c *clock) {
 	t.Helper()
 	f = newFakeFiles()
 	c = &clock{t: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
-	m := NewModule(Deps{Log: slog.New(slog.DiscardHandler), Files: f, Now: c.now})
+	m := NewModule(Deps{Log: slog.New(slog.DiscardHandler), Files: f, Now: c.now, CORSOrigins: cors})
 	return m.Main, m.Listening, f, attachDoc(m.Main), attachDoc(m.Listening), c
 }
 
@@ -233,6 +233,93 @@ func TestModuleRoutes(t *testing.T) {
 		{"DELETE", "/admin/brand/listening/monogram_primary"}} {
 		if w := do(mp[0], mp[1]); w.Code != 404 {
 			t.Errorf("%s %s = %d %s", mp[0], mp[1], w.Code, w.Body)
+		}
+	}
+}
+
+func TestPublicCORS(t *testing.T) {
+	const allowed = "https://listening.baoopn.com"
+	router := func(cors ...string) chi.Router {
+		main, lis, _, _, _, _ := newPair(t, cors...)
+		m := &Module{Main: main, Listening: lis}
+		r := chi.NewRouter()
+		r.Route("/v1", m.Public)
+		r.Route("/admin", m.Admin)
+		return r
+	}
+	r := router(allowed)
+	do := func(r chi.Router, method, path, origin string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, nil)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		r.ServeHTTP(w, req)
+		return w
+	}
+	acao := func(w *httptest.ResponseRecorder) string { return w.Header().Get("Access-Control-Allow-Origin") }
+
+	// a) allowed origin
+	w := do(r, "GET", "/v1/brand/listening", allowed)
+	if w.Code != 200 || acao(w) != allowed || w.Header().Get("Vary") != "Origin" ||
+		w.Header().Get("Cache-Control") != "public, max-age=60" || w.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Errorf("a) allowed GET = %d %v", w.Code, w.Header())
+	}
+	// b) unlisted origin
+	if w := do(r, "GET", "/v1/brand/listening", "https://evil.example"); acao(w) != "" || w.Header().Get("Vary") != "Origin" {
+		t.Errorf("b) evil GET = %v", w.Header())
+	}
+	// c) null origin
+	if w := do(r, "GET", "/v1/brand/listening", "null"); acao(w) != "" {
+		t.Errorf("c) null GET = %v", w.Header())
+	}
+	// d) no origin
+	if w := do(r, "GET", "/v1/brand/listening", ""); w.Code != 200 || acao(w) != "" || w.Header().Get("Vary") != "Origin" {
+		t.Errorf("d) no-origin GET = %d %v", w.Code, w.Header())
+	}
+	// e) preflight
+	for _, p := range []string{"/v1/brand/listening", "/v1/brand/listening/icon_192"} {
+		w := do(r, "OPTIONS", p, allowed)
+		h := w.Header()
+		if w.Code != http.StatusNoContent || acao(w) != allowed || h.Get("Access-Control-Allow-Methods") != "GET, OPTIONS" ||
+			h.Get("Access-Control-Allow-Headers") != "Content-Type" || h.Get("Access-Control-Max-Age") != "86400" ||
+			h.Get("Access-Control-Allow-Credentials") != "" ||
+			h.Get("Vary") != "Origin, Access-Control-Request-Method, Access-Control-Request-Headers" {
+			t.Errorf("e) OPTIONS %s allowed = %d %v", p, w.Code, h)
+		}
+		w = do(r, "OPTIONS", p, "https://evil.example")
+		if w.Code != http.StatusNoContent || acao(w) != "" || w.Header().Get("Access-Control-Allow-Methods") != "" {
+			t.Errorf("e) OPTIONS %s evil = %d %v", p, w.Code, w.Header())
+		}
+	}
+	// f) redirects
+	for _, p := range []string{"/v1/brand/listening/icon_192", "/v1/brand/favicon_ico"} {
+		w := do(r, "GET", p, allowed)
+		if w.Code != http.StatusFound || acao(w) != allowed || w.Header().Get("Location") == "" ||
+			w.Header().Get("Cache-Control") != "public, max-age=300" || w.Header().Get("Vary") != "Origin" {
+			t.Errorf("f) GET %s = %d %v", p, w.Code, w.Header())
+		}
+	}
+	// g) unknown slot: the 404 is readable
+	if w := do(r, "GET", "/v1/brand/listening/monogram_primary", allowed); w.Code != 404 || acao(w) != allowed {
+		t.Errorf("g) 404 = %d %v", w.Code, w.Header())
+	}
+	// h) admin routes never send CORS headers
+	w = do(r, "GET", "/admin/brand/listening", allowed)
+	for k := range w.Header() {
+		if strings.HasPrefix(http.CanonicalHeaderKey(k), "Access-Control-") {
+			t.Errorf("h) admin GET sent %s", k)
+		}
+	}
+	if w := do(r, "OPTIONS", "/admin/brand/listening", allowed); w.Code == http.StatusNoContent || acao(w) != "" {
+		t.Errorf("h) admin OPTIONS = %d %v", w.Code, w.Header())
+	}
+	// i) no origins configured
+	none := router()
+	for _, mp := range [][2]string{{"GET", "/v1/brand/listening"}, {"GET", "/v1/brand"}, {"GET", "/v1/brand/favicon_ico"},
+		{"OPTIONS", "/v1/brand/listening"}, {"OPTIONS", "/v1/brand/listening/icon_192"}} {
+		if w := do(none, mp[0], mp[1], allowed); acao(w) != "" {
+			t.Errorf("i) %s %s with nil origins sent ACAO", mp[0], mp[1])
 		}
 	}
 }

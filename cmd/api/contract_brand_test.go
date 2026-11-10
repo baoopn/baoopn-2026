@@ -202,6 +202,30 @@ func TestContractBrandListening(t *testing.T) {
 		t.Errorf("GET %s/ = %d", pub, w.Code)
 	}
 
+	// CORS for BRAND_CORS_ORIGINS (the harness lists the listening site).
+	const site = "https://listening.baoopn.com"
+	from := func(o string) map[string]string { return map[string]string{"Origin": o} }
+	w = c.raw("GET", pub, nil, from(site))
+	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != site ||
+		!strings.Contains(w.Header().Get("Vary"), "Origin") {
+		t.Errorf("CORS GET %s = %d %v", pub, w.Code, w.Header())
+	}
+	w = c.raw("OPTIONS", pub, nil, from(site))
+	if w.Code != http.StatusNoContent || w.Header().Get("Access-Control-Allow-Origin") != site ||
+		w.Header().Get("Access-Control-Allow-Methods") != "GET, OPTIONS" {
+		t.Errorf("OPTIONS %s = %d %v", pub, w.Code, w.Header())
+	}
+	w = c.raw("GET", pub+"/icon_now_playing_navy", nil, from(site))
+	if w.Code != http.StatusFound || w.Header().Get("Access-Control-Allow-Origin") != site {
+		t.Errorf("CORS redirect = %d %v", w.Code, w.Header())
+	}
+	if w := c.raw("GET", pub, nil, from("https://evil.example")); w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("unlisted origin got ACAO: %v", w.Header())
+	}
+
+	if w := c.raw("GET", adm, nil, from(site)); w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("admin GET with Origin = %d %v", w.Code, w.Header())
+	}
 	list := c.ok("GET", adm, nil, 200, arr(adminBrandAsset), false)
 	items, _ := list.([]any)
 	if len(items) != len(listeningBrandSlots) {

@@ -24,6 +24,8 @@
 #   INBOUND_MAIL_DOMAIN, INBOUND_WEBHOOK_SECRET    reply threading via the Email Worker
 #                                                  (secret must equal the worker's)
 #   SPOTIFY_API_URL                                spotify-tracker listening widgets
+#   BRAND_CORS_ORIGINS                             origins that may read /api/v1/brand from a browser
+#                                                  (default https://listening.baoopn.com; empty = none)
 #   S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, MEDIA_PUBLIC_URL
 #                                                  media in a Cloudflare R2 bucket (else the volume)
 #   TURNSTILE_SECRET_KEY / PUBLIC_TURNSTILE_SITE_KEY  contact-form captcha
@@ -68,6 +70,7 @@ services:
       - LOG_FORMAT=json
       - HTTP_ADDR=:8080
       - PUBLIC_URL=${SERVICE_URL_WEB}
+      - BRAND_CORS_ORIGINS=${BRAND_CORS_ORIGINS-https://listening.baoopn.com}
       - DATABASE_URL=postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-baoopn}?sslmode=disable
       - MIGRATE_ON_START=${MIGRATE_ON_START:-true}
       - SECRETS_KEY=${SERVICE_PASSWORD_64_SECRETS}

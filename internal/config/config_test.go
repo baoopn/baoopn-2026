@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -89,6 +91,37 @@ func TestLoadMediaOrphans(t *testing.T) {
 		t.Setenv("MEDIA_ORPHAN_MAX_PER_PASS", bad)
 		if _, err := load(); err == nil {
 			t.Errorf("MEDIA_ORPHAN_MAX_PER_PASS=%s accepted", bad)
+		}
+	}
+}
+
+func TestLoadBrandCORSOrigins(t *testing.T) {
+	load := func() (Config, error) {
+		t.Setenv("DATABASE_URL", "postgres://x") // Load unsets it
+		return Load()
+	}
+	t.Setenv("BRAND_CORS_ORIGINS", "") // restored after the test
+	if err := os.Unsetenv("BRAND_CORS_ORIGINS"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := load()
+	if err != nil || !slices.Equal(c.BrandCORSOrigins, []string{"https://listening.baoopn.com"}) {
+		t.Fatalf("unset = %q, %v", c.BrandCORSOrigins, err)
+	}
+	t.Setenv("BRAND_CORS_ORIGINS", "")
+	c, err = load()
+	if err != nil || c.BrandCORSOrigins == nil || len(c.BrandCORSOrigins) != 0 {
+		t.Fatalf("empty = %#v, %v", c.BrandCORSOrigins, err)
+	}
+	t.Setenv("BRAND_CORS_ORIGINS", "HTTPS://A.com:443/, http://localhost:5173 ,https://a.com")
+	c, err = load()
+	if want := []string{"https://a.com", "http://localhost:5173"}; err != nil || !slices.Equal(c.BrandCORSOrigins, want) {
+		t.Fatalf("list = %q, %v; want %q", c.BrandCORSOrigins, err, want)
+	}
+	for _, bad := range []string{"*", "null", "https://a.com/x", "ftp://a.com", "https://u@a.com", "https://a.com?q", "a.com"} {
+		t.Setenv("BRAND_CORS_ORIGINS", bad)
+		if _, err := load(); err == nil || !strings.Contains(err.Error(), "BRAND_CORS_ORIGINS") {
+			t.Errorf("%q: err = %v, want a BRAND_CORS_ORIGINS error", bad, err)
 		}
 	}
 }

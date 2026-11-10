@@ -2,7 +2,6 @@ package credit
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,21 +28,6 @@ func (m *Module) Hooks(chi.Router) {}
 func (m *Module) internal(w http.ResponseWriter, r *http.Request, what string, err error) {
 	m.d.Log.ErrorContext(r.Context(), "credit: "+what, logging.Err(err))
 	httpapi.Error(w, http.StatusInternalServerError, "internal", "internal error")
-}
-
-// allowedOrigin returns the request's Origin when it is in the list, else "".
-// Only exact matches count; "null" never does.
-func allowedOrigin(r *http.Request, origins []string) string {
-	o := strings.ToLower(strings.TrimSpace(r.Header.Get("Origin")))
-	if o == "" || o == "null" {
-		return ""
-	}
-	for _, s := range origins {
-		if s == o {
-			return o
-		}
-	}
-	return ""
 }
 
 // publicDoc never fails: on a database error it serves the defaults, which
@@ -83,7 +67,7 @@ func (m *Module) handlePublic(w http.ResponseWriter, r *http.Request) {
 		m.internal(w, r, "brand logo", err)
 		return
 	}
-	if o := allowedOrigin(r, d.Origins); o != "" {
+	if o := httpapi.AllowedOrigin(r, d.Origins); o != "" {
 		h.Set("Access-Control-Allow-Origin", o)
 	}
 	h.Set("Cache-Control", cache)
@@ -94,7 +78,7 @@ func (m *Module) handlePreflight(w http.ResponseWriter, r *http.Request) {
 	d, _ := m.publicDoc(r)
 	h := w.Header()
 	h.Set("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
-	if o := allowedOrigin(r, d.Origins); o != "" {
+	if o := httpapi.AllowedOrigin(r, d.Origins); o != "" {
 		h.Set("Access-Control-Allow-Origin", o)
 		h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		h.Set("Access-Control-Allow-Headers", "Content-Type")

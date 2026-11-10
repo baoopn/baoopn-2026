@@ -79,6 +79,9 @@ type Deps struct {
 	Files Files
 	// Now is the clock (tests); nil means time.Now.
 	Now func() time.Time
+	// CORSOrigins are the exact origins that may read the public routes
+	// cross-origin; empty means no CORS headers.
+	CORSOrigins []string
 }
 
 // defaultAsset is an embedded default file.
@@ -103,6 +106,7 @@ type Store struct {
 	files    Files
 	now      func() time.Time
 	defaults map[string]defaultAsset
+	cors     []string
 
 	// mu serializes writers (Replace, Reset, Ensure, prune). Readers never
 	// take it: they read snap, an immutable copy published after each
@@ -129,7 +133,7 @@ func NewBrand(d Deps, name string) *Store {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	s := &Store{b: b, log: d.Log, files: d.Files, now: d.Now, defaults: map[string]defaultAsset{}}
+	s := &Store{b: b, log: d.Log, files: d.Files, now: d.Now, defaults: map[string]defaultAsset{}, cors: d.CORSOrigins}
 	for _, def := range b.Slots {
 		data, err := b.defaultFile(def)
 		if err != nil {

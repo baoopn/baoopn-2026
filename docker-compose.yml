@@ -73,6 +73,7 @@ services:
     environment:
       DATABASE_URL: postgres://baoopn:baoopn@postgres:5432/baoopn?sslmode=disable
       PUBLIC_URL: http://localhost:3000
+      BRAND_CORS_ORIGINS: ${BRAND_CORS_ORIGINS-https://listening.baoopn.com}
       MEDIA_DIR: /data/media
       # .env points at localhost:9000; inside the network RustFS is rustfs:9000.
       S3_ENDPOINT: http://rustfs:9000
