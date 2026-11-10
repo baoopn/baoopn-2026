@@ -59,14 +59,23 @@ func (m *Module) publicDoc(r *http.Request) (Doc, string) {
 
 func (m *Module) handlePublic(w http.ResponseWriter, r *http.Request) {
 	d, cache := m.publicDoc(r)
-	// A client site may ask for one logo kind (?logo=wordmark|mark) instead of
-	// the stored one; any other value is ignored.
-	if k := r.URL.Query().Get("logo"); validLogo(k) {
-		d.Logo = k
+	// A client site may ask for one variant (?logo=wordmark|mark) instead of
+	// the stored default; any other value is ignored.
+	// It may also ask for one style (?color=color|mono) instead of the
+	// variant's stored style; any other value is ignored. Neither changes
+	// the stored document.
+	q := r.URL.Query()
+	kind := d.Logo
+	if k := q.Get("logo"); validLogo(k) {
+		kind = k
+	}
+	style := ""
+	if s := q.Get("color"); validStyle(s) {
+		style = s
 	}
 	h := w.Header()
 	h.Set("Vary", "Origin")
-	c, err := m.public(r.Context(), d)
+	c, err := m.public(r.Context(), d, kind, style)
 	if err != nil {
 		// No CORS header and no caching: a client page sees a failed fetch
 		// and keeps its fallback text.

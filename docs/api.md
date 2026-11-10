@@ -24,7 +24,7 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
 | GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`; the defaults when the database is unreachable) |
 | GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
-| GET | `/credit` | `?logo=wordmark\|mark` (optional) | `Credit` (the footer credit for client sites; `logo` overrides the stored logo kind for this request; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
+| GET | `/credit` | `?logo=wordmark\|mark&color=color\|mono` (both optional) | `Credit` (the footer credit for client sites; `logo` picks the variant instead of the stored default, `color` overrides that variant's style for this request; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
 | OPTIONS | `/credit` | – | `204` CORS preflight (headers only for a listed origin) |
 | GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
 
@@ -174,8 +174,13 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
   | `favicon_svg` | SVG | square viewBox | 256 KiB |
   | `apple_touch_icon` | PNG | exactly 180×180 | 512 KiB |
   | `wordmark_primary` | SVG | viewBox | 256 KiB |
+  | `wordmark_inverse` | SVG | viewBox (shown on dark backgrounds) | 256 KiB |
+  | `wordmark_navy` | SVG | viewBox (navy glyph, shown on light backgrounds) | 256 KiB |
+  | `wordmark_cream` | SVG | viewBox (cream glyph, shown on dark backgrounds) | 256 KiB |
   | `monogram_primary` | SVG | square viewBox | 256 KiB |
   | `monogram_inverse` | SVG | square viewBox | 256 KiB |
+  | `monogram_navy` | SVG | viewBox (navy glyph, shown on light backgrounds) | 256 KiB |
+  | `monogram_cream` | SVG | viewBox (cream glyph, shown on dark backgrounds) | 256 KiB |
   | `email_logo` | PNG | 240–1200 px wide, 60–600 px tall, 1.5:1 to 4:1 (shown 48 px tall in emails) | 256 KiB |
 
 - **Errors:** 400 `bad_request` (not multipart, no `file` field), 404 `not_found` (unknown
@@ -215,27 +220,65 @@ data: {"thread_id":12,"message_id":40,"direction":"outbound","request_id":"r-abc
 ### Credit
 
 Client sites built by Bao show a "Designed & built by" line with the baoopn logo in their
-footers. `GET /api/v1/credit` gives them the text, the link and the current logo files, so a
-new text or a replaced brand logo reaches every client site without a deploy there. The
-snippet and the setup steps for a client site are in `docs/credit.md`.
+footers. The line is a prefix, then the linked logo, then a suffix. `GET /api/v1/credit`
+gives client sites the text, the link and the current logo files, so new text or a replaced
+brand logo reaches every client site without a deploy there. The snippet and the setup
+steps for a client site are in `docs/credit.md`.
 
-- **Storage:** the `credit` settings document holds `text`, `url`, `logo`, `origins` and
+- **Variants:** the owner sets the line once for each logo kind, `wordmark` and `mark`. Each
+  variant has its own `prefix`, `suffix` and `style`. A client site picks the variant with
+  `?logo=wordmark|mark`. Without it, or with any other value, the API serves the stored
+  default variant (`logo`).
+- **Style override:** `?color=color|mono` serves that style instead of the variant's stored
+  style, for this request only. It works with or without `?logo=` (for example
+  `?logo=mark&color=mono`). Both parameters need exact lowercase values; the API ignores any
+  other value and never changes the stored document. `logo.style` in the answer is the style
+  the API served.
+- **Storage:** the `credit` settings document holds `url`, `logo` (the default variant),
+  `variants` (`{"wordmark": {prefix, suffix, style}, "mark": {…}}`), `origins` and
   `updated_at`. It needs no table of its own. The API keeps the document in memory (one API
   instance) and replaces it after each save.
-- **Defaults** (no document yet, or one field broken by a hand edit): text
-  `Designed & built by`, url the origin of `PUBLIC_URL`, logo `wordmark`, no origins,
-  `updated_at` null. A broken origin in a stored document is dropped.
-- **Logo:** `logo` picks the brand files. `wordmark` uses `wordmark_primary` on light and
-  dark backgrounds (there is no inverse wordmark). `mark` uses `monogram_primary` on light
-  and `monogram_inverse` on dark. The URLs are absolute (`MEDIA_PUBLIC_URL/brand/…`, else
-  `PUBLIC_URL/media/brand/…`), and each version has its own URL. `alt` is the host of
+- **Defaults** (no document yet, or one field broken by a hand edit): url the origin of
+  `PUBLIC_URL`, logo `wordmark`, both variants with prefix `Designed & built by`, an empty
+  suffix and style `color`, no origins, `updated_at` null. Each field of a variant falls back
+  on its own. A broken origin in a stored document is dropped. A document saved before the
+  variants has a top-level `text`; the API reads it as the prefix of each missing variant
+  and keeps reading the top-level `logo` as the default variant. The next save writes the
+  new shape.
+- **Logo:** the kind and the style pick the brand files:
+
+  | kind | style | light background | dark background |
+  |---|---|---|---|
+  | `wordmark` | `color` | `wordmark_primary` | `wordmark_inverse` |
+  | `wordmark` | `mono` | `wordmark_navy` | `wordmark_cream` |
+  | `mark` | `color` | `monogram_primary` | `monogram_inverse` |
+  | `mark` | `mono` | `monogram_navy` | `monogram_cream` |
+
+  `color` is the filled tile; `mono` is the glyph only. The URLs are absolute
+  (`MEDIA_PUBLIC_URL/brand/…`, else `PUBLIC_URL/media/brand/…`), and each version has its
+  own URL. The width and height come from the SVG viewBox. `alt` is the host of
   `PUBLIC_URL` without `www.`.
+- **Public answer** (`Credit`): `prefix`, `suffix`, `url`, `alt`, `logo` (`kind`, `style`,
+  `light`, `dark`) and `updated_at`, all for the chosen variant. `text` is a deprecated copy
+  of `prefix`, kept so old snippets still work.
+- **Admin answer** (`AdminCredit`): `url`, `logo`, `variants`, `origins`, `updated_at`,
+  `endpoint`, `logos` (all four files, as `logos[kind][style]`, for the previews) and
+  `limits` (`prefix_max`, `suffix_max`, `url_max`, `origins_max`).
 - **Fields** (`PUT /api/admin/credit` checks them in this order and reports the first problem):
-  - `text`: 1 to 80 characters after trimming, on one line: no control characters, no line or
-    paragraph separators (U+2028, U+2029) and no format characters such as bidi overrides
-    or zero-width spaces.
   - `url`: an absolute `https` URL with a host and no user info, at most 500 bytes.
-  - `logo`: `wordmark` or `mark`.
+  - `logo`: `wordmark` or `mark`, the default variant.
+  - `variants`: when present, exactly the keys `wordmark` and `mark` (else "variants must
+    have wordmark and mark"). The API checks `wordmark` first, then `mark`, and in each one
+    `prefix`, `suffix` and `style`. The message names the field, for example
+    `variants.mark.suffix must be at most 80 characters on one line`.
+    - `prefix` and `suffix`: 0 to 80 characters after trimming, on one line: no control
+      characters, no line or paragraph separators (U+2028, U+2029) and no format characters
+      such as bidi overrides or zero-width spaces.
+    - `style`: `color` or `mono`. An empty style means `color`.
+  - `text` (deprecated): read only when `variants` is absent. It follows the prefix rules
+    and becomes the prefix of both variants, with an empty suffix and style `color`. With
+    neither `variants` nor `text`, both variants get the default line. The admin app always
+    sends `variants`.
   - `origins`: at most 50 after removing repeats (`null` means none). Each entry is a bare
     origin: `https://host[:port]`, or `http` for `localhost`, `127.0.0.1` and `[::1]` only.
     No path other than `/`, no query, no fragment, no user info, no `*` and no `%`. The host

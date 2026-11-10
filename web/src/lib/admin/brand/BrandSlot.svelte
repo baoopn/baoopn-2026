@@ -40,7 +40,13 @@
 	});
 
 	/** Landscape logos preview 48 px tall (the email logo's size in mail). */
-	const wide = $derived(asset.slot === 'wordmark_primary' || asset.slot === 'email_logo');
+	// Wide logos keep their aspect ratio; the rest fill a square.
+	const wide = $derived(
+		asset.slot.startsWith('wordmark_') ||
+			asset.slot === 'monogram_navy' ||
+			asset.slot === 'monogram_cream' ||
+			asset.slot === 'email_logo'
+	);
 
 	async function done(next: AdminBrandAsset, title: string) {
 		onchange(next);

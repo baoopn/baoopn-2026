@@ -4,12 +4,18 @@ import { readFileSync } from 'node:fs';
 import {
 	MESSAGES,
 	ORIGINS_MAX,
+	STYLES,
 	TEXT_MAX,
 	fieldFromMessage,
+	FRAMEWORKS,
 	normalizeOrigin,
+	reactSnippet,
 	snippet,
-	validateForm
+	svelteSnippet,
+	validateForm,
+	vueSnippet
 } from '../src/lib/admin/credit/rules.js';
+import { compile } from 'svelte/compiler';
 
 // Same table as internal/credit/validate_test.go.
 const ACCEPT = [
@@ -69,37 +75,89 @@ test('normalizeOrigin rejects anything that is not a bare origin', () => {
 	}
 });
 
+const variant = (over = {}) => ({ prefix: 'Designed & built by', suffix: '', style: 'color', ...over });
 const valid = () => ({
-	text: 'Designed & built by',
 	url: 'https://baoopn.com',
 	logo: 'wordmark',
+	variants: { wordmark: variant(), mark: variant() },
 	origins: /** @type {string[]} */ ([])
 });
+/** valid() with one variant changed. */
+const withVariant = (/** @type {'wordmark' | 'mark'} */ kind, over = {}) => {
+	const f = valid();
+	f.variants[kind] = variant(over);
+	return f;
+};
 
 test('validateForm passes a valid form and trims the values', () => {
-	const r = validateForm({ ...valid(), text: '  Built by  ', url: ' https://baoopn.com/ ' });
+	const f = valid();
+	f.url = ' https://baoopn.com/ ';
+	f.variants.mark = { prefix: '  by  ', suffix: ' baoopn ', style: 'mono' };
+	const r = validateForm(f);
 	assert.deepEqual(r.errors, {});
 	assert.deepEqual(r.input, {
-		text: 'Built by',
 		url: 'https://baoopn.com/',
 		logo: 'wordmark',
+		variants: {
+			wordmark: { prefix: 'Designed & built by', suffix: '', style: 'color' },
+			mark: { prefix: 'by', suffix: 'baoopn', style: 'mono' }
+		},
 		origins: []
 	});
 });
 
-test('validateForm enforces the text limits', () => {
-	assert.equal(validateForm({ ...valid(), text: '' }).errors.text, MESSAGES.text);
-	assert.equal(validateForm({ ...valid(), text: 'two\nlines' }).errors.text, MESSAGES.text);
-	// Line and paragraph separators, bidi controls, zero-width space, BOM.
-	const bad = [0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069, 0x200b, 0xfeff].map((c) => String.fromCodePoint(c));
-	for (const ch of bad) {
-		const text = `Built ${ch}by`;
-		assert.equal(validateForm({ ...valid(), text }).errors.text, MESSAGES.text, JSON.stringify(ch));
+test('validateForm allows an empty prefix and suffix', () => {
+	const r = validateForm(withVariant('wordmark', { prefix: '', suffix: '   ' }));
+	assert.deepEqual(r.errors, {});
+	assert.deepEqual(r.input.variants.wordmark, { prefix: '', suffix: '', style: 'color' });
+});
+
+test('validateForm enforces the prefix and suffix limits per variant', () => {
+	// Line and paragraph separators, bidi controls, zero-width space, BOM, newline.
+	const bad = ['\n', ...[0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069, 0x200b, 0xfeff].map((c) => String.fromCodePoint(c))];
+	for (const kind of /** @type {const} */ (['wordmark', 'mark'])) {
+		for (const field of /** @type {const} */ (['prefix', 'suffix'])) {
+			const key = `variants.${kind}.${field}`;
+			for (const ch of bad) {
+				const r = validateForm(withVariant(kind, { [field]: `Built ${ch}by` }));
+				assert.deepEqual(r.errors, { [key]: MESSAGES[field] }, `${key} ${JSON.stringify(ch)}`);
+			}
+			const long = validateForm(withVariant(kind, { [field]: 'x'.repeat(TEXT_MAX + 1) }));
+			assert.deepEqual(long.errors, { [key]: MESSAGES[field] }, key);
+			assert.deepEqual(validateForm(withVariant(kind, { [field]: 'x'.repeat(TEXT_MAX) })).errors, {});
+			// Runes, not UTF-16 units: 80 emoji fit.
+			assert.deepEqual(validateForm(withVariant(kind, { [field]: '🎨'.repeat(TEXT_MAX) })).errors, {});
+		}
 	}
-	assert.equal(validateForm({ ...valid(), text: 'x'.repeat(TEXT_MAX + 1) }).errors.text, MESSAGES.text);
-	assert.equal(validateForm({ ...valid(), text: 'x'.repeat(TEXT_MAX) }).errors.text, undefined);
-	// Runes, not UTF-16 units: 80 emoji fit.
-	assert.equal(validateForm({ ...valid(), text: '🎨'.repeat(TEXT_MAX) }).errors.text, undefined);
+});
+
+test('validateForm accepts only the two styles, and reads an empty style as color', () => {
+	assert.deepEqual(STYLES, ['color', 'mono']);
+	assert.deepEqual(validateForm(withVariant('mark', { style: 'mono' })).errors, {});
+	const empty = validateForm(withVariant('mark', { style: '' }));
+	assert.deepEqual(empty.errors, {});
+	assert.equal(empty.input.variants.mark.style, 'color');
+	for (const style of ['big', 'Mono', 'COLOR']) {
+		assert.deepEqual(
+			validateForm(withVariant('mark', { style })).errors,
+			{ 'variants.mark.style': MESSAGES.style },
+			style
+		);
+	}
+});
+
+test('validateForm lists errors in the order the API checks them', () => {
+	const f = valid();
+	f.url = 'http://x';
+	f.variants.mark = { prefix: 'a\nb', suffix: 'c\nd', style: 'big' };
+	f.variants.wordmark = { prefix: '', suffix: 'x'.repeat(TEXT_MAX + 1), style: 'color' };
+	assert.deepEqual(Object.keys(validateForm(f).errors), [
+		'url',
+		'variants.wordmark.suffix',
+		'variants.mark.prefix',
+		'variants.mark.suffix',
+		'variants.mark.style'
+	]);
 });
 
 test('validateForm accepts only absolute https URLs without userinfo', () => {
@@ -131,7 +189,6 @@ test('validateForm caps the origin list after dedupe', () => {
 });
 
 test('fieldFromMessage maps each API 422 message to its field', () => {
-	assert.equal(fieldFromMessage('text must be 1 to 80 characters on one line'), 'text');
 	assert.equal(fieldFromMessage('url must be an absolute https URL'), 'url');
 	assert.equal(fieldFromMessage('logo must be wordmark or mark'), 'logo');
 	assert.equal(fieldFromMessage('origins can hold at most 50 entries'), 'origins');
@@ -141,8 +198,23 @@ test('fieldFromMessage maps each API 422 message to its field', () => {
 		),
 		'origins[3]'
 	);
+	for (const kind of ['wordmark', 'mark']) {
+		assert.equal(
+			fieldFromMessage(`variants.${kind}.prefix must be at most 80 characters on one line`),
+			`variants.${kind}.prefix`
+		);
+		assert.equal(
+			fieldFromMessage(`variants.${kind}.suffix must be at most 80 characters on one line`),
+			`variants.${kind}.suffix`
+		);
+		assert.equal(fieldFromMessage(`variants.${kind}.style must be color or mono`), `variants.${kind}.style`);
+	}
+	assert.equal(fieldFromMessage('variants must have wordmark and mark'), 'variants.wordmark.prefix');
+	assert.equal(fieldFromMessage('text must be at most 80 characters on one line'), 'variants.wordmark.prefix');
+	assert.equal(fieldFromMessage('variants.big.prefix must be short'), null);
 	assert.equal(fieldFromMessage('something else went wrong'), null);
 	assert.equal(fieldFromMessage('urls are fine'), null);
+	assert.equal(fieldFromMessage('texts are fine'), null);
 });
 
 test('snippet embeds the endpoint and builds nodes without innerHTML', () => {
@@ -161,6 +233,15 @@ test('snippet embeds the endpoint and builds nodes without innerHTML', () => {
 	assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(s));
 });
 
+test('snippet lays out prefix, then a link holding the logo and the suffix', () => {
+	const s = snippet('https://baoopn.com/api/v1/credit?logo=mark');
+	assert.ok(s.includes('fetch("https://baoopn.com/api/v1/credit?logo=mark")'));
+	assert.ok(s.includes("if (data.suffix) link.append(document.createTextNode(' ' + data.suffix));"));
+	assert.ok(s.includes("if (data.prefix) line.append(document.createTextNode(data.prefix + ' '));"));
+	assert.ok(s.indexOf('link.append(picture)') < s.indexOf('data.suffix'));
+	assert.ok(!s.includes('data.text'));
+});
+
 test('snippet cannot be broken out of with a hostile endpoint', () => {
 	const s = snippet('https://x.com/</script><img src=x>');
 	assert.equal(s.match(/<\/script>/g)?.length, 1);
@@ -177,4 +258,71 @@ test('the snippet script is a valid module', async () => {
 	// Compile only: an async function accepts the same top-level await.
 	const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
 	assert.doesNotThrow(() => new AsyncFunction(body));
+});
+
+const BUILDERS = { react: reactSnippet, vue: vueSnippet, svelte: svelteSnippet };
+
+for (const [name, build] of Object.entries(BUILDERS)) {
+	test(`${name} snippet embeds the endpoint as an escaped JS string`, () => {
+		const plain = 'https://baoopn.com/api/v1/credit?logo=mark&color=mono';
+		assert.ok(build(plain).includes(`const ENDPOINT = ${JSON.stringify(plain)};`));
+		const hostile = 'https://x.com/"</script><img src=x>';
+		const s = build(hostile);
+		assert.ok(s.includes('const ENDPOINT = "https://x.com/\\"\\u003c/script>\\u003cimg src=x>";'));
+		assert.ok(!s.includes(hostile));
+		// The only closing script tag is the component's own (none in React).
+		assert.equal(s.match(/<\/script>/g)?.length ?? 0, name === 'react' ? 0 : 1);
+	});
+
+	test(`${name} snippet uses framework escaping only`, () => {
+		const s = build('https://baoopn.com/api/v1/credit');
+		assert.ok(
+			!/dangerouslySetInnerHTML|v-html|\{@html|innerHTML|outerHTML|insertAdjacentHTML/.test(s)
+		);
+		assert.ok(s.includes('if (!/^https:\\/\\//.test(data.url)'));
+		assert.ok(s.includes('prefers-color-scheme: dark'));
+		assert.ok(s.includes('Designed &amp; built by <a href="https://baoopn.com">baoopn</a>'));
+		assert.ok(s.includes('baoopn-credit'));
+		assert.ok(s.includes('rel="noopener"'));
+		assert.ok(s.includes('Math.round((20 * img.width) / (img.height || 1))'));
+		assert.ok(s.includes('.abort()'));
+	});
+}
+
+test('react snippet is a client component with hooks', () => {
+	const s = reactSnippet('https://baoopn.com/api/v1/credit');
+	assert.ok(s.startsWith("'use client';\n"));
+	assert.ok(s.includes("import { useEffect, useState } from 'react';"));
+	assert.ok(s.includes('export default function BaoopnCredit()'));
+	assert.ok(s.includes('}, []);'));
+});
+
+test('vue snippet is a script setup SFC', () => {
+	const s = vueSnippet('https://baoopn.com/api/v1/credit');
+	assert.ok(s.startsWith('<script setup lang="ts">'));
+	assert.ok(s.includes("import { onMounted, onUnmounted, ref } from 'vue';"));
+	assert.ok(s.includes('<template>') && s.trimEnd().endsWith('</template>'));
+});
+
+test('svelte snippet compiles with Svelte 5 runes', () => {
+	const s = svelteSnippet('https://x.com/"</script>');
+	assert.ok(s.includes('$state.raw'));
+	const out = compile(s, { filename: 'BaoopnCredit.svelte', runes: true });
+	assert.ok(out.js.code.length > 0);
+	assert.deepEqual(
+		out.warnings.map((w) => w.code),
+		[]
+	);
+	const ssr = compile(s, { filename: 'BaoopnCredit.svelte', generate: 'server' });
+	assert.ok(ssr.js.code.includes('Designed &amp; built by'));
+});
+
+test('FRAMEWORKS names each file and keeps HTML as the plain snippet', () => {
+	assert.deepEqual(Object.fromEntries(Object.entries(FRAMEWORKS).map(([k, v]) => [k, v.file])), {
+		html: 'credit.html',
+		react: 'BaoopnCredit.tsx',
+		vue: 'BaoopnCredit.vue',
+		svelte: 'BaoopnCredit.svelte'
+	});
+	assert.equal(FRAMEWORKS.html.build, snippet);
 });
