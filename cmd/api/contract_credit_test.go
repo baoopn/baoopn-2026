@@ -157,7 +157,7 @@ func TestContractCredit(t *testing.T) {
 	}
 	// ?color= overrides the style for one request; the stored doc keeps mono.
 	for q, want := range map[string]string{"?logo=mark&color=mono": "mono", "?logo=mark&color=color": "color",
-		"?logo=mark&color=MONO": "mono", "?color=mono": "mono"} {
+		"?logo=mark&color=MONO": "mono", "?color=MONO": "color", "?color=mono": "mono"} {
 		pub = decodeData(t, c.raw("GET", "/api/v1/credit"+q, nil, nil), creditShape)
 		if field(field(pub, "logo"), "style") != want {
 			t.Errorf("GET %s style = %v, want %s", q, field(field(pub, "logo"), "style"), want)
