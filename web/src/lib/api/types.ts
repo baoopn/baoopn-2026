@@ -600,6 +600,53 @@ export interface AdminBrandAsset extends BrandAsset {
 	preview: 'light' | 'dark' | 'both';
 }
 
+// Credit line for client sites (GET /api/v1/credit, /api/admin/credit).
+// The public route sends CORS headers only to the listed origins.
+export type CreditLogoKind = 'wordmark' | 'mark';
+
+export interface CreditImage {
+	/** Absolute URL. */
+	url: string;
+	width: number;
+	height: number;
+	content_type: string;
+}
+
+export interface CreditLogo {
+	kind: CreditLogoKind;
+	light: CreditImage;
+	dark: CreditImage;
+}
+
+export interface Credit {
+	text: string;
+	url: string;
+	alt: string;
+	logo: CreditLogo;
+	/** RFC 3339 UTC; null until the first save. */
+	updated_at: string | null;
+}
+
+export interface AdminCredit {
+	text: string;
+	url: string;
+	logo: CreditLogoKind;
+	/** Normalised origins, for example https://example.com. */
+	origins: string[];
+	updated_at: string | null;
+	/** Absolute URL of the public endpoint. */
+	endpoint: string;
+	logos: Record<CreditLogoKind, CreditLogo>;
+	limits: { text_max: number; url_max: number; origins_max: number };
+}
+
+export interface CreditInput {
+	text: string;
+	url: string;
+	logo: CreditLogoKind;
+	origins: string[];
+}
+
 // Off-site backups (GET /api/admin/backups). The backup sidecar writes the
 // status rows; the API reads them and stores only the settings doc and
 // queued run requests. Timestamps are RFC 3339 UTC. No secret values, only
