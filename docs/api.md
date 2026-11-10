@@ -24,7 +24,7 @@ to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Coun
 | GET | `/listening/top-artists` | `range` (`7d`,`30d`,`90d`), `limit` (1–20) | `TopArtist[]` (cached 5 min) |
 | GET | `/brand` | – | `Brand` (current URL, type and size of every brand asset; `Cache-Control: public, max-age=60`; the defaults when the database is unreachable) |
 | GET | `/brand/{slot}` | – | `302` to the slot's current file (`Cache-Control: public, max-age=300`); 404 `not_found` for an unknown slot |
-| GET | `/credit` | – | `Credit` (the footer credit for client sites; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
+| GET | `/credit` | `?logo=wordmark\|mark` (optional) | `Credit` (the footer credit for client sites; `logo` overrides the stored logo kind for this request; `Cache-Control: public, max-age=300`, `Vary: Origin`; CORS for listed origins only, see *Credit*) |
 | OPTIONS | `/credit` | – | `204` CORS preflight (headers only for a listed origin) |
 | GET | `/listening/top-playlists` | `limit` (1–24, default 6: older entries per period) | `TopPlaylists` (newest first per period; only the newest entry of each period carries `tracks`; cached 5 min; empty periods when `SPOTIFY_API_URL` is unset) |
 

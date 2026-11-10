@@ -293,3 +293,29 @@ func TestLoadAndSave(t *testing.T) {
 		t.Errorf("hand edit = %+v", d)
 	}
 }
+
+// ?logo= picks the logo kind for one client; a bad value keeps the stored one.
+func TestPublicLogoParam(t *testing.T) {
+	m, _ := newTest(&Doc{Text: "x", URL: "https://baoopn.com", Logo: LogoWordmark, Origins: []string{}})
+	r := chi.NewRouter()
+	m.Public(r)
+	for q, want := range map[string]string{
+		"": LogoWordmark, "?logo=mark": LogoMark, "?logo=wordmark": LogoWordmark,
+		"?logo=big": LogoWordmark, "?logo=MARK": LogoWordmark,
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/credit"+q, nil))
+		var body struct {
+			Data Credit `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != 200 {
+			t.Fatalf("%q: %d %v", q, w.Code, err)
+		}
+		if body.Data.Logo.Kind != want {
+			t.Errorf("%q: kind = %q, want %q", q, body.Data.Logo.Kind, want)
+		}
+	}
+	if d := m.snap.Load(); d.Logo != LogoWordmark {
+		t.Errorf("stored logo changed to %q", d.Logo)
+	}
+}

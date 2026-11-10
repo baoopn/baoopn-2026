@@ -59,6 +59,11 @@ func (m *Module) publicDoc(r *http.Request) (Doc, string) {
 
 func (m *Module) handlePublic(w http.ResponseWriter, r *http.Request) {
 	d, cache := m.publicDoc(r)
+	// A client site may ask for one logo kind (?logo=wordmark|mark) instead of
+	// the stored one; any other value is ignored.
+	if k := r.URL.Query().Get("logo"); validLogo(k) {
+		d.Logo = k
+	}
 	h := w.Header()
 	h.Set("Vary", "Origin")
 	c, err := m.public(r.Context(), d)

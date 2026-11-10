@@ -82,6 +82,13 @@ and both hosts:
 - `img-src` must allow the host that serves the logo, which is the media host
   (for example `https://media.baoopn.com`). The admin page names the exact host.
 
+## Pick the logo for one site
+
+The admin page sets the logo for every client site. A site that needs the
+other one can ask for it with `?logo=mark` (the monogram, with a light and an
+inverse file) or `?logo=wordmark`. Any other value is ignored and the stored
+logo is used.
+
 ## Caching and limits
 
 The API marks the response `public, max-age=300`, so a browser reuses it for
