@@ -19,9 +19,8 @@ export const BRAND_COPY = {
 		toast: 'The public site picks up changes within a minute.'
 	},
 	listening: {
-		intro:
-			'Favicons, logos, icons and the share image. Used by listening.baoopn.com. It picks up changes within a few minutes.',
-		toast: 'listening.baoopn.com picks up changes within a few minutes.'
+		intro: 'Favicons, logos, icons and the share image for listening.baoopn.com.',
+		toast: 'Saved to the listening brand.'
 	}
 };
 
@@ -32,6 +31,37 @@ export const BRAND_COPY = {
  */
 export function parseBrand(value) {
 	return value === 'listening' ? 'listening' : 'baoopn';
+}
+
+/**
+ * The URL the page shows. A shallow goto (and Back or Forward to an entry one
+ * wrote) sets page.shallow.url and leaves page.url alone, so read that first.
+ * @param {{ url: URL | { href: string; searchParams: { get(k: string): string | null } }; shallow?: { url: { href: string; searchParams: { get(k: string): string | null } } } | null }} page
+ */
+function shownUrl(page) {
+	return page.shallow?.url ?? page.url;
+}
+
+/**
+ * The brand the admin page shows, from `?brand=` on the shown URL.
+ * @param {Parameters<typeof shownUrl>[0]} page
+ * @returns {BrandName}
+ */
+export function currentBrand(page) {
+	return parseBrand(shownUrl(page).searchParams.get('brand'));
+}
+
+/**
+ * The shown URL with `?brand=` set for `next` (dropped for baoopn, the default).
+ * @param {Parameters<typeof shownUrl>[0]} page
+ * @param {BrandName} next
+ * @returns {URL}
+ */
+export function brandUrl(page, next) {
+	const url = new URL(shownUrl(page).href);
+	if (next === 'listening') url.searchParams.set('brand', next);
+	else url.searchParams.delete('brand');
+	return url;
 }
 
 /**

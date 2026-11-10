@@ -19,7 +19,8 @@
 		brand?: BrandName;
 		/** Admin API path of the brand's slot list; PUT and DELETE go to base/slot. */
 		base?: string;
-		onchange: (a: AdminBrandAsset) => void;
+		/** Gets the brand the request was made for, which may no longer be shown. */
+		onchange: (a: AdminBrandAsset, brand: BrandName) => void;
 	} = $props();
 
 	let busy = $state(false);
@@ -41,9 +42,9 @@
 	const maskable = $derived(isMaskable(asset.slot));
 	const path = $derived(base + '/' + asset.slot);
 
-	async function done(next: AdminBrandAsset, title: string) {
-		onchange(next);
-		toasts.success(title, BRAND_COPY[brand].toast);
+	async function done(next: AdminBrandAsset, from: BrandName, title: string) {
+		onchange(next, from);
+		toasts.success(title, BRAND_COPY[from].toast);
 		await invalidateAll();
 	}
 
@@ -52,12 +53,14 @@
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file || busy) return;
+		const from = brand;
+		const to = path;
 		busy = true;
 		error = null;
 		try {
 			const fd = new FormData();
 			fd.append('file', file);
-			await done(await put<AdminBrandAsset>(path, fd), `${asset.label} replaced`);
+			await done(await put<AdminBrandAsset>(to, fd), from, `${asset.label} replaced`);
 		} catch (err) {
 			error = errorMessage(err);
 			toasts.error(`Could not replace the ${asset.label.toLowerCase()}`, error);
@@ -68,11 +71,14 @@
 
 	// Not `del()`: that helper is typed void, and the reset returns the default asset.
 	async function reset() {
+		const from = brand;
+		const to = path;
 		busy = true;
 		error = null;
 		try {
 			await done(
-				await admin<AdminBrandAsset>(path, { method: 'DELETE' }),
+				await admin<AdminBrandAsset>(to, { method: 'DELETE' }),
+				from,
 				`${asset.label} reset`
 			);
 		} catch (err) {

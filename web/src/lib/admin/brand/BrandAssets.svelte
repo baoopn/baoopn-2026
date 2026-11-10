@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { RefreshCw } from '@lucide/svelte';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { AdminBrandAsset, BrandName } from '#lib/api/types.js';
@@ -8,14 +9,14 @@
 	import { get } from '#lib/admin/api.js';
 	import { errorMessage } from '#lib/admin/format.js';
 	import BrandSlot from './BrandSlot.svelte';
-	import { BRAND_COPY, apiBase, groupAssets, parseBrand } from './layout.js';
+	import { BRAND_COPY, apiBase, brandUrl, currentBrand, groupAssets } from './layout.js';
 
 	const brandOptions: { value: BrandName; label: string }[] = [
 		{ value: 'baoopn', label: 'baoopn' },
 		{ value: 'listening', label: 'listening' }
 	];
 
-	const brand = $derived(parseBrand(page.url.searchParams.get('brand')));
+	const brand = $derived(currentBrand(page));
 	const base = $derived(apiBase(brand));
 
 	// Tagged with the brand it came from, so a switch never shows the old list.
@@ -41,23 +42,24 @@
 		}
 	}
 
+	// Track only the brand; load's own reads (auth, token) must not rerun it.
 	$effect(() => {
-		void load(brand);
+		const b = brand;
+		untrack(() => void load(b));
 	});
 
 	const groups = $derived(assets ? groupAssets(assets) : []);
 
-	function replace(next: AdminBrandAsset) {
-		if (data)
+	// An upload or reset that ends after a switch belongs to the other brand.
+	function replace(next: AdminBrandAsset, from: BrandName) {
+		if (data && data.brand === from)
 			data = { ...data, assets: data.assets.map((a) => (a.slot === next.slot ? next : a)) };
 	}
 
 	// Shallow: only the URL changes, so the page keeps its data, scroll and focus.
+	// The switcher's value always reads `brand`, which follows the shown URL.
 	function pick(next: BrandName) {
-		const url = new URL(page.url.href);
-		if (next === 'listening') url.searchParams.set('brand', next);
-		else url.searchParams.delete('brand');
-		void goto(url, { replace: true, shallow: true });
+		void goto(brandUrl(page, next), { replace: true, shallow: true });
 	}
 </script>
 
@@ -68,7 +70,12 @@
 			<p class="hint mt-1">{BRAND_COPY[brand].intro}</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
-			<Segmented options={brandOptions} value={brand} label="Brand" size="sm" onchange={pick} />
+			<Segmented
+				options={brandOptions}
+				bind:value={() => brand, pick}
+				label="Brand"
+				size="sm"
+			/>
 			<button
 				type="button"
 				class="btn btn-ghost btn-sm"

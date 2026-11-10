@@ -7,6 +7,8 @@ import {
 	BRAND_NAMES,
 	GROUPS,
 	apiBase,
+	brandUrl,
+	currentBrand,
 	groupAssets,
 	isMaskable,
 	isWide,
@@ -14,6 +16,7 @@ import {
 	previewSizes,
 	slotPath
 } from '../src/lib/admin/brand/layout.js';
+import { skipsGuard } from '../src/lib/admin/guard-rules.js';
 
 const ICONS = ['headphones', 'now_playing', 'now_playing_static', 'paused', 'playlist', 'track'];
 
@@ -37,7 +40,13 @@ test('brand copy has an intro and toast for each brand, with no em dashes', () =
 		assert.ok(BRAND_COPY[b].toast.length > 0);
 		assert.ok(!/—/.test(BRAND_COPY[b].intro + BRAND_COPY[b].toast));
 	}
-	assert.match(BRAND_COPY.listening.intro, /listening\.baoopn\.com/);
+	assert.equal(
+		BRAND_COPY.listening.intro,
+		'Favicons, logos, icons and the share image for listening.baoopn.com.'
+	);
+	assert.equal(BRAND_COPY.listening.toast, 'Saved to the listening brand.');
+	// listening.baoopn.com does not read this API yet, so promise no timing.
+	assert.ok(!/picks up changes within a few minutes/.test(JSON.stringify(BRAND_COPY.listening)));
 });
 
 test('GROUPS are in display order with plain labels', () => {
@@ -148,11 +157,40 @@ for (const name of ['BrandAssets', 'BrandSlot']) {
 	});
 }
 
-test('BrandAssets keeps the brand in ?brand= with a shallow goto', () => {
-	const src = readFileSync(
-		new URL('../src/lib/admin/brand/BrandAssets.svelte', import.meta.url),
-		'utf8'
-	);
-	assert.match(src, /searchParams\.get\('brand'\)/);
-	assert.match(src, /goto\(url, \{ replace: true, shallow: true \}\)/);
+const SETTINGS = 'https://baoopn.com/admin/settings';
+const at = (href, shallowHref) => ({
+	url: new URL(href),
+	shallow: shallowHref ? { url: new URL(shallowHref) } : null
+});
+
+test('currentBrand reads page.url before any shallow goto', () => {
+	assert.equal(currentBrand(at(SETTINGS)), 'baoopn');
+	assert.equal(currentBrand(at(SETTINGS + '?brand=listening')), 'listening');
+	assert.equal(currentBrand({ url: new URL(SETTINGS + '?brand=listening') }), 'listening');
+});
+
+test('currentBrand follows page.shallow.url after a shallow goto or Back', () => {
+	// SvelteKit 3 leaves page.url alone on a shallow goto and sets page.shallow.url.
+	assert.equal(currentBrand(at(SETTINGS, SETTINGS + '?brand=listening')), 'listening');
+	assert.equal(currentBrand(at(SETTINGS + '?brand=listening', SETTINGS)), 'baoopn');
+});
+
+test('brandUrl builds from the shown URL and keeps other params', () => {
+	const p = at(SETTINGS + '?x=1', SETTINGS + '?x=1&brand=listening');
+	assert.equal(brandUrl(p, 'baoopn').href, SETTINGS + '?x=1');
+	assert.equal(brandUrl(p, 'listening').href, SETTINGS + '?x=1&brand=listening');
+	assert.equal(brandUrl(at(SETTINGS), 'listening').href, SETTINGS + '?brand=listening');
+	// A copy: the page URL is never changed in place.
+	assert.equal(p.shallow.url.href, SETTINGS + '?x=1&brand=listening');
+});
+
+test('skipsGuard skips only a shallow goto or a clean form', () => {
+	assert.equal(skipsGuard({ type: 'goto', shallow: true }, true), true);
+	assert.equal(skipsGuard({ type: 'goto', shallow: false }, true), false);
+	assert.equal(skipsGuard({ type: 'link', shallow: false }, true), false);
+	// Back onto an entry a shallow goto wrote is shallow too, and can lose edits.
+	assert.equal(skipsGuard({ type: 'popstate', shallow: true }, true), false);
+	assert.equal(skipsGuard({ type: 'leave', shallow: false }, true), false);
+	assert.equal(skipsGuard({ type: 'popstate', shallow: true }, false), true);
+	assert.equal(skipsGuard({ type: 'link', shallow: false }, false), true);
 });
