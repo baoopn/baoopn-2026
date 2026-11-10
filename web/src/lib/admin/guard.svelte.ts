@@ -8,7 +8,8 @@ import { beforeNavigate } from '$app/navigation';
  */
 export function guardUnsaved(isDirty: () => boolean, message = 'Discard unsaved changes?'): void {
 	beforeNavigate((nav) => {
-		if (!isDirty()) return;
+		// A shallow goto only rewrites the URL (e.g. ?brand= on settings); the form stays.
+		if (nav.shallow || !isDirty()) return;
 		if (nav.type === 'leave') {
 			nav.cancel();
 			return;

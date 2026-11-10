@@ -559,8 +559,15 @@ export interface TopPlaylists {
 	periods: { week: TopPlaylist[]; month: TopPlaylist[]; year: TopPlaylist[] };
 }
 
-// Brand assets (GET /api/v1/brand, /api/admin/brand). Files live in the media
-// bucket under brand/<stem>.<hash16>.<ext>; the admin can replace each slot.
+// Brand assets. Two brands share one system:
+// - baoopn: GET /api/v1/brand, /api/admin/brand; settings key "brand"; files
+//   under brand/<stem>.<hash16>.<ext>.
+// - listening (listening.baoopn.com): GET /api/v1/brand/listening,
+//   /api/admin/brand/listening; settings key "brand_listening"; files under
+//   brand/listening/<stem>.<hash16>.<ext>.
+// The admin can replace each slot of either brand.
+export type BrandName = 'baoopn' | 'listening';
+
 export type BrandSlot =
 	| 'favicon_ico'
 	| 'favicon_svg'
@@ -575,8 +582,35 @@ export type BrandSlot =
 	| 'monogram_cream'
 	| 'email_logo';
 
-export interface BrandAsset {
-	slot: BrandSlot;
+type ListeningIconName =
+	| 'headphones'
+	| 'now_playing'
+	| 'now_playing_static'
+	| 'paused'
+	| 'playlist'
+	| 'track';
+
+export type ListeningBrandSlot =
+	| 'favicon_ico'
+	| 'favicon_svg'
+	| 'apple_touch_icon'
+	| 'favicon_16'
+	| 'favicon_32'
+	| 'favicon_48'
+	| 'icon_192'
+	| 'icon_512'
+	| 'icon_maskable_512'
+	| `mark_${'primary' | 'inverse' | 'navy' | 'cream'}`
+	| `wordmark_${'primary' | 'inverse' | 'navy' | 'cream'}`
+	| `icon_${ListeningIconName}_${'navy' | 'cream'}`
+	| 'og_image'
+	| 'email_logo';
+
+/** Display group of a slot on the admin page. */
+export type BrandGroup = 'favicons' | 'logos' | 'icons' | 'social' | 'email';
+
+export interface BrandAsset<S extends string = BrandSlot> {
+	slot: S;
 	url: string;
 	content_type: string;
 	width: number;
@@ -584,13 +618,17 @@ export interface BrandAsset {
 	custom: boolean;
 }
 
-export interface Brand {
-	assets: Record<BrandSlot, BrandAsset>;
+export interface Brand<S extends string = BrandSlot> {
+	assets: Record<S, BrandAsset<S>>;
 }
 
-export interface AdminBrandAsset extends BrandAsset {
+export type ListeningBrand = Brand<ListeningBrandSlot>;
+
+export interface AdminBrandAsset<S extends string = BrandSlot | ListeningBrandSlot>
+	extends BrandAsset<S> {
 	label: string;
-	kind: 'icon' | 'logo';
+	kind: 'icon' | 'logo' | 'image';
+	group: BrandGroup;
 	size_bytes: number;
 	/** Uploaded filename; "" for the default. */
 	original: string;
