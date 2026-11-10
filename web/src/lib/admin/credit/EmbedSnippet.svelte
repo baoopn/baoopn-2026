@@ -1,20 +1,44 @@
 <script lang="ts">
 	import { Copy } from '@lucide/svelte';
+	import type { CreditLogoKind } from '#lib/api/types.js';
+	import Segmented from '../components/Segmented.svelte';
 	import { toasts } from '../toast.svelte';
 	import { snippet } from './rules.js';
 
 	let {
 		endpoint,
-		logoUrl
+		logoUrl,
+		defaultLogo
 	}: {
 		endpoint: string;
 		/** One of the logo URLs, to name its host in the CSP note. */
 		logoUrl: string;
+		/** The variant the switch starts on. */
+		defaultLogo: CreditLogoKind;
 	} = $props();
 
-	const code = $derived(snippet(endpoint));
+	const logoOptions: { value: CreditLogoKind; label: string }[] = [
+		{ value: 'wordmark', label: 'Wordmark' },
+		{ value: 'mark', label: 'Mark' }
+	];
+
+	/** null until the admin picks one, so the switch follows the default logo. */
+	let picked = $state<CreditLogoKind | null>(null);
+	const kind = $derived(picked ?? defaultLogo);
+	const code = $derived(snippet(withLogo(endpoint, kind)));
 	const apiOrigin = $derived(originOf(endpoint));
 	const logoOrigin = $derived(originOf(logoUrl));
+
+	/** The endpoint with ?logo=<kind>, so the site always gets this variant. */
+	function withLogo(u: string, logo: CreditLogoKind): string {
+		try {
+			const url = new URL(u);
+			url.searchParams.set('logo', logo);
+			return url.href;
+		} catch {
+			return `${u}?logo=${logo}`;
+		}
+	}
 
 	function originOf(u: string): string {
 		try {
@@ -44,6 +68,17 @@
 			<Copy class="size-4" aria-hidden="true" />
 			Copy
 		</button>
+	</div>
+
+	<div>
+		<p class="field-label">Logo</p>
+		<Segmented
+			options={logoOptions}
+			value={kind}
+			label="Snippet logo"
+			onchange={(v) => (picked = v)}
+		/>
+		<p class="hint">The snippet asks for this variant with ?logo={kind}.</p>
 	</div>
 
 	<!-- Focusable so keyboard users can scroll the snippet. -->

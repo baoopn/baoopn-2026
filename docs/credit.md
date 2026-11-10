@@ -1,10 +1,27 @@
 # Credit line for client sites
 
-Client sites built by baoopn can show a small credit in their footer: a line of
-text and the baoopn logo, linked to baoopn.com. The site loads the current
-credit from `GET https://baoopn.com/api/v1/credit`, so a change to the text,
-link or brand logo reaches every client site on its own.
+Client sites built by baoopn can show a small credit in their footer. The line
+has three parts: a prefix, the baoopn logo, and a suffix. The logo links to
+baoopn.com, and the suffix sits inside that link, next to the logo. For
+example: "Designed & built by [logo]" or "by [logo] baoopn". The site loads the
+current credit from `GET https://baoopn.com/api/v1/credit`, so a change to the
+text, link or brand logo reaches every client site on its own.
 [api.md](api.md#credit) lists the fields and the CORS rules.
+
+## Logo variants
+
+The credit has two variants, **Wordmark** and **Mark**. The admin page sets
+each one on its own card:
+
+- **Prefix**: the text before the logo, up to 80 characters on one line. It
+  can be empty.
+- **Style**: **Color** shows the filled tile. **Mono** shows the glyph only,
+  navy on light pages and cream on dark ones.
+- **Suffix**: the text after the logo, up to 80 characters on one line. It can
+  be empty.
+
+Each card shows the line on a light and a dark background as you type.
+**Default logo** picks the variant a site gets when it does not ask for one.
 
 ## Add a client site
 
@@ -51,10 +68,12 @@ snippet with a **Copy** button.
 		link.href = data.url;
 		link.rel = 'noopener';
 		link.append(picture);
+		if (data.suffix) link.append(document.createTextNode(' ' + data.suffix));
 		const line = document.createElement('p');
 		line.id = 'baoopn-credit';
 		line.className = 'baoopn-credit';
-		line.append(document.createTextNode(data.text + ' '), link);
+		if (data.prefix) line.append(document.createTextNode(data.prefix + ' '));
+		line.append(link);
 		fallback.replaceWith(line);
 	} catch {
 		// Keep the static line.
@@ -63,7 +82,8 @@ snippet with a **Copy** button.
 ```
 
 The first line works without JavaScript. The script fetches the credit and
-swaps in the logo. It builds every element with DOM methods and never parses
+swaps in the prefix, logo and suffix. An empty prefix or suffix adds no text.
+It builds every element with DOM methods and never parses
 HTML from the response. If the request fails for any reason, the static line
 stays.
 
@@ -84,10 +104,17 @@ and both hosts:
 
 ## Pick the logo for one site
 
-The admin page sets the logo for every client site. A site that needs the
-other one can ask for it with `?logo=mark` (the monogram, with a light and an
-inverse file) or `?logo=wordmark`. Any other value is ignored and the stored
-logo is used.
+A site asks for one variant by adding `?logo=wordmark` or `?logo=mark` to the
+fetch URL in the snippet, for example
+`fetch("https://baoopn.com/api/v1/credit?logo=mark")`. It then gets that
+variant's prefix, suffix and style. Without `?logo=`, or with any other value
+(the match is exact and lowercase), it gets the default variant. The
+**Wordmark** and **Mark** switch above the snippet on the admin page adds the
+query for you.
+
+The response still has a `text` field with the same value as `prefix`, so
+snippets copied before the prefix and suffix existed keep working. `text` is
+deprecated; new code reads `prefix` and `suffix`.
 
 ## Caching and limits
 
