@@ -1,11 +1,4 @@
-<p align="center">
-  <a href="https://baoopn.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://baoopn.com/api/v1/brand/wordmark_inverse">
-      <img src="https://baoopn.com/api/v1/brand/wordmark_primary" alt="baoopn" width="200">
-    </picture>
-  </a>
-</p>
+[![baoopn](docs/brand-kit/logo/baoopn-wordmark-primary.svg)](https://baoopn.com)
 
 # baoopn-2026
 
