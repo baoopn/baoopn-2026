@@ -98,6 +98,11 @@ above the snippet:
 - **Vue**: `BaoopnCredit.vue`, a Vue 3 component with `<script setup>`.
 - **Svelte**: `BaoopnCredit.svelte`, a Svelte 5 component with runes.
 
+All three are written in TypeScript. For a plain JavaScript React app, rename
+the file to `BaoopnCredit.jsx` and remove the types. Next.js lint may warn about
+the `<img>` tag (`@next/next/no-img-element`). The tag sits inside a
+`<picture>` for the dark logo, so keep it.
+
 Save the code under that file name and render the component in the site's
 footer. Each one shows the same static line until the credit loads, keeps it
 if the request fails, and accepts only an `https` link. The framework escapes

@@ -130,9 +130,12 @@
 				Text after the logo, inside the link. Leave it empty for no text.
 			</p>
 		{/if}
-		<p class="hint">
-			Sites that use an older snippet do not show the suffix. Copy the new snippet below.
-		</p>
+		{#if variant.suffix.trim()}
+			<p class="hint">
+				Sites that use an older snippet do not show the suffix. Copy the new code from Embed
+				snippet.
+			</p>
+		{/if}
 	</div>
 
 	<CreditPreview {variant} {logo} {url} {alt} />
