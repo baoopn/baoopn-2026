@@ -7,10 +7,15 @@ import {
 	STYLES,
 	TEXT_MAX,
 	fieldFromMessage,
+	FRAMEWORKS,
 	normalizeOrigin,
+	reactSnippet,
 	snippet,
-	validateForm
+	svelteSnippet,
+	validateForm,
+	vueSnippet
 } from '../src/lib/admin/credit/rules.js';
+import { compile } from 'svelte/compiler';
 
 // Same table as internal/credit/validate_test.go.
 const ACCEPT = [
@@ -253,4 +258,71 @@ test('the snippet script is a valid module', async () => {
 	// Compile only: an async function accepts the same top-level await.
 	const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
 	assert.doesNotThrow(() => new AsyncFunction(body));
+});
+
+const BUILDERS = { react: reactSnippet, vue: vueSnippet, svelte: svelteSnippet };
+
+for (const [name, build] of Object.entries(BUILDERS)) {
+	test(`${name} snippet embeds the endpoint as an escaped JS string`, () => {
+		const plain = 'https://baoopn.com/api/v1/credit?logo=mark&color=mono';
+		assert.ok(build(plain).includes(`const ENDPOINT = ${JSON.stringify(plain)};`));
+		const hostile = 'https://x.com/"</script><img src=x>';
+		const s = build(hostile);
+		assert.ok(s.includes('const ENDPOINT = "https://x.com/\\"\\u003c/script>\\u003cimg src=x>";'));
+		assert.ok(!s.includes(hostile));
+		// The only closing script tag is the component's own (none in React).
+		assert.equal(s.match(/<\/script>/g)?.length ?? 0, name === 'react' ? 0 : 1);
+	});
+
+	test(`${name} snippet uses framework escaping only`, () => {
+		const s = build('https://baoopn.com/api/v1/credit');
+		assert.ok(
+			!/dangerouslySetInnerHTML|v-html|\{@html|innerHTML|outerHTML|insertAdjacentHTML/.test(s)
+		);
+		assert.ok(s.includes('if (!/^https:\\/\\//.test(data.url)'));
+		assert.ok(s.includes('prefers-color-scheme: dark'));
+		assert.ok(s.includes('Designed &amp; built by <a href="https://baoopn.com">baoopn</a>'));
+		assert.ok(s.includes('baoopn-credit'));
+		assert.ok(s.includes('rel="noopener"'));
+		assert.ok(s.includes('Math.round((20 * img.width) / (img.height || 1))'));
+		assert.ok(s.includes('.abort()'));
+	});
+}
+
+test('react snippet is a client component with hooks', () => {
+	const s = reactSnippet('https://baoopn.com/api/v1/credit');
+	assert.ok(s.startsWith("'use client';\n"));
+	assert.ok(s.includes("import { useEffect, useState } from 'react';"));
+	assert.ok(s.includes('export default function BaoopnCredit()'));
+	assert.ok(s.includes('}, []);'));
+});
+
+test('vue snippet is a script setup SFC', () => {
+	const s = vueSnippet('https://baoopn.com/api/v1/credit');
+	assert.ok(s.startsWith('<script setup lang="ts">'));
+	assert.ok(s.includes("import { onMounted, onUnmounted, ref } from 'vue';"));
+	assert.ok(s.includes('<template>') && s.trimEnd().endsWith('</template>'));
+});
+
+test('svelte snippet compiles with Svelte 5 runes', () => {
+	const s = svelteSnippet('https://x.com/"</script>');
+	assert.ok(s.includes('$state.raw'));
+	const out = compile(s, { filename: 'BaoopnCredit.svelte', runes: true });
+	assert.ok(out.js.code.length > 0);
+	assert.deepEqual(
+		out.warnings.map((w) => w.code),
+		[]
+	);
+	const ssr = compile(s, { filename: 'BaoopnCredit.svelte', generate: 'server' });
+	assert.ok(ssr.js.code.includes('Designed &amp; built by'));
+});
+
+test('FRAMEWORKS names each file and keeps HTML as the plain snippet', () => {
+	assert.deepEqual(Object.fromEntries(Object.entries(FRAMEWORKS).map(([k, v]) => [k, v.file])), {
+		html: 'credit.html',
+		react: 'BaoopnCredit.tsx',
+		vue: 'BaoopnCredit.vue',
+		svelte: 'BaoopnCredit.svelte'
+	});
+	assert.equal(FRAMEWORKS.html.build, snippet);
 });

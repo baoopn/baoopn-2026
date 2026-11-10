@@ -87,6 +87,26 @@ It builds every element with DOM methods and never parses
 HTML from the response. If the request fails for any reason, the static line
 stays.
 
+## Framework components
+
+The admin page also gives the credit as a component for sites built with a
+framework. Pick **React**, **Vue** or **Svelte** in the **Framework** switch
+above the snippet:
+
+- **React**: `BaoopnCredit.tsx`, a function component for React 18 or 19. It
+  starts with `'use client';`, so it also works in the Next.js App Router.
+- **Vue**: `BaoopnCredit.vue`, a Vue 3 component with `<script setup>`.
+- **Svelte**: `BaoopnCredit.svelte`, a Svelte 5 component with runes.
+
+Save the code under that file name and render the component in the site's
+footer. Each one shows the same static line until the credit loads, keeps it
+if the request fails, and accepts only an `https` link. The framework escapes
+all text, so no component renders HTML from the response. The **Logo** and
+**Style** switches add the same `?logo=` and `?color=` query to every
+framework, so copy the code from the admin page after you pick them. The
+`connect-src` and `img-src` rules below apply to the components too. They need
+no inline script, so `script-src` does not change.
+
 ## Content Security Policy
 
 If the client site sets a Content Security Policy, it must allow the script
@@ -122,8 +142,10 @@ and never changes the saved settings. `logo.style` in the response names the
 style the site got. On the admin page, the **Style** switch above the snippet
 adds `&color=` for **Color** or **Mono**, and adds nothing for **Saved**.
 
-The response still has a `text` field with the same value as `prefix`, so
-snippets copied before the prefix and suffix existed keep working. `text` is
+The response still has a `text` field with the same value as `prefix`. A
+snippet copied before the prefix and suffix existed reads `text`, so it still
+shows the prefix and the logo, but it never shows the suffix. To show a suffix,
+a site needs the new snippet or one of the framework components. `text` is
 deprecated; new code reads `prefix` and `suffix`.
 
 ## Caching and limits

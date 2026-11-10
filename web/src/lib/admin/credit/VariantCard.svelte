@@ -130,6 +130,9 @@
 				Text after the logo, inside the link. Leave it empty for no text.
 			</p>
 		{/if}
+		<p class="hint">
+			Sites that use an older snippet do not show the suffix. Copy the new snippet below.
+		</p>
 	</div>
 
 	<CreditPreview {variant} {logo} {url} {alt} />
