@@ -13,6 +13,7 @@
 		published,
 		modified,
 		schema,
+		imageAlt,
 		noindex = false
 	}: {
 		/** Page title; the site name is appended (omit for the home page). */
@@ -26,6 +27,8 @@
 		modified?: string;
 		/** JSON-LD object(s). */
 		schema?: unknown;
+		/** Alt text for the share image; defaults to the title. */
+		imageAlt?: string;
 		noindex?: boolean;
 	} = $props();
 
@@ -40,14 +43,16 @@
 	const img = $derived(
 		absolute(origin, image) ?? absolute(origin, profile.seo.og_image) ?? absolute(origin, profile.avatar_url)
 	);
+	const alt = $derived(imageAlt || title || siteName);
 </script>
 
 <svelte:head>
 	<title>{fullTitle}</title>
 	<meta name="description" content={desc} />
 	<link rel="canonical" href={canonical} />
-	{#if noindex}<meta name="robots" content="noindex" />{/if}
-	<meta property="og:site_name" content={siteName} />
+	<meta name="robots" content={noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large'} />
+	<!-- The short name, matching the WebSite JSON-LD name on the home page. -->
+	<meta property="og:site_name" content={profile.name} />
 	<meta property="og:type" content={type} />
 	<meta property="og:title" content={title ?? siteName} />
 	<meta property="og:description" content={desc} />
@@ -55,7 +60,9 @@
 	<meta property="og:locale" content="en_US" />
 	{#if img}
 		<meta property="og:image" content={img} />
+		<meta property="og:image:alt" content={alt} />
 		<meta name="twitter:image" content={img} />
+		<meta name="twitter:image:alt" content={alt} />
 	{/if}
 	{#if published}<meta property="article:published_time" content={published} />{/if}
 	{#if modified}<meta property="article:modified_time" content={modified} />{/if}

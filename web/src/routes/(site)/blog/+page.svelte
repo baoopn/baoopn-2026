@@ -8,6 +8,8 @@
 	import { reveal } from '#lib/site/motion.js';
 	import { CATEGORIES, categoryLabel } from '#lib/site/post.js';
 	import type { PostCategory } from '#lib/api/types.js';
+	import { page } from '$app/state';
+	import { blogNode, graph } from '#lib/site/seo.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -32,6 +34,14 @@
 	const seoTitle = $derived(
 		[data.tag ? heading : '', catLabel ? `${catLabel} posts` : ''].filter(Boolean).join(' · ') || 'Blog'
 	);
+	const description = $derived(
+		data.category === 'life'
+			? "Life posts: notes from Bao Nguyen's life outside of code."
+			: "Notes on building software: case studies, how-tos and lessons from Bao Nguyen's projects."
+	);
+	// Tag filters fold into the unfiltered list; category and page stay, so
+	// posts that only show on page 2+ keep an indexable, self-canonical page.
+	const canonicalPath = $derived(data.tag ? href({ tag: '', page: 1 }) : href({ page: data.page }));
 	const emptyText = $derived(
 		data.tag
 			? 'No posts match this filter.'
@@ -42,12 +52,13 @@
 </script>
 
 <Seo
-	title={seoTitle}
-	description={data.category === 'life'
-		? "Life posts: notes from Bao Nguyen's life outside of code."
-		: "Notes on building software: case studies, how-tos and lessons from Bao Nguyen's projects."}
-	path={data.category ? `/blog?category=${data.category}` : '/blog'}
+	title={data.page > 1 ? `${seoTitle} · Page ${data.page}` : seoTitle}
+	description={data.page > 1 ? `Page ${data.page}. ${description}` : description}
+	path={canonicalPath}
 	noindex={data.page > 1 && !data.posts.length}
+	schema={data.category || data.tag || data.page > 1
+		? undefined
+		: graph([blogNode(page.url.origin, { name: `${data.profile.name} · Blog`, author: data.profile.name, description })])}
 />
 
 <div class="mx-auto max-w-6xl px-4 sm:px-6">

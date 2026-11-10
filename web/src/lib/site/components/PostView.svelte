@@ -7,6 +7,7 @@
 	import { absolute, count, dateLong, pad2, safeImage } from '#lib/site/format.js';
 	import { categoryChip, categoryHref, categoryLabel, partHref, partLabel } from '#lib/site/post.js';
 	import type { PostDetail } from '#lib/api/types.js';
+	import { blogPostingNode, breadcrumbs, graph } from '#lib/site/seo.js';
 
 	let { post, author }: { post: PostDetail; author: string } = $props();
 
@@ -24,36 +25,55 @@
 	const path = $derived(partHref(post.slug, part.no));
 	const title = $derived(first ? post.title : `${partLabel(part)} · ${post.title}`);
 
+	// Each part is its own page, so it gets its own description and schema URL.
+	const description = $derived(
+		first ? post.excerpt : `Part ${part.no} of ${total}: ${partLabel(part)}. ${post.excerpt}`
+	);
+
 	const schema = $derived.by(() => {
 		const origin = page.url.origin;
-		const url = origin + partHref(post.slug, 1);
-		return {
-			'@context': 'https://schema.org',
-			'@type': 'BlogPosting',
-			headline: post.title,
-			description: post.excerpt,
-			datePublished: post.published_at,
-			dateModified: post.updated_at || post.published_at,
-			image: absolute(origin, post.cover_url),
-			keywords: post.tags.join(', ') || undefined,
-			url,
-			mainEntityOfPage: url,
-			author: { '@type': 'Person', name: author, url: origin + '/' },
-			hasPart: multi
-				? post.parts.map((p) => ({
-						'@type': 'WebPageElement',
-						position: p.no,
-						name: partLabel(p),
-						url: origin + partHref(post.slug, p.no)
-					}))
-				: undefined
-		};
+		const profile = page.data.profile;
+		const image =
+			absolute(origin, post.cover_url) ??
+			absolute(origin, profile?.seo?.og_image) ??
+			absolute(origin, profile?.avatar_url);
+		const url = origin + path;
+		return graph([
+			blogPostingNode(origin, {
+				url,
+				headline: title,
+				description,
+				image,
+				published: post.published_at,
+				modified: post.updated_at,
+				keywords: post.tags,
+				author,
+				series: first ? undefined : { url: origin + partHref(post.slug, 1), headline: post.title },
+				parts:
+					multi && first
+						? post.parts.map((p) => ({
+								position: p.no,
+								name: partLabel(p),
+								url: origin + partHref(post.slug, p.no)
+							}))
+						: undefined
+			}),
+			breadcrumbs(origin, [
+				['Blog', '/blog'],
+				...(first
+					? [[post.title, path] as [string, string]]
+					: [
+							[post.title, partHref(post.slug, 1)] as [string, string],
+							[partLabel(part), path] as [string, string]
+						])
+			])
+		]);
 	});
 </script>
 
 <Seo
 	{title}
-	description={post.excerpt}
+	{description}
 	image={post.cover_url}
 	type="article"
 	{path}

@@ -3,8 +3,10 @@
 	import Seo from '#lib/site/components/Seo.svelte';
 	import SocialIcon from '#lib/site/components/SocialIcon.svelte';
 	import AlbumArt from '#lib/site/components/AlbumArt.svelte';
-	import { pad2, prettyUrl, safeImage, safeUrl, yearMonth } from '#lib/site/format.js';
+	import { absolute, pad2, prettyUrl, safeImage, safeUrl, yearMonth } from '#lib/site/format.js';
 	import { reveal } from '#lib/site/motion.js';
+	import { page } from '$app/state';
+	import { graph, personNode, profilePageNode, sameAs } from '#lib/site/seo.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -18,12 +20,26 @@
 			.filter((s): s is typeof s & { href: string } => !!s.href)
 	);
 	let portraitFailed = $state(false);
+
+	const schema = $derived.by(() => {
+		const origin = page.url.origin;
+		const person = personNode(origin, {
+			name: profile.name,
+			headline: profile.headline,
+			image: absolute(origin, profile.avatar_url),
+			email: profile.email,
+			location: profile.location,
+			sameAs: sameAs(profile.socials)
+		});
+		return graph([profilePageNode(origin, person, profile.updated_at)]);
+	});
 </script>
 
 <Seo
 	title="About"
-	description={profile.seo.description || `About ${profile.name}: ${profile.headline}.`}
+	description={`About ${profile.name}, ${profile.headline}: work history, skills and favorite artists.`}
 	type="profile"
+	{schema}
 />
 
 <div class="mx-auto max-w-6xl px-4 sm:px-6">
