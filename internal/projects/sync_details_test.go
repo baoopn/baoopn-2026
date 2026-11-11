@@ -68,8 +68,7 @@ func TestAdminSyncIgnoresRequestCancel(t *testing.T) {
 		t.Fatalf("overlapping sync: %d", code)
 	}
 	close(release)
-	e.s.mu.Lock() // waits for the background sync
-	e.s.mu.Unlock()
+	waitSyncDone(t, e.s)
 	var n int
 	if err := e.m.db.QueryRow(context.Background(), `SELECT count(*) FROM projects`).Scan(&n); err != nil || n != 3 {
 		t.Fatalf("projects after background sync: %d %v", n, err)
@@ -87,10 +86,22 @@ func TestAdminSyncSlowAnswers202(t *testing.T) {
 		t.Fatalf("slow sync: %d %+v", code, out.Data)
 	}
 	close(release)
-	e.s.mu.Lock()
-	e.s.mu.Unlock()
+	waitSyncDone(t, e.s)
 	e.gh.set(func(f *fakeGitHub) { f.block = nil })
 	if res := e.sync(); res.Total != 3 {
 		t.Fatalf("fast sync %+v", res)
 	}
+}
+
+// waitSyncDone waits until no sync holds the syncer's lock.
+func waitSyncDone(t *testing.T, s *Syncer) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.mu.TryLock() {
+		if time.Now().After(deadline) {
+			t.Fatal("background sync did not finish")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.mu.Unlock()
 }
