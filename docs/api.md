@@ -2,7 +2,9 @@
 
 The TypeScript types in `web/src/lib/api/types.ts` are the source of truth for shapes.
 Envelopes: `{ "data": …, "meta"?: PageMeta }` on success, `{ "error": { "code", "message" } }`
-on failure. The browser always calls the same origin (`/api/...`); the SvelteKit server proxies
+on failure. A JSON body that does not parse (bad syntax, wrong types, unknown fields) gets 400
+`bad_request` with the fixed message "invalid JSON body"; one over 2 MiB gets 413 `too_large`.
+The browser always calls the same origin (`/api/...`); the SvelteKit server proxies
 to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Country` and
 `X-Internal-Token`.
 
