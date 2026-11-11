@@ -47,7 +47,7 @@ func verifyAPIKey(ctx context.Context, secret string) (*clerk.APIKey, error) {
 // even for a valid key that is not cached yet. A key of the wrong shape, or
 // one Clerk refused within rejectTTL, is refused without asking Clerk and
 // keeps its reservation, as does a key Clerk refuses. A key Clerk accepts,
-// and a Clerk failure (502: Clerk answered 401 or 403 to our own secret key,
+// and a Clerk failure (503: Clerk answered 401 or 403 to our own secret key,
 // 429 throttled us, 5xx, or a network error), give the reservation back and
 // are never cached as refused.
 func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, secret string) {
@@ -81,7 +81,7 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 					slog.String("clerk_trace_id", apiErr.TraceID))
 			}
 			a.log.ErrorContext(ctx, "clerk api key verification failed", attrs...)
-			httpapi.Error(w, http.StatusBadGateway, "auth_unavailable", "could not verify the user with Clerk")
+			authUnavailable(w)
 			return
 		}
 		exp, valid := a.keyUsable(k)
@@ -104,7 +104,7 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	case err != nil:
 		a.log.ErrorContext(ctx, "clerk lookup failed", slog.String("err_type", fmt.Sprintf("%T", err)),
 			slog.String("key_id", keyID))
-		httpapi.Error(w, http.StatusBadGateway, "auth_unavailable", "could not verify the user with Clerk")
+		authUnavailable(w)
 		return
 	}
 	if !a.allowed(u) {

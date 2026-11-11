@@ -135,7 +135,7 @@ Scripts can call the admin API with a Clerk user API key instead of a session to
 - Create the key in `/admin/account`, on the API keys tab. Only keys that belong to an admin work.
 - Send it as `Authorization: Bearer <key>`. The API sees the `ak_` prefix and checks the key with Clerk.
 - The API returns 401 `unauthorized` for an invalid, revoked or expired key, 403 `forbidden`
-  for a user who is not an admin, and 502 `auth_unavailable` when it cannot reach Clerk
+  for a user who is not an admin, and 503 `auth_unavailable` when it cannot reach Clerk
   or Clerk rejects the server's own secret key.
 - The API caches a checked key for up to 60 s, so a revoked key can keep working for up to 60 s.
 - A key not shaped like `ak_…` is refused without asking Clerk. A refused key is remembered for

@@ -116,6 +116,14 @@ func New(c Config, log *slog.Logger) *Authenticator {
 	return a
 }
 
+// authUnavailable answers when the API cannot check the user with Clerk.
+// It is a JSON 503, not a 502: the proxy in front of the apps swaps every
+// 502 and 504 body for an HTML error page, so the admin app would never see
+// the auth_unavailable code.
+func authUnavailable(w http.ResponseWriter) {
+	httpapi.Error(w, http.StatusServiceUnavailable, "auth_unavailable", "could not verify the user with Clerk")
+}
+
 // Middleware requires a valid session token or user API key for an
 // allow-listed user.
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
@@ -152,7 +160,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			u = User{ID: claims.Subject, Role: tc.Role}
 		default:
 			a.log.ErrorContext(r.Context(), "clerk lookup failed", logging.Err(err))
-			httpapi.Error(w, http.StatusBadGateway, "auth_unavailable", "could not verify the user with Clerk")
+			authUnavailable(w)
 			return
 		}
 		if !a.allowed(u) {

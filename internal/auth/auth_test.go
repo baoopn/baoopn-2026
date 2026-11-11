@@ -3,6 +3,9 @@ package auth
 import (
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +50,21 @@ func TestAllowed(t *testing.T) {
 		if got := a.allowed(tc.u); got != tc.want {
 			t.Errorf("%s: allowed = %v", name, got)
 		}
+	}
+}
+
+// The Clerk-failure answer must stay a JSON 503: the proxy replaces 502 and
+// 504 bodies with HTML, which would hide the auth_unavailable code.
+func TestAuthUnavailable(t *testing.T) {
+	rec := httptest.NewRecorder()
+	authUnavailable(rec)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("content type = %q, want JSON", ct)
+	}
+	if !strings.Contains(rec.Body.String(), `"auth_unavailable"`) {
+		t.Fatalf("body = %s, want auth_unavailable", rec.Body.String())
 	}
 }

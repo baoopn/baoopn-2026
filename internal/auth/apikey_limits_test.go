@@ -192,7 +192,7 @@ func TestAPIKeyClerkOutageNotCachedOrCounted(t *testing.T) {
 			h.key = func(string) (*clerk.APIKey, error) { return nil, err }
 			n := keyFailuresPerMinute + 5
 			for i := range n {
-				if rec := h.doFrom(t, "10.0.0.1:1", "Bearer "+secret); rec.Code != http.StatusBadGateway {
+				if rec := h.doFrom(t, "10.0.0.1:1", "Bearer "+secret); rec.Code != http.StatusServiceUnavailable {
 					t.Fatalf("call %d: %d", i, rec.Code)
 				}
 			}
@@ -316,7 +316,7 @@ func TestAPIKeyValidAndOutageRefunded(t *testing.T) {
 	}
 	h.key = func(string) (*clerk.APIKey, error) { return nil, &clerk.APIErrorResponse{HTTPStatusCode: 503} }
 	for i := range keyFailuresPerMinute * 3 {
-		if rec := h.doFrom(t, "10.0.0.1:1", fmt.Sprintf("Bearer ak_live_out%02d_0123456789abcdef", i)); rec.Code != http.StatusBadGateway {
+		if rec := h.doFrom(t, "10.0.0.1:1", fmt.Sprintf("Bearer ak_live_out%02d_0123456789abcdef", i)); rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("outage %d: %d", i, rec.Code)
 		}
 	}
