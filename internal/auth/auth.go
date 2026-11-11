@@ -46,6 +46,22 @@ var errNoVerifiedEmail = errors.New("user has no verified email address")
 // forbidden, never a claims fallback or allow-list grant.
 var errBlocked = errors.New("user is banned or locked")
 
+// errUserGone means Clerk has no such user (404: deleted). The token is
+// for an account that no longer exists: 401, never a claims fallback.
+var errUserGone = errors.New("clerk user not found")
+
+// clerkUnreachable reports whether a lookup error means Clerk could not
+// answer (network error, 5xx, 429), the only case where the token's role
+// claim may stand in. Any other Clerk answer (e.g. 401/403 to our own
+// secret key, 400) is a hard failure.
+func clerkUnreachable(err error) bool {
+	var apiErr *clerk.APIErrorResponse
+	if errors.As(err, &apiErr) {
+		return apiErr.HTTPStatusCode == http.StatusTooManyRequests || apiErr.HTTPStatusCode >= 500
+	}
+	return true
+}
+
 // UserFrom returns the admin stored in the request context.
 func UserFrom(ctx context.Context) (User, bool) {
 	u, ok := ctx.Value(ctxKey{}).(User)
@@ -185,7 +201,10 @@ func (a *Authenticator) sessionUser(w http.ResponseWriter, r *http.Request, subj
 		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account is blocked")
 	case errors.Is(err, errNoVerifiedEmail):
 		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account has no verified email")
-	case claimRole != "":
+	case errors.Is(err, errUserGone):
+		a.log.WarnContext(r.Context(), "session for a deleted clerk user", slog.String("user", subject))
+		httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "sign in required")
+	case claimRole != "" && clerkUnreachable(err):
 		// Clerk's Backend API is unreachable. The verified token's role
 		// claim (from public_metadata, which users cannot edit) still
 		// authorizes; its email claim is not trusted (may be unverified).
@@ -237,6 +256,10 @@ func (a *Authenticator) lookup(ctx context.Context, id string) (User, error) {
 
 	cu, err := a.fetchUser(ctx, id)
 	if err != nil {
+		var apiErr *clerk.APIErrorResponse
+		if errors.As(err, &apiErr) && apiErr.HTTPStatusCode == http.StatusNotFound {
+			return User{}, errUserGone
+		}
 		return User{}, err
 	}
 	u := User{ID: cu.ID}

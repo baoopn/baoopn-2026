@@ -17,6 +17,12 @@ func verifiedUser(id string, meta string) *clerk.User {
 	}}}
 }
 
+func clerkStatus(code int) func() (*clerk.User, error) {
+	return func() (*clerk.User, error) {
+		return nil, &clerk.APIErrorResponse{HTTPStatusCode: code}
+	}
+}
+
 func TestSessionUser(t *testing.T) {
 	for name, tc := range map[string]struct {
 		fetch      func() (*clerk.User, error)
@@ -43,6 +49,22 @@ func TestSessionUser(t *testing.T) {
 		},
 		"clerk down, claim fallback": {
 			fetch:     func() (*clerk.User, error) { return nil, errors.New("dial tcp: refused") },
+			claimRole: "admin", wantOK: true, wantRole: "admin",
+		},
+		"deleted user (404) with admin claim": {
+			fetch:     clerkStatus(http.StatusNotFound),
+			claimRole: "admin", wantStatus: http.StatusUnauthorized,
+		},
+		"clerk refuses our secret (401), claim not used": {
+			fetch:     clerkStatus(http.StatusUnauthorized),
+			claimRole: "admin", wantStatus: http.StatusServiceUnavailable,
+		},
+		"clerk 5xx, claim fallback": {
+			fetch:     clerkStatus(http.StatusBadGateway),
+			claimRole: "admin", wantOK: true, wantRole: "admin",
+		},
+		"clerk 429, claim fallback": {
+			fetch:     clerkStatus(http.StatusTooManyRequests),
 			claimRole: "admin", wantOK: true, wantRole: "admin",
 		},
 		"clerk down, no claim": {
@@ -82,5 +104,15 @@ func TestAPIKeyBannedUserForbidden(t *testing.T) {
 	}
 	if code, _ := errBody(t, rec); code != "forbidden" {
 		t.Fatalf("code = %q", code)
+	}
+}
+
+// An API key whose Clerk user was deleted is refused with 401.
+func TestAPIKeyDeletedUserUnauthorized(t *testing.T) {
+	h := newKeyHarness(t)
+	h.a.fetchUser = func(context.Context, string) (*clerk.User, error) { return clerkStatus(http.StatusNotFound)() }
+	rec, seen := h.do(t, "Bearer ak_live_x_0123456789abcdef")
+	if rec.Code != http.StatusUnauthorized || seen != nil {
+		t.Fatalf("status %d, user %v", rec.Code, seen)
 	}
 }

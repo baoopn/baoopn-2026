@@ -106,6 +106,10 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	case errors.Is(err, errNoVerifiedEmail):
 		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account has no verified email")
 		return
+	case errors.Is(err, errUserGone):
+		a.log.WarnContext(ctx, "api key of a deleted clerk user", slog.String("user", userID), slog.String("key_id", keyID))
+		httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
+		return
 	case err != nil:
 		a.log.ErrorContext(ctx, "clerk lookup failed", slog.String("err_type", fmt.Sprintf("%T", err)),
 			slog.String("key_id", keyID))
