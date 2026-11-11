@@ -99,11 +99,25 @@ jobs:
           set -euo pipefail
           # Builds the Go API and the SvelteKit app on the server: allow 20 min.
           for i in $(seq 1 120); do
-            status=$(curl -fsS "$COOLIFY_URL/api/v1/deployments/$DEPLOYMENT" \
-              -H "Authorization: Bearer $COOLIFY_TOKEN" -A github-actions | jq -r 'if type == "array" then .[0].status else .status end')
+            resp=$(curl -fsS "$COOLIFY_URL/api/v1/deployments/$DEPLOYMENT" \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" -A github-actions | jq -c 'if type == "array" then .[0] else . end')
+            status=$(echo "$resp" | jq -r '.status')
             echo "[$i] status=$status"
             case "$status" in
-              finished) exit 0 ;;
+              finished)
+                # Coolify records the commit it built (ApplicationDeploymentQueue.commit).
+                # It may be "HEAD" or empty when it did not resolve one.
+                built=$(echo "$resp" | jq -r '.commit // ""')
+                if [[ "$built" =~ ^[0-9a-f]{40}$ ]]; then
+                  if [ "$built" != "${{ github.sha }}" ]; then
+                    echo "::warning::Coolify built $built, not the tested commit ${{ github.sha }}."
+                  else
+                    echo "Coolify built the tested commit."
+                  fi
+                else
+                  echo "::notice::Coolify did not report the commit it built ('$built')."
+                fi
+                exit 0 ;;
               failed|cancelled*) echo "::error::Coolify deployment $status"; exit 1 ;;
             esac
             sleep 10
