@@ -75,7 +75,7 @@ func (s *Store) handleTestEmail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The mailer's errors carry an SMTP code at most, never the server's words.
 		s.d.Log.Warn("sitesettings: test email failed", logging.Err(err))
-		httpapi.Error(w, http.StatusBadGateway, "mail_failed", "sending failed: "+err.Error())
+		httpapi.Error(w, http.StatusServiceUnavailable, "mail_failed", "sending failed: "+err.Error())
 		return
 	}
 	httpapi.JSON(w, http.StatusOK, map[string]string{"sent_to": to})

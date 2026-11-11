@@ -363,7 +363,7 @@
 					<p class="text-sm text-ink-soft">Nothing to preview yet.</p>
 				{:else}
 					<div class="prose">
-						<!-- eslint-disable-next-line svelte/no-at-html-tags -- HTML rendered and sanitised by our API -->
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -- rendered by our API from admin-authored Markdown; raw HTML is kept as-is (trusted), not sanitized -->
 						{@html html}
 					</div>
 				{/if}

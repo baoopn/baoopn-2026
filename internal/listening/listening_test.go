@@ -242,7 +242,7 @@ func TestTopPlaylistsStale(t *testing.T) {
 		t.Fatalf("stale %d %s", rec.Code, rec.Body)
 	}
 	*now = now.Add(10 * ttlTop)
-	if rec := get(r, "/listening/top-playlists"); rec.Code != http.StatusBadGateway {
+	if rec := get(r, "/listening/top-playlists"); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expired %d", rec.Code)
 	}
 }
@@ -276,17 +276,17 @@ func TestTTLAndStale(t *testing.T) {
 		t.Fatalf("not refreshed after TTL: %d calls", u.count("/api/v1/now-playing"))
 	}
 
-	// Upstream down: stale within 10× TTL, then 502.
+	// Upstream down: stale within 10× TTL, then 503.
 	u.set(func(u *upstream) { u.fail = true })
 	*now = now.Add(30 * time.Second)
 	if rec := get(r, "/listening/now-playing"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"is_playing":true`) {
 		t.Fatalf("stale %d %s", rec.Code, rec.Body)
 	}
 	*now = now.Add(30 * time.Second)
-	if rec := get(r, "/listening/now-playing"); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "upstream_unavailable") {
+	if rec := get(r, "/listening/now-playing"); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "upstream_unavailable") {
 		t.Fatalf("expired stale %d %s", rec.Code, rec.Body)
 	}
-	if rec := get(r, "/listening/top-artists"); rec.Code != http.StatusBadGateway {
+	if rec := get(r, "/listening/top-artists"); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("cold failure %d", rec.Code)
 	}
 }

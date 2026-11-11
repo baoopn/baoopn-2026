@@ -105,6 +105,7 @@
 	function status(c: OrphanCandidate): string {
 		if (c.blocked === 'disabled') return 'Cleanup off';
 		if (c.blocked === 'grace') return 'Waits until ' + dateTime(c.eligible_at);
+		if (c.blocked === 'truncated') return 'Kept: bucket listing was truncated';
 		if (inDraft(c)) return 'In a local draft';
 		if (c.kind === 'local_copy') return 'Tick to remove';
 		return 'Can be removed';

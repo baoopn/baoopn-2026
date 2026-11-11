@@ -15,6 +15,13 @@ The web server is the only public service. It proxies `/api/*` and `/media/*` to
 `http://api:8080` and adds the client IP/country with `INTERNAL_API_TOKEN`.
 Coolify builds every image on the server from the repository, so no registry is used.
 
+The api, web and mediaworker containers run with `no-new-privileges`, all Linux
+capabilities dropped and a memory limit (api and web 512 MB, api `GOMEMLIMIT` 400MiB; mediaworker
+`MEDIAWORKER_MEM_LIMIT`, default 1 GB). Postgres, api, web, mediaworker and
+backup restart `unless-stopped`. If the API is down, the web proxy answers
+`/api/*` and `/media/*` with a JSON 503 (`upstream_unavailable`), not a 502,
+because Traefik's error pages rewrite 502 bodies.
+
 Uploaded media live in the Cloudflare R2 bucket `baoopn-portfolio`, served from
 its custom domain `https://media.baoopn.com` (see *Media bucket* below). Without
 the S3 variables the api keeps them on the `baoopn-media` volume.
@@ -22,7 +29,8 @@ the S3 variables the api keeps them on the `baoopn-media` volume.
 `docker-compose.yml` is for local development: Postgres and RustFS (an
 S3-compatible stand-in for R2; a one-shot `rustfs-init` creates the private
 `baoopn-dev` bucket) by default, or the whole stack with
-`docker compose --profile full up --build` (site on :3000).
+`docker compose --profile full up --build` (site on :3000). Its published ports
+bind to 127.0.0.1 only.
 
 ## CI/CD (GitHub Actions)
 
@@ -40,6 +48,9 @@ S3-compatible stand-in for R2; a one-shot `rustfs-init` creates the private
   Coolify to deploy the resource and waits until the deployment finishes. A
   commit on `main` that did not come from a merged PR is tested but never deployed.
   The deploy runs only if `main` still points at the tested commit; otherwise the newer run deploys.
+  When Coolify reports the commit it built and that is not the tested commit, the job fails,
+  unless `main` moved meanwhile and Coolify built the new `main` head: that commit passed
+  PR CI and its own run follows, so the job only posts a notice.
   The deploy job is **skipped while `vars.COOLIFY_RESOURCE_UUID` is unset**, so
   nothing is published until you decide to go live.
 

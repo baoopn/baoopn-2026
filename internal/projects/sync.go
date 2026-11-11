@@ -3,6 +3,7 @@ package projects
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -299,32 +300,55 @@ func (s *Syncer) details(ctx context.Context, only *int64) error {
 	if err != nil {
 		return err
 	}
+	var firstErr error
+	failed := 0
 	for _, t := range todo {
 		if s.gh.lowOnQuota() {
 			s.log.Info("github sync: rate limit low, deferring details", slog.Int("left", len(todo)))
-			return nil
+			break
 		}
-		readme, err := s.gh.readme(ctx, t.full)
-		if err != nil {
+		err := s.detailOne(ctx, t.id, t.full, t.branch)
+		if err == nil {
+			continue
+		}
+		var ge *GitHubError
+		if ctx.Err() != nil || (errors.As(err, &ge) && ge.RateLimited) {
+			// Nothing later can succeed either.
 			return err
 		}
-		langs, err := s.gh.languages(ctx, t.full)
-		if err != nil {
-			return err
-		}
-		html := ""
-		if readme != "" {
-			link, image := readmeBases(t.full, t.branch)
-			res, err := markdown.Render(readme, markdown.Options{LinkBase: link, ImageBase: image})
-			if err != nil {
-				return err
-			}
-			html = res.HTML
-		}
-		if _, err := s.db.Exec(ctx, `UPDATE projects SET readme_html = $2, gh_languages = $3,
-			details_pushed_at = gh_pushed_at, synced_at = now() WHERE id = $1`, t.id, html, langs); err != nil {
-			return err
+		// One bad repo must not block the details of the ones after it.
+		s.log.Warn("github sync: project details", slog.String("repo", t.full), logging.Err(err))
+		failed++
+		if firstErr == nil {
+			firstErr = fmt.Errorf("%s: %w", t.full, err)
 		}
 	}
+	if firstErr != nil {
+		return fmt.Errorf("details failed for %d of %d projects, first %w", failed, len(todo), firstErr)
+	}
 	return nil
+}
+
+// detailOne fetches and stores one project's README and languages.
+func (s *Syncer) detailOne(ctx context.Context, id int64, full, branch string) error {
+	readme, err := s.gh.readme(ctx, full)
+	if err != nil {
+		return err
+	}
+	langs, err := s.gh.languages(ctx, full)
+	if err != nil {
+		return err
+	}
+	html := ""
+	if readme != "" {
+		link, image := readmeBases(full, branch)
+		res, err := markdown.Render(readme, markdown.Options{LinkBase: link, ImageBase: image})
+		if err != nil {
+			return err
+		}
+		html = res.HTML
+	}
+	_, err = s.db.Exec(ctx, `UPDATE projects SET readme_html = $2, gh_languages = $3,
+		details_pushed_at = gh_pushed_at, synced_at = now() WHERE id = $1`, id, html, langs)
+	return err
 }

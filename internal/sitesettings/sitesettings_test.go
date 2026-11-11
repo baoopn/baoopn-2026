@@ -123,7 +123,7 @@ func TestTestEmail(t *testing.T) {
 		t.Fatalf("message: %+v", m.sent)
 	}
 	m.err = errors.New("smtp 451")
-	if code, out := do(t, h, "POST", "/settings/test-email", ""); code != 502 || !strings.Contains(string(out["error"]), "mail_failed") {
+	if code, out := do(t, h, "POST", "/settings/test-email", ""); code != 503 || !strings.Contains(string(out["error"]), "mail_failed") {
 		t.Fatalf("failed: %d %s", code, out["error"])
 	}
 }

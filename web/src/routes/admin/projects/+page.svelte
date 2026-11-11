@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { FolderGit2, LoaderCircle, Plus, RefreshCw, X } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
-	import type { AdminProject, ProjectPatch, SyncResult } from '#lib/api/types.js';
+	import type { AdminProject, ProjectPatch, SyncResponse } from '#lib/api/types.js';
 	import PageHeader from '#lib/admin/components/PageHeader.svelte';
 	import Segmented from '#lib/admin/components/Segmented.svelte';
 	import SearchInput from '#lib/admin/components/SearchInput.svelte';
@@ -12,7 +12,7 @@
 	import ProjectRow from '#lib/admin/projects/ProjectRow.svelte';
 	import { get, patch, post } from '#lib/admin/api.js';
 	import { Resource } from '#lib/admin/resource.svelte.js';
-	import { errorMessage, slugify } from '#lib/admin/format.js';
+	import { SYNC_RUNNING_MESSAGE, errorMessage, slugify } from '#lib/admin/format.js';
 	import { toasts } from '#lib/admin/toast.svelte.js';
 
 	type Filter = 'all' | 'visible' | 'hidden' | 'forks' | 'archived';
@@ -111,11 +111,11 @@
 
 	// ---- sync ----------------------------------------------------------------
 	let syncing = $state(false);
-	let syncResult = $state<SyncResult | null>(null);
+	let syncResult = $state<SyncResponse | null>(null);
 	async function sync() {
 		syncing = true;
 		try {
-			syncResult = await post<SyncResult>('/projects/sync');
+			syncResult = await post<SyncResponse>('/projects/sync');
 			await projects.load(true);
 		} catch (err) {
 			toasts.error('GitHub sync failed', errorMessage(err));
@@ -193,8 +193,12 @@
 		role="status"
 	>
 		<span class="flex-1">
-			Synced <strong>{syncResult.total}</strong> repos: {syncResult.added} added (hidden until you show
-			them), {syncResult.updated} updated · <RelTime value={syncResult.synced_at} />
+			{#if 'status' in syncResult}
+				{SYNC_RUNNING_MESSAGE}
+			{:else}
+				Synced <strong>{syncResult.total}</strong> repos: {syncResult.added} added (hidden until you
+				show them), {syncResult.updated} updated · <RelTime value={syncResult.synced_at} />
+			{/if}
 		</span>
 		<button
 			type="button"

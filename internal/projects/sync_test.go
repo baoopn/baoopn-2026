@@ -27,6 +27,8 @@ type fakeGitHub struct {
 	pushedA   time.Time
 	remaining int
 	fail      int // status to fail repo listing with (0 = none)
+	failPaths map[string]int
+	block     chan struct{} // when set, repo listing waits for it to close
 	calls     map[string]int
 	authSeen  string
 }
@@ -52,11 +54,21 @@ func (f *fakeGitHub) count(path string) int {
 
 func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
+	block := f.block
+	f.mu.Unlock()
+	if block != nil && r.URL.Path == "/users/bao/repos" {
+		<-block
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[r.URL.Path]++
 	f.authSeen = r.Header.Get("Authorization")
 	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(f.remaining))
 	w.Header().Set("X-RateLimit-Reset", "1900000000")
+	if st := f.failPaths[r.URL.Path]; st != 0 {
+		w.WriteHeader(st)
+		return
+	}
 	repo := func(id int, name string, pushed time.Time, private bool) map[string]any {
 		return map[string]any{"id": id, "name": name, "full_name": "bao/" + name, "html_url": "https://github.com/bao/" + name,
 			"homepage": nil, "description": name + " desc", "language": "Go", "topics": []string{"go"},
@@ -276,7 +288,7 @@ func TestSyncAgainstFakeGitHub(t *testing.T) {
 		t.Fatalf("rate limited: %d", code)
 	}
 	e.gh.set(func(f *fakeGitHub) { f.fail = http.StatusInternalServerError })
-	if code := e.do(e.admin, "POST", "/projects/sync", nil, nil); code != http.StatusBadGateway {
+	if code := e.do(e.admin, "POST", "/projects/sync", nil, nil); code != http.StatusServiceUnavailable {
 		t.Fatalf("unavailable: %d", code)
 	}
 	e.s.mu.Lock()

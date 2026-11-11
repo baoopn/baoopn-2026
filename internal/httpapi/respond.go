@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 )
 
@@ -19,12 +21,24 @@ func Error(w http.ResponseWriter, status int, code, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": msg}})
 }
 
+// maxJSONBody caps a JSON request body.
+const maxJSONBody = 2 << 20
+
 // Decode reads a JSON body (max 2 MiB) into v, rejecting unknown fields.
+// A body over the cap answers 413 too_large; any other decode error answers
+// 400 with a fixed message (the decoder's detail, which echoes field names
+// and types, is only logged at debug).
 func Decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		Error(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			Error(w, http.StatusRequestEntityTooLarge, "too_large", "request body too large")
+			return false
+		}
+		slog.DebugContext(r.Context(), "invalid JSON body", slog.String("path", r.URL.Path), slog.String("err", err.Error()))
+		Error(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return false
 	}
 	return true

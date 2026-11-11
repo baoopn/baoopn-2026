@@ -42,6 +42,7 @@ type modules struct {
 	rec     *analytics.Recorder
 	syncer  *projects.Syncer
 	contact *contact.Module
+	listen  *listening.Module
 }
 
 // buildModules constructs the feature modules in the order of spec §2.
@@ -111,6 +112,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 		rec:     rec,
 		syncer:  syncer,
 		contact: contactMod,
+		listen:  listeningMod,
 	}, nil
 }
 

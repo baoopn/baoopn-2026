@@ -42,6 +42,26 @@ type ctxKey struct{}
 // (and no role/ID grant): always forbidden, never a claims fallback.
 var errNoVerifiedEmail = errors.New("user has no verified email address")
 
+// errBlocked means Clerk reports the user banned or locked: always
+// forbidden, never a claims fallback or allow-list grant.
+var errBlocked = errors.New("user is banned or locked")
+
+// errUserGone means Clerk has no such user (404: deleted). The token is
+// for an account that no longer exists: 401, never a claims fallback.
+var errUserGone = errors.New("clerk user not found")
+
+// clerkUnreachable reports whether a lookup error means Clerk could not
+// answer (network error, 5xx, 429), the only case where the token's role
+// claim may stand in. Any other Clerk answer (e.g. 401/403 to our own
+// secret key, 400) is a hard failure.
+func clerkUnreachable(err error) bool {
+	var apiErr *clerk.APIErrorResponse
+	if errors.As(err, &apiErr) {
+		return apiErr.HTTPStatusCode == http.StatusTooManyRequests || apiErr.HTTPStatusCode >= 500
+	}
+	return true
+}
+
 // UserFrom returns the admin stored in the request context.
 func UserFrom(ctx context.Context) (User, bool) {
 	u, ok := ctx.Value(ctxKey{}).(User)
@@ -143,24 +163,12 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		tc, _ := claims.Custom.(*tokenClaims)
-		u, err := a.lookup(r.Context(), claims.Subject)
-		switch {
-		case err == nil:
-			if tc != nil && tc.Role != "" {
-				u.Role = tc.Role
-			}
-		case errors.Is(err, errNoVerifiedEmail):
-			httpapi.Error(w, http.StatusForbidden, "forbidden", "this account has no verified email")
-			return
-		case tc != nil && tc.Role != "":
-			// Clerk's Backend API is unreachable. The verified token's role
-			// claim (from public_metadata, which users cannot edit) still
-			// authorizes; its email claim is not trusted (may be unverified).
-			a.log.WarnContext(r.Context(), "clerk lookup failed; authorizing from role claim", logging.Err(err))
-			u = User{ID: claims.Subject, Role: tc.Role}
-		default:
-			a.log.ErrorContext(r.Context(), "clerk lookup failed", logging.Err(err))
-			authUnavailable(w)
+		claimRole := ""
+		if tc != nil {
+			claimRole = tc.Role
+		}
+		u, ok := a.sessionUser(w, r, claims.Subject, claimRole)
+		if !ok {
 			return
 		}
 		if !a.allowed(u) {
@@ -178,6 +186,35 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		}
 		session.ServeHTTP(w, r)
 	})
+}
+
+// sessionUser resolves the session's user from Clerk. The token's role
+// claim is used only when Clerk is unreachable, never over a successful
+// lookup. On failure it writes the error response and returns false.
+func (a *Authenticator) sessionUser(w http.ResponseWriter, r *http.Request, subject, claimRole string) (User, bool) {
+	u, err := a.lookup(r.Context(), subject)
+	switch {
+	case err == nil:
+		return u, true
+	case errors.Is(err, errBlocked):
+		a.log.WarnContext(r.Context(), "admin access forbidden: user banned or locked", slog.String("user", subject))
+		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account is blocked")
+	case errors.Is(err, errNoVerifiedEmail):
+		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account has no verified email")
+	case errors.Is(err, errUserGone):
+		a.log.WarnContext(r.Context(), "session for a deleted clerk user", slog.String("user", subject))
+		httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "sign in required")
+	case claimRole != "" && clerkUnreachable(err):
+		// Clerk's Backend API is unreachable. The verified token's role
+		// claim (from public_metadata, which users cannot edit) still
+		// authorizes; its email claim is not trusted (may be unverified).
+		a.log.WarnContext(r.Context(), "clerk lookup failed; authorizing from role claim", logging.Err(err))
+		return User{ID: subject, Role: claimRole}, true
+	default:
+		a.log.ErrorContext(r.Context(), "clerk lookup failed", logging.Err(err))
+		authUnavailable(w)
+	}
+	return User{}, false
 }
 
 func (a *Authenticator) partyAllowed(azp string) bool {
@@ -219,11 +256,15 @@ func (a *Authenticator) lookup(ctx context.Context, id string) (User, error) {
 
 	cu, err := a.fetchUser(ctx, id)
 	if err != nil {
+		var apiErr *clerk.APIErrorResponse
+		if errors.As(err, &apiErr) && apiErr.HTTPStatusCode == http.StatusNotFound {
+			return User{}, errUserGone
+		}
 		return User{}, err
 	}
 	u := User{ID: cu.ID}
 	if cu.Banned || cu.Locked {
-		return u, nil // never allowed: empty email and role
+		return u, errBlocked // not cached: an unban takes effect at once
 	}
 	u.Role = metadataRole(cu.PublicMetadata)
 	if cu.ImageURL != nil {
