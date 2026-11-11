@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -196,6 +197,9 @@ func (m *Module) adminReorder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// adminSyncTimeout bounds an admin-triggered GitHub sync.
+const adminSyncTimeout = 5 * time.Minute
+
 func (m *Module) adminSync(w http.ResponseWriter, r *http.Request) {
 	if m.syncer == nil || m.syncer.user == "" {
 		httpapi.Error(w, http.StatusServiceUnavailable, "github_disabled", "GITHUB_USER is not configured")
@@ -205,7 +209,12 @@ func (m *Module) adminSync(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, http.StatusConflict, "sync_running", "a sync is already running")
 		return
 	}
-	res, err := m.syncer.syncLocked(r.Context())
+	// The sync outlives the request timeout and a client that goes away:
+	// cancelling it mid-way would roll back the upsert and leave details
+	// half done. It gets its own, longer bound instead.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), adminSyncTimeout)
+	res, err := m.syncer.syncLocked(ctx)
+	cancel()
 	m.syncer.mu.Unlock()
 	if err != nil {
 		m.fail(w, r, err)
