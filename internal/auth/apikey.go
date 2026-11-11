@@ -40,19 +40,41 @@ func verifyAPIKey(ctx context.Context, secret string) (*clerk.APIKey, error) {
 
 // apiKeyAuth authenticates a request that carries a Clerk user API key. It
 // never logs the secret, the header or a raw error message.
+//
+// A cached valid key is never limited. Any other key first reserves one of
+// the client's keyFailuresPerMinute failures, before any check, so parallel
+// requests cannot pass the limit together. A client with none left gets 429,
+// even for a valid key that is not cached yet. A key of the wrong shape, or
+// one Clerk refused within rejectTTL, is refused without asking Clerk and
+// keeps its reservation, as does a key Clerk refuses. A key Clerk accepts,
+// and a Clerk failure (502: Clerk answered 401 or 403 to our own secret key,
+// 429 throttled us, 5xx, or a network error), give the reservation back and
+// are never cached as refused.
 func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, secret string) {
 	ctx := r.Context()
 	userID, keyID, ok := a.cachedKey(secret)
 	if !ok {
+		refund, ok := a.keyFails.reserve(httpapi.ClientBucket(r), a.now())
+		if !ok {
+			w.Header().Set("Retry-After", "60")
+			httpapi.Error(w, http.StatusTooManyRequests, "rate_limited", "too many invalid API keys")
+			return
+		}
+		if !apiKeyShape.MatchString(secret) || a.keyRefused(secret) {
+			httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
+			return
+		}
 		k, err := a.verifyKey(ctx, secret)
 		if err != nil {
 			var apiErr *clerk.APIErrorResponse
 			if errors.As(err, &apiErr) && keyRejected(apiErr.HTTPStatusCode) {
 				a.log.WarnContext(ctx, "clerk api key rejected",
 					slog.Int("status", apiErr.HTTPStatusCode), slog.String("clerk_trace_id", apiErr.TraceID))
+				a.storeRefused(secret)
 				httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
 				return
 			}
+			refund()
 			attrs := []any{slog.String("err_type", fmt.Sprintf("%T", err))}
 			if apiErr != nil {
 				attrs = append(attrs, slog.Int("status", apiErr.HTTPStatusCode),
@@ -65,9 +87,11 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 		exp, valid := a.keyUsable(k)
 		if !valid {
 			a.log.WarnContext(ctx, "clerk api key not usable", slog.String("key_id", k.ID))
+			a.storeRefused(secret)
 			httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
 			return
 		}
+		refund()
 		userID, keyID = k.Subject, k.ID
 		a.storeKey(secret, keyCached{userID: userID, keyID: keyID, exp: exp})
 	}
@@ -94,8 +118,9 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 }
 
 // keyRejected reports whether a Clerk error status means the key itself is
-// bad. 401 and 403 mean our own secret key is wrong and 429 is throttling,
-// so those are Clerk failures, not bad keys.
+// bad. Clerk answers 401 and 403 when it refuses our own secret key (the
+// server's CLERK_SECRET_KEY), not the caller's API key, and 429 when it
+// throttles us, so those are Clerk failures, not bad keys.
 func keyRejected(status int) bool {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:

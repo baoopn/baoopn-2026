@@ -34,13 +34,14 @@ token and stores the reply with the quoted history stripped.
 
 - An address that is not `reply+<32 hex>@INBOUND_DOMAIN`, or a message over
   10 MiB, is refused with `setReject` (the sender gets a bounce).
-- API `2xx`: done. `413`: refused as too large. `400`, `404` and `422`: logged
-  and dropped, because retrying cannot help (`404` means the API has no
-  `INBOUND_WEBHOOK_SECRET` or `INBOUND_MAIL_DOMAIN`, and is logged as an error).
-  The API records its own rejects with `204`.
+- API `2xx`: done. `413`: refused as too large. `400` and `422`: logged and
+  dropped, because retrying cannot help a malformed request. The API records
+  its own rejects with `204`.
 - Everything else is retried: `401`/`403` (clock skew, or the secret rotated on
-  one side first), `408`, `425`, `429`, `5xx` (the API answers `503` when it is
-  busy or over its site-wide limit) and network errors. There are up to 3
+  one side first), `404` (the API has no `INBOUND_WEBHOOK_SECRET` or
+  `INBOUND_MAIL_DOMAIN`; each one is logged as an error), `408`, `425`, `429`,
+  `5xx` (the API answers `503` when it is busy, over its site-wide limit, or
+  could not read the body) and network errors. There are up to 3
   attempts (0.5 s, then 2 s apart), re-signed each time. After the last one the
   worker throws, so Email Routing reports a failure to the sending server, which
   keeps the message and retries later. Mail is lost only if the API stays

@@ -31,12 +31,12 @@ export async function forward(raw, { to, from }, env, { fetchImpl = fetch, wait 
 			});
 			const action = classify(res.status);
 			if (action !== 'retry') {
-				if (action === 'drop') {
-					// 404: the API has no secret or domain set, a misconfiguration on our side.
-					const log = res.status === 404 ? console.error : console.warn;
-					log(`inbound-email: API answered ${res.status}, dropped`);
-				}
+				if (action === 'drop') console.warn(`inbound-email: API answered ${res.status}, dropped`);
 				return action;
+			}
+			if (res.status === 404) {
+				// The API has no secret or domain set: a misconfiguration on our side.
+				console.error('inbound-email: API answered 404 (hook not configured), will retry');
 			}
 			lastError = `status ${res.status}`;
 		} catch {

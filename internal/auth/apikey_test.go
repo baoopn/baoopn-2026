@@ -99,14 +99,14 @@ func (h *keyHarness) assertNoSecret(t *testing.T, secret string) {
 
 func TestAPIKeyAdminAccepted(t *testing.T) {
 	h := newKeyHarness(t)
-	rec, u := h.do(t, "Bearer ak_live_x")
+	rec, u := h.do(t, "Bearer ak_live_x_0123456789abcdef")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
 	if u == nil || u.ID != "user_1" || u.Via != "api_key" {
 		t.Fatalf("user = %+v", u)
 	}
-	h.assertNoSecret(t, "ak_live_x")
+	h.assertNoSecret(t, "ak_live_x_0123456789abcdef")
 }
 
 func TestAPIKeyNonAdminForbidden(t *testing.T) {
@@ -114,14 +114,14 @@ func TestAPIKeyNonAdminForbidden(t *testing.T) {
 	h.key = func(string) (*clerk.APIKey, error) {
 		return &clerk.APIKey{ID: "ak_id_2", Type: "api_key", Subject: "user_9"}, nil
 	}
-	rec, _ := h.do(t, "Bearer ak_live_other")
+	rec, _ := h.do(t, "Bearer ak_live_other_0123456789abcdef")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	if code, msg := errBody(t, rec); code != "forbidden" || msg != "this account is not an admin" {
 		t.Fatalf("body = %s %s", code, msg)
 	}
-	h.assertNoSecret(t, "ak_live_other")
+	h.assertNoSecret(t, "ak_live_other_0123456789abcdef")
 }
 
 func TestAPIKeyUnusable(t *testing.T) {
@@ -140,7 +140,7 @@ func TestAPIKeyUnusable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newKeyHarness(t)
 			h.key = func(string) (*clerk.APIKey, error) { return &k, nil }
-			rec, _ := h.do(t, "Bearer ak_live_bad")
+			rec, _ := h.do(t, "Bearer ak_live_bad_0123456789abcdef")
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d", rec.Code)
 			}
@@ -150,7 +150,7 @@ func TestAPIKeyUnusable(t *testing.T) {
 			if len(h.a.keyCache) != 0 {
 				t.Fatal("unusable key was cached")
 			}
-			h.assertNoSecret(t, "ak_live_bad")
+			h.assertNoSecret(t, "ak_live_bad_0123456789abcdef")
 		})
 	}
 }
@@ -168,12 +168,12 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 		"clerk 403": {&clerk.APIErrorResponse{HTTPStatusCode: 403}, 502, "auth_unavailable"},
 		"clerk 429": {&clerk.APIErrorResponse{HTTPStatusCode: 429}, 502, "auth_unavailable"},
 		"clerk 503": {&clerk.APIErrorResponse{HTTPStatusCode: 503}, 502, "auth_unavailable"},
-		"network":   {errors.New("dial tcp: ak_live_err refused"), 502, "auth_unavailable"},
+		"network":   {errors.New("dial tcp: ak_live_err_0123456789abcdef refused"), 502, "auth_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newKeyHarness(t)
 			h.key = func(string) (*clerk.APIKey, error) { return nil, tc.err }
-			rec, _ := h.do(t, "Bearer ak_live_err")
+			rec, _ := h.do(t, "Bearer ak_live_err_0123456789abcdef")
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d", rec.Code)
 			}
@@ -183,7 +183,7 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 			if tc.status == http.StatusBadGateway && !strings.Contains(h.logs.String(), "level=ERROR") {
 				t.Fatalf("502 not logged at Error: %s", h.logs.String())
 			}
-			h.assertNoSecret(t, "ak_live_err")
+			h.assertNoSecret(t, "ak_live_err_0123456789abcdef")
 		})
 	}
 }
@@ -191,17 +191,17 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 func TestAPIKeyCache(t *testing.T) {
 	h := newKeyHarness(t)
 	for range 2 {
-		if rec, _ := h.do(t, "Bearer ak_live_x"); rec.Code != http.StatusOK {
+		if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusOK {
 			t.Fatalf("status = %d", rec.Code)
 		}
 	}
 	if n := h.calls.Load(); n != 1 {
 		t.Fatalf("verify calls within TTL = %d, want 1", n)
 	}
-	h.assertNoSecret(t, "ak_live_x")
+	h.assertNoSecret(t, "ak_live_x_0123456789abcdef")
 
 	h.clock = h.clock.Add(61 * time.Second)
-	if rec, _ := h.do(t, "Bearer ak_live_x"); rec.Code != http.StatusOK {
+	if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	if n := h.calls.Load(); n != 2 {
@@ -210,13 +210,13 @@ func TestAPIKeyCache(t *testing.T) {
 
 	h.clock = h.clock.Add(61 * time.Second)
 	h.key = func(string) (*clerk.APIKey, error) { return nil, errors.New("dial") }
-	if rec, _ := h.do(t, "Bearer ak_live_x"); rec.Code != http.StatusBadGateway {
+	if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusBadGateway {
 		t.Fatalf("status after expiry with network error = %d, want 502", rec.Code)
 	}
 	if n := h.calls.Load(); n != 3 {
 		t.Fatalf("verify calls = %d, want 3", n)
 	}
-	h.assertNoSecret(t, "ak_live_x")
+	h.assertNoSecret(t, "ak_live_x_0123456789abcdef")
 }
 
 func TestAPIKeyCacheHonoursExpiration(t *testing.T) {
@@ -225,11 +225,11 @@ func TestAPIKeyCacheHonoursExpiration(t *testing.T) {
 	h.key = func(string) (*clerk.APIKey, error) {
 		return &clerk.APIKey{ID: "ak_id_1", Subject: "user_1", Expiration: &exp}, nil
 	}
-	if rec, _ := h.do(t, "Bearer ak_live_x"); rec.Code != http.StatusOK {
+	if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	h.clock = h.clock.Add(11 * time.Second)
-	if rec, _ := h.do(t, "Bearer ak_live_x"); rec.Code != http.StatusUnauthorized {
+	if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status after key expiry = %d, want 401", rec.Code)
 	}
 	if n := h.calls.Load(); n != 2 {
@@ -239,13 +239,13 @@ func TestAPIKeyCacheHonoursExpiration(t *testing.T) {
 
 func TestAPIKeyDistinctSecrets(t *testing.T) {
 	h := newKeyHarness(t)
-	h.do(t, "Bearer ak_live_a")
-	h.do(t, "Bearer ak_live_b")
+	h.do(t, "Bearer ak_live_a_0123456789abcdef")
+	h.do(t, "Bearer ak_live_b_0123456789abcdef")
 	if n := h.calls.Load(); n != 2 {
 		t.Fatalf("verify calls = %d, want 2", n)
 	}
-	h.assertNoSecret(t, "ak_live_a")
-	h.assertNoSecret(t, "ak_live_b")
+	h.assertNoSecret(t, "ak_live_a_0123456789abcdef")
+	h.assertNoSecret(t, "ak_live_b_0123456789abcdef")
 }
 
 func TestAPIKeyCacheBounded(t *testing.T) {

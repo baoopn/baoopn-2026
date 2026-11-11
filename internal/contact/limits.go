@@ -46,14 +46,6 @@ func (b *bucket) take(now time.Time) bool {
 	return true
 }
 
-// empty reports whether no token is left at now, without using one.
-func (b *bucket) empty(now time.Time) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.refill(now)
-	return b.tokens < 1
-}
-
 // maxFailClients bounds the clients failLimiter tracks; past it the table is
 // cleared, which only forgets failures.
 const maxFailClients = 4096
@@ -70,16 +62,9 @@ func newFailLimiter(perMinute int) *failLimiter {
 	return &failLimiter{perMin: perMinute, clients: map[string]*bucket{}}
 }
 
-// blocked reports whether client used up its failures.
-func (f *failLimiter) blocked(client string, now time.Time) bool {
-	f.mu.Lock()
-	b := f.clients[client]
-	f.mu.Unlock()
-	return b != nil && b.empty(now)
-}
-
-// fail counts one failure for client.
-func (f *failLimiter) fail(client string, now time.Time) {
+// fail counts one failure for client. It reports false when the client had
+// no failure left, that is when this one is over the limit.
+func (f *failLimiter) fail(client string, now time.Time) bool {
 	f.mu.Lock()
 	b := f.clients[client]
 	if b == nil {
@@ -90,12 +75,17 @@ func (f *failLimiter) fail(client string, now time.Time) {
 		f.clients[client] = b
 	}
 	f.mu.Unlock()
-	b.take(now)
+	return b.take(now)
 }
+
+// statusReadFailed is what readInbound returns for a read error it cannot
+// classify. The handler answers it 503, so the worker tries again.
+const statusReadFailed = -1
 
 // readInbound reads the request body while holding one of the inboundReads
 // slots, for at most m.readTimeout. It returns the body, or the status to
-// answer: 503 (no free slot), 413 (too large), 408 (too slow) or 400.
+// answer: 503 (no free slot), 413 (too large), 408 (too slow) or
+// statusReadFailed.
 func (m *Module) readInbound(w http.ResponseWriter, r *http.Request) ([]byte, int) {
 	select {
 	case m.reads <- struct{}{}:
@@ -122,5 +112,5 @@ func (m *Module) readInbound(w http.ResponseWriter, r *http.Request) ([]byte, in
 	case errors.Is(err, os.ErrDeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
 		return nil, http.StatusRequestTimeout
 	}
-	return nil, http.StatusBadRequest
+	return nil, statusReadFailed
 }

@@ -28,16 +28,18 @@ export function rejectReason(to, size, domain) {
 }
 
 /**
- * API answers that retrying cannot fix: 400 (unreadable request), 404 (the
- * hook is not configured on the API: our misconfiguration) and 422.
+ * API answers that retrying cannot fix: 400 and 422 (a malformed request).
+ * 404 is not one: it means the hook is not configured on the API, our own
+ * misconfiguration, which a fix and a retry can recover from.
  */
-const PERMANENT = new Set([400, 404, 422]);
+const PERMANENT = new Set([400, 422]);
 
 /**
  * What to do with the API's answer:
- * "done" (2xx), "reject" (413: refuse the message), "drop" (400, 404, 422:
- * log and stop) or "retry" (everything else, including 401 and 403 for clock
- * skew or a secret rotated on one side first, 408, 425, 429 and 5xx).
+ * "done" (2xx), "reject" (413: refuse the message), "drop" (400, 422: log and
+ * stop) or "retry" (everything else, including 401 and 403 for clock skew or a
+ * secret rotated on one side first, 404 for a hook not yet configured, 408,
+ * 425, 429 and 5xx).
  */
 export function classify(status) {
 	if (status >= 200 && status < 300) return 'done';

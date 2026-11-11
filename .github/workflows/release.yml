@@ -56,8 +56,26 @@ jobs:
           fi
           echo "Commit came from $prs merged pull request(s)."
 
+      # Coolify v4 /deploy takes no commit: it builds whatever main points at
+      # now. Deploy only if that is still the commit CI just tested; otherwise
+      # a newer run (same concurrency group) tests and deploys main.
+      - name: Check main still points at this commit
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+          if [ "$head" != "${{ github.sha }}" ]; then
+            echo "::notice::main moved from ${{ github.sha }} to $head. Not deploying; the newer run deploys."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Trigger deployment
         id: deploy
+        if: steps.head.outputs.skip != 'true'
         env:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
@@ -72,6 +90,7 @@ jobs:
           echo "deployment_uuid=$(echo "$resp" | jq -r '.deployments[0].deployment_uuid')" >> "$GITHUB_OUTPUT"
 
       - name: Wait for deployment to finish
+        if: steps.head.outputs.skip != 'true'
         env:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
@@ -80,11 +99,25 @@ jobs:
           set -euo pipefail
           # Builds the Go API and the SvelteKit app on the server: allow 20 min.
           for i in $(seq 1 120); do
-            status=$(curl -fsS "$COOLIFY_URL/api/v1/deployments/$DEPLOYMENT" \
-              -H "Authorization: Bearer $COOLIFY_TOKEN" -A github-actions | jq -r 'if type == "array" then .[0].status else .status end')
+            resp=$(curl -fsS "$COOLIFY_URL/api/v1/deployments/$DEPLOYMENT" \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" -A github-actions | jq -c 'if type == "array" then .[0] else . end')
+            status=$(echo "$resp" | jq -r '.status')
             echo "[$i] status=$status"
             case "$status" in
-              finished) exit 0 ;;
+              finished)
+                # Coolify records the commit it built (ApplicationDeploymentQueue.commit).
+                # It may be "HEAD" or empty when it did not resolve one.
+                built=$(echo "$resp" | jq -r '.commit // ""')
+                if [[ "$built" =~ ^[0-9a-f]{40}$ ]]; then
+                  if [ "$built" != "${{ github.sha }}" ]; then
+                    echo "::warning::Coolify built $built, not the tested commit ${{ github.sha }}."
+                  else
+                    echo "Coolify built the tested commit."
+                  fi
+                else
+                  echo "::notice::Coolify did not report the commit it built ('$built')."
+                fi
+                exit 0 ;;
               failed|cancelled*) echo "::error::Coolify deployment $status"; exit 1 ;;
             esac
             sleep 10
