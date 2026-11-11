@@ -166,3 +166,7 @@ export function errorMessage(err: unknown): string {
 	if (err instanceof Error) return err.message || 'Something went wrong';
 	return typeof err === 'string' ? err : 'Something went wrong';
 }
+
+/** Shown when POST /projects/sync answers 202: the sync goes on in the background. */
+export const SYNC_RUNNING_MESSAGE =
+	'Sync is running in the background. Refresh in a minute to see the result.';
