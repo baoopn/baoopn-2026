@@ -73,7 +73,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 ## Admin — `/api/admin` (Bearer Clerk session token or user API key)
 
 `GET /config` is unauthenticated (`AdminConfig`). Everything else needs
-`Authorization: Bearer <clerk session token>`; 401 `unauthorized`, 403 `forbidden`.
+`Authorization: Bearer <clerk session token>`; 401 `unauthorized`, 403 `forbidden` (not an
+admin, or Clerk reports the user banned or locked), 503 `auth_unavailable`. The session token's
+role claim is used only when Clerk cannot be reached; a successful Clerk lookup always wins.
 
 | Method | Path | Body | Response `data` |
 |---|---|---|---|
@@ -137,7 +139,7 @@ Scripts can call the admin API with a Clerk user API key instead of a session to
 - Create the key in `/admin/account`, on the API keys tab. Only keys that belong to an admin work.
 - Send it as `Authorization: Bearer <key>`. The API sees the `ak_` prefix and checks the key with Clerk.
 - The API returns 401 `unauthorized` for an invalid, revoked or expired key, 403 `forbidden`
-  for a user who is not an admin, and 503 `auth_unavailable` when it cannot reach Clerk
+  for a user who is not an admin or is banned or locked, and 503 `auth_unavailable` when it cannot reach Clerk
   or Clerk rejects the server's own secret key.
 - The API caches a checked key for up to 60 s, so a revoked key can keep working for up to 60 s.
 - A key not shaped like `ak_…` is refused without asking Clerk. A refused key is remembered for

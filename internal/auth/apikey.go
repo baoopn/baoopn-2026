@@ -98,6 +98,11 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 
 	u, err := a.lookup(ctx, userID)
 	switch {
+	case errors.Is(err, errBlocked):
+		a.log.WarnContext(ctx, "admin access forbidden: user banned or locked", slog.String("user", userID),
+			slog.String("key_id", keyID))
+		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account is blocked")
+		return
 	case errors.Is(err, errNoVerifiedEmail):
 		httpapi.Error(w, http.StatusForbidden, "forbidden", "this account has no verified email")
 		return
