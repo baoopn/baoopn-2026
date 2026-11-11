@@ -8,7 +8,7 @@ import {
 	windowLimiter,
 	withSecurityHeaders
 } from '#lib/server/security-headers.js';
-import { isClientAbort, stripHopHeaders, upstreamUnavailable } from '#lib/server/proxy.js';
+import { proxyFetch, stripHopHeaders } from '#lib/server/proxy.js';
 import { preloadAsset, robotsHeader } from '#lib/site/seo.js';
 
 /**
@@ -88,33 +88,7 @@ async function cspReport(request: Request): Promise<Response> {
 async function proxy(event: Parameters<Handle>[0]['event']): Promise<Response> {
 	const { pathname, search } = event.url;
 	const headers = forwardHeaders(event.request.headers, event.request, event.getClientAddress());
-	let res: Response;
-	try {
-		res = await fetch(API_URL + pathname + search, {
-			method: event.request.method,
-			headers,
-			body: ['GET', 'HEAD'].includes(event.request.method) ? undefined : event.request.body,
-			// @ts-expect-error duplex is required by undici for streamed bodies
-			duplex: 'half',
-			redirect: 'manual',
-			// A client that goes away (e.g. a closed SSE tab) aborts the upstream request.
-			signal: event.request.signal
-		});
-	} catch (err) {
-		// A client abort is routine; nobody reads this response. Anything else
-		// means the API is down or unreachable.
-		if (!isClientAbort(err, event.request.signal)) {
-			console.error(JSON.stringify({ msg: 'api proxy failed', path: pathname, error: String(err) }));
-		}
-		return upstreamUnavailable();
-	}
-	// res.body is passed through as a stream, chunk by chunk, so SSE
-	// (/api/v1/listening/now-playing/stream) is not buffered. fetch already
-	// decoded any compression, so the encoding and length no longer apply.
-	const out = new Headers(res.headers);
-	out.delete('content-encoding');
-	out.delete('content-length');
-	return new Response(res.body, { status: res.status, headers: out });
+	return proxyFetch(fetch, API_URL + pathname + search, event.request, headers);
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
