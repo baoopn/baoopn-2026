@@ -39,6 +39,7 @@ S3-compatible stand-in for R2; a one-shot `rustfs-init` creates the private
 - **`release.yml`** runs on push to `main` (or manually). It reuses CI, then asks
   Coolify to deploy the resource and waits until the deployment finishes. A
   commit on `main` that did not come from a merged PR is tested but never deployed.
+  The deploy runs only if `main` still points at the tested commit; otherwise the newer run deploys.
   The deploy job is **skipped while `vars.COOLIFY_RESOURCE_UUID` is unset**, so
   nothing is published until you decide to go live.
 
@@ -173,7 +174,8 @@ Raster uploads (JPEG, PNG, static GIF, WebP, HEIC/HEIF, BMP, TIFF) are stored as
   `202 processing`; the admin polls `GET /api/admin/media/{id}`.
 - **Fallbacks.** If the worker is down or a file cannot convert, the api publishes the
   metadata-stripped original after `MEDIA_FALLBACK_AFTER` (JPEG/PNG/GIF/WebP) or marks the
-  upload failed (HEIC/TIFF/BMP). R2 errors are retried with backoff. Details:
+  upload failed (HEIC/TIFF/BMP). A cropped upload is never published uncropped; it is marked
+  failed and can be retried. R2 errors are retried with backoff. Details:
   `docs/api.md` → *Media uploads*.
 
 | Variable | Service | Default |
