@@ -15,7 +15,7 @@ services:
       POSTGRES_PASSWORD: baoopn
       POSTGRES_DB: baoopn
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - baoopn-pg:/var/lib/postgresql/data
     healthcheck:
@@ -127,7 +127,7 @@ services:
       ORIGIN: http://localhost:3000
       API_URL: http://api:8080
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       api:
         condition: service_healthy

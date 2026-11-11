@@ -42,6 +42,7 @@
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=${SERVICE_USER_POSTGRES}
       - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
@@ -64,6 +65,12 @@ services:
         # shown as the version in the admin dashboard.
         VERSION: ${SOURCE_COMMIT:-coolify}
     image: baoopn-api:latest
+    restart: unless-stopped
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - APP_ENV=production
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -139,6 +146,10 @@ services:
     command: ["/usr/local/bin/mediaworker"]
     restart: unless-stopped
     mem_limit: ${MEDIAWORKER_MEM_LIMIT:-1g}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - GOMEMLIMIT=${MEDIAWORKER_GOMEMLIMIT:-768MiB}
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -167,6 +178,12 @@ services:
       context: .
       dockerfile: deploy/docker/web.Dockerfile
     image: baoopn-web:latest
+    restart: unless-stopped
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - SERVICE_FQDN_WEB_3000
       - PORT=3000
