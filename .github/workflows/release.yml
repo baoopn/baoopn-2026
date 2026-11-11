@@ -56,8 +56,26 @@ jobs:
           fi
           echo "Commit came from $prs merged pull request(s)."
 
+      # Coolify v4 /deploy takes no commit: it builds whatever main points at
+      # now. Deploy only if that is still the commit CI just tested; otherwise
+      # a newer run (same concurrency group) tests and deploys main.
+      - name: Check main still points at this commit
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+          if [ "$head" != "${{ github.sha }}" ]; then
+            echo "::notice::main moved from ${{ github.sha }} to $head. Not deploying; the newer run deploys."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Trigger deployment
         id: deploy
+        if: steps.head.outputs.skip != 'true'
         env:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
@@ -72,6 +90,7 @@ jobs:
           echo "deployment_uuid=$(echo "$resp" | jq -r '.deployments[0].deployment_uuid')" >> "$GITHUB_OUTPUT"
 
       - name: Wait for deployment to finish
+        if: steps.head.outputs.skip != 'true'
         env:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
