@@ -75,9 +75,11 @@ func (r *Recorder) record(req *http.Request, ev beacon) {
 }
 
 // excludedPath reports whether a (cleaned) path is not a public page we
-// count. Only known routes are accepted, so a script cannot fill the stats
-// tables with arbitrary unique paths: the fixed pages, one slug segment
-// under /blog and /projects, and /blog/<slug>/<n> for a post's part n (1–20).
+// count: the fixed pages, one slug-shaped segment under /blog and /projects,
+// and /blog/<slug>/<n> for a post's part n (1–20). Slugs are only checked for
+// shape, not against real posts or projects, so a script can still send many
+// distinct made-up slugs; the in-memory side is bounded by maxPageKeys and
+// the stats tables by retention.
 func excludedPath(p string) bool {
 	switch p {
 	case "/", "/projects", "/blog", "/about", "/contact":

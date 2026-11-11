@@ -30,6 +30,7 @@ const (
 	retentionDays   = 400
 	maxSeen         = 200_000
 	maxPendingRows  = 50_000
+	maxPageKeys     = 10_000 // pending page_view_stats rows in memory
 	finalFlushLimit = 5 * time.Second
 )
 
@@ -75,6 +76,7 @@ type Recorder struct {
 
 	mu      sync.Mutex
 	pages   map[pageKey]*pageVal
+	dropped int64 // page events dropped at maxPageKeys since the last flush
 	days    []dayVisitor
 	hours   []hourVisitor
 	seenDay string
@@ -143,7 +145,22 @@ func (r *Recorder) LiveNow() int {
 func (r *Recorder) observePage(k pageKey, views, visibleMS int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.addPageLocked(k, views, visibleMS)
+}
+
+// addPageLocked adds to the pending row for k. With maxPageKeys rows already
+// pending, a new key folds into the same row without its referrer if that
+// row exists, and is otherwise dropped (counted, logged at the next flush),
+// so a flood of distinct dimensions cannot grow memory without bound.
+func (r *Recorder) addPageLocked(k pageKey, views, visibleMS int64) {
 	v := r.pages[k]
+	if v == nil && len(r.pages) >= maxPageKeys {
+		k.referrer = ""
+		if v = r.pages[k]; v == nil {
+			r.dropped++
+			return
+		}
+	}
 	if v == nil {
 		v = &pageVal{}
 		r.pages[k] = v
@@ -161,6 +178,8 @@ func (r *Recorder) Flush(ctx context.Context) error {
 	r.mu.Lock()
 	pages, days, hours := r.pages, r.days, r.hours
 	r.pages, r.days, r.hours = map[pageKey]*pageVal{}, nil, nil
+	dropped := r.dropped
+	r.dropped = 0
 	cutoff := r.now().Add(-livePeriod)
 	for v, t := range r.live {
 		if !t.After(cutoff) {
@@ -168,6 +187,10 @@ func (r *Recorder) Flush(ctx context.Context) error {
 		}
 	}
 	r.mu.Unlock()
+	if dropped > 0 {
+		r.log.Warn("analytics: page events dropped, too many pending rows",
+			slog.Int64("dropped", dropped), slog.Int("max_rows", maxPageKeys))
+	}
 
 	var errs []error
 	if err := r.flushPages(ctx, pages); err != nil {
@@ -200,16 +223,12 @@ func (r *Recorder) flushPages(ctx context.Context, pending map[pageKey]*pageVal)
 	return r.db.SendBatch(ctx, batch).Close()
 }
 
+// requeuePages merges failed rows back, under the same maxPageKeys cap.
 func (r *Recorder) requeuePages(pending map[pageKey]*pageVal) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for k, v := range pending {
-		if cur := r.pages[k]; cur != nil {
-			cur.views += v.views
-			cur.visibleMS += v.visibleMS
-		} else {
-			r.pages[k] = v
-		}
+		r.addPageLocked(k, v.views, v.visibleMS)
 	}
 }
 
