@@ -478,3 +478,17 @@ func TestS3HTTPClientTimeouts(t *testing.T) {
 		t.Fatalf("dial timeout = %v", d.Timeout)
 	}
 }
+
+// A bucket error is a JSON 503: Traefik's error pages replace 502 bodies.
+func TestServeObjectStorageError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	s := newS3Store(t, s3Cfg(srv, ""), false)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/media/"+strings.Repeat("a", 24)+".webp", nil))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"storage_unavailable"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
