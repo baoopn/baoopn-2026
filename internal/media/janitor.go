@@ -19,12 +19,19 @@ import (
 // JanitorInterval is how often RunJanitor ticks.
 const JanitorInterval = 15 * time.Second
 
+// tickTimeout bounds one janitor pass, so a hung database or S3 call cannot
+// stall the janitor forever. It is longer than the orphan pass's own 2 min.
+const tickTimeout = 5 * time.Minute
+
 // RunJanitor runs Tick every interval until ctx is done.
 func (s *Store) RunJanitor(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		if err := s.safeTick(ctx); err != nil && ctx.Err() == nil {
+		tctx, cancel := context.WithTimeout(ctx, tickTimeout)
+		err := s.safeTick(tctx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
 			s.log.Warn("media janitor", logging.Err(err))
 		}
 		select {
@@ -231,29 +238,41 @@ func (s *Store) publishOriginal(ctx context.Context, j *Job) {
 }
 
 func (s *Store) cleanupOriginals(ctx context.Context) error {
-	rows, err := s.db.Query(ctx, `SELECT j.id, m.filename FROM media_jobs j JOIN media m ON m.id = j.media_id
-		WHERE j.status = 'failed' AND NOT j.original_deleted AND j.failed_at < now() - make_interval(secs => $1)`,
-		s.failedRetention.Seconds())
+	list, err := s.staleOriginals(ctx)
 	if err != nil {
 		return err
 	}
-	type row struct {
-		id       int64
-		filename string
-	}
-	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
-		var x row
-		return x, r.Scan(&x.id, &x.filename)
-	})
-	if err != nil {
-		return err
-	}
-	for _, x := range list {
-		s.removeOriginal(stemOf(x.filename))
-		if _, err := s.db.Exec(ctx, `UPDATE media_jobs SET original_deleted = true, updated_at = now() WHERE id = $1`, x.id); err != nil {
+	for _, id := range list {
+		if err := s.dropOriginal(ctx, id); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// staleOriginals lists the jobs failed longer than FailedRetention ago whose
+// original is still kept.
+func (s *Store) staleOriginals(ctx context.Context) ([]int64, error) {
+	return s.ids(ctx, `SELECT id FROM media_jobs
+		WHERE status = 'failed' AND NOT original_deleted AND failed_at < now() - make_interval(secs => $1)`,
+		s.failedRetention.Seconds())
+}
+
+// dropOriginal claims job id's original first and deletes the file only when
+// the claim took. The claim re-checks the row, so a Retry that requeued the
+// job after staleOriginals listed it keeps its original.
+func (s *Store) dropOriginal(ctx context.Context, id int64) error {
+	var filename string
+	err := s.db.QueryRow(ctx, `UPDATE media_jobs j SET original_deleted = true, updated_at = now()
+		FROM media m WHERE m.id = j.media_id AND j.id = $1 AND j.status = 'failed' AND NOT j.original_deleted
+		RETURNING m.filename`, id).Scan(&filename)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.removeOriginal(stemOf(filename))
 	return nil
 }
 

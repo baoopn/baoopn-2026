@@ -199,3 +199,36 @@ func TestFallbackStorageRetry(t *testing.T) {
 		t.Fatal("original not published")
 	}
 }
+
+// A Retry that lands between the cleanup's listing and its delete keeps the
+// original: the cleanup claims the row first and skips it when the claim fails.
+func TestCleanupOriginalsRaceRetry(t *testing.T) {
+	s, _ := newQueueStore(t, nil)
+	ctx := context.Background()
+	m := mustSave(t, s, "scan.bmp", bmpBytes(t), nil)
+	j := mustLease(t, s)
+	if _, err := s.Fail(ctx, j.ID, j.LeaseToken, "the image could not be decoded", false); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, s, `UPDATE media_jobs SET failed_at = now() - interval '25 hours'`)
+	list, err := s.staleOriginals(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("stale originals = %v %v", list, err)
+	}
+	if _, err := s.Retry(ctx, m.ID); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if err := s.dropOriginal(ctx, list[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.originalPath(stemOf(m.Filename))); err != nil {
+		t.Fatal("original deleted under a retried job")
+	}
+	var deleted bool
+	if err := s.db.QueryRow(ctx, `SELECT original_deleted FROM media_jobs WHERE id = $1`, list[0]).Scan(&deleted); err != nil || deleted {
+		t.Fatalf("original_deleted = %v %v", deleted, err)
+	}
+	if _, status, _ := jobState(t, s, m.ID); status != "queued" {
+		t.Fatalf("job status = %s", status)
+	}
+}
