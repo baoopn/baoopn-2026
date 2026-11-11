@@ -19,7 +19,7 @@ async function always(status) {
 }
 
 test('every non-permanent failure is retried, then throws so Cloudflare defers', async () => {
-	for (const status of [401, 403, 408, 425, 429, 500, 502, 503, 504]) {
+	for (const status of [401, 403, 404, 408, 425, 429, 500, 502, 503, 504]) {
 		const r = await always(status);
 		await assert.rejects(r.run, new RegExp(`API unavailable \\(status ${status}\\)`), String(status));
 		assert.equal(r.calls(), attempts, `${status}: attempts`);
@@ -43,7 +43,7 @@ test('a network error on every attempt throws', async () => {
 });
 
 test('permanent answers stop at once; 413 rejects; 2xx is done', async () => {
-	const want = { 400: 'drop', 404: 'drop', 422: 'drop', 413: 'reject', 200: 'done', 202: 'done', 204: 'done' };
+	const want = { 400: 'drop', 422: 'drop', 413: 'reject', 200: 'done', 202: 'done', 204: 'done' };
 	const quiet = { warn: console.warn, error: console.error };
 	console.warn = console.error = () => {};
 	try {
@@ -54,5 +54,35 @@ test('permanent answers stop at once; 413 rejects; 2xx is done', async () => {
 		}
 	} finally {
 		Object.assign(console, quiet);
+	}
+});
+
+test('404 (hook not configured) is retried 3 times, logged as an error, then throws', async () => {
+	const errors = [];
+	const { error } = console;
+	console.error = (msg) => void errors.push(msg);
+	try {
+		const r = await always(404);
+		await assert.rejects(r.run, /API unavailable \(status 404\)/);
+		assert.equal(r.calls(), 3);
+		assert.equal(errors.length, 3);
+		assert.match(errors[0], /404/);
+	} finally {
+		console.error = error;
+	}
+});
+
+test('400 and 422 (malformed) drop after 1 attempt', async () => {
+	const { warn } = console;
+	console.warn = () => {};
+	try {
+		for (const status of [400, 422]) {
+			const r = await always(status);
+			assert.equal(await r.run, 'drop', String(status));
+			assert.equal(r.calls(), 1, `${status}: attempts`);
+			assert.deepEqual(r.waits, [], `${status}: no wait`);
+		}
+	} finally {
+		console.warn = warn;
 	}
 });

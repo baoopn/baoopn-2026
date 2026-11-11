@@ -33,8 +33,8 @@ test('classifies API answers', () => {
 	const want = {
 		200: 'done', 204: 'done',
 		413: 'reject',
-		400: 'drop', 404: 'drop', 422: 'drop',
-		401: 'retry', 403: 'retry', 408: 'retry', 425: 'retry', 429: 'retry',
+		400: 'drop', 422: 'drop',
+		404: 'retry', 401: 'retry', 403: 'retry', 408: 'retry', 425: 'retry', 429: 'retry',
 		409: 'retry', 500: 'retry', 502: 'retry', 503: 'retry', 301: 'retry', 0: 'retry',
 	};
 	for (const [status, action] of Object.entries(want)) {
@@ -80,7 +80,7 @@ async function quietly(fn) {
 }
 
 test('forward drops permanent answers and refuses 413', async () => {
-	for (const status of [400, 404, 422]) {
+	for (const status of [400, 422]) {
 		let n = 0;
 		const r = await quietly(() =>
 			forward(raw, { to: 'x' }, env, { fetchImpl: async () => (n++, { status }), wait: async () => {} })
