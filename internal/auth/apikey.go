@@ -40,16 +40,33 @@ func verifyAPIKey(ctx context.Context, secret string) (*clerk.APIKey, error) {
 
 // apiKeyAuth authenticates a request that carries a Clerk user API key. It
 // never logs the secret, the header or a raw error message.
+//
+// A cached valid key is never limited. Otherwise a client over
+// keyFailuresPerMinute gets 429; a key of the wrong shape, or one Clerk
+// refused within rejectTTL, is refused without asking Clerk. Clerk failures
+// (401, 403, 429, 5xx, network) are 502 and neither cached nor counted.
 func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, secret string) {
 	ctx := r.Context()
 	userID, keyID, ok := a.cachedKey(secret)
 	if !ok {
+		client, now := httpapi.ClientBucket(r), a.now()
+		if a.keyFails.blocked(client, now) {
+			w.Header().Set("Retry-After", "60")
+			httpapi.Error(w, http.StatusTooManyRequests, "rate_limited", "too many invalid API keys")
+			return
+		}
+		if !apiKeyShape.MatchString(secret) || a.keyRefused(secret) {
+			a.keyFails.fail(client, now)
+			httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
+			return
+		}
 		k, err := a.verifyKey(ctx, secret)
 		if err != nil {
 			var apiErr *clerk.APIErrorResponse
 			if errors.As(err, &apiErr) && keyRejected(apiErr.HTTPStatusCode) {
 				a.log.WarnContext(ctx, "clerk api key rejected",
 					slog.Int("status", apiErr.HTTPStatusCode), slog.String("clerk_trace_id", apiErr.TraceID))
+				a.refuse(secret, client, now)
 				httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
 				return
 			}
@@ -65,6 +82,7 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 		exp, valid := a.keyUsable(k)
 		if !valid {
 			a.log.WarnContext(ctx, "clerk api key not usable", slog.String("key_id", k.ID))
+			a.refuse(secret, client, now)
 			httpapi.Error(w, http.StatusUnauthorized, "unauthorized", "invalid API key")
 			return
 		}
@@ -91,6 +109,12 @@ func (a *Authenticator) apiKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	u.Via = "api_key"
 	a.log.DebugContext(ctx, "admin api key accepted", slog.String("user", u.ID), slog.String("key_id", keyID))
 	next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, ctxKey{}, u)))
+}
+
+// refuse remembers secret as refused and counts one failure for client.
+func (a *Authenticator) refuse(secret, client string, now time.Time) {
+	a.storeRefused(secret)
+	a.keyFails.fail(client, now)
 }
 
 // keyRejected reports whether a Clerk error status means the key itself is

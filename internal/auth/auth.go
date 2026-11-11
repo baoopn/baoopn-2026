@@ -73,6 +73,10 @@ type Authenticator struct {
 	mu       sync.Mutex
 	cache    map[string]cached
 	keyCache map[[32]byte]keyCached
+	// rejectedKeys holds when Clerk refused a key, under the SHA-256 of
+	// its secret.
+	rejectedKeys map[[32]byte]time.Time
+	keyFails     *keyFailLimiter
 }
 
 // Config configures the authenticator.
@@ -104,6 +108,7 @@ func New(c Config, log *slog.Logger) *Authenticator {
 	}
 	a := &Authenticator{emails: emails, userIDs: ids, role: c.AdminRole, allowLoopback: c.Dev,
 		log: log, cache: map[string]cached{}, keyCache: map[[32]byte]keyCached{},
+		rejectedKeys: map[[32]byte]time.Time{}, keyFails: newKeyFailLimiter(keyFailuresPerMinute),
 		verifyKey: verifyAPIKey, fetchUser: user.Get, now: time.Now}
 	if u, err := url.Parse(c.PublicURL); err == nil && u.Host != "" {
 		a.parties = []string{u.Scheme + "://" + u.Host}
