@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +42,10 @@ type Module struct {
 	maxStreamsPerClient int
 	keepAlive           time.Duration
 	writeTimeout        time.Duration
+	maxAge              time.Duration
+	maxAgeJitter        time.Duration
+	closing             chan struct{} // closed by CloseStreams
+	closeOnce           sync.Once
 }
 
 // New returns the listening module. An empty BaseURL serves empty results.
@@ -53,7 +58,8 @@ func New(d Deps) *Module {
 	}
 	m := &Module{base: strings.TrimRight(d.BaseURL, "/"), log: d.Log, http: d.HTTP, cache: newCache(time.Now),
 		maxStreams: maxStreams, maxStreamsPerClient: maxStreamsPerClient,
-		keepAlive: streamKeepAlive, writeTimeout: streamWriteTimeout}
+		keepAlive: streamKeepAlive, writeTimeout: streamWriteTimeout,
+		maxAge: streamMaxAge, maxAgeJitter: streamMaxAgeJitter, closing: make(chan struct{})}
 	if m.base != "" {
 		m.hub = newHub(m.base, d.StreamHTTP, d.Log)
 	}

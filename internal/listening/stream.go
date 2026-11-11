@@ -2,6 +2,7 @@ package listening
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -21,6 +22,12 @@ const (
 	// leaves room for a few tabs, or a few people behind one NAT. Clients
 	// over it fall back to polling.
 	maxStreamsPerClient = 8
+	// streamMaxAge ends each stream after a while (plus up to
+	// streamMaxAgeJitter, so clients do not reconnect in step); the client
+	// reconnects through the retry delay, which spreads streams over fresh
+	// connections and API instances.
+	streamMaxAge       = 30 * time.Minute
+	streamMaxAgeJitter = 5 * time.Minute
 )
 
 // streamSlots counts open streams, in total and per client bucket.
@@ -64,6 +71,19 @@ func (s *streamSlots) open() int {
 	return s.total
 }
 
+// CloseStreams ends every open now-playing stream and refuses new ones, so
+// open streams do not hold up server shutdown. Safe to call more than once.
+func (m *Module) CloseStreams() { m.closeOnce.Do(func() { close(m.closing) }) }
+
+// streamLifetime is the max age of one stream, with jitter.
+func (m *Module) streamLifetime() time.Duration {
+	d := m.maxAge
+	if m.maxAgeJitter > 0 {
+		d += rand.N(m.maxAgeJitter)
+	}
+	return d
+}
+
 // Streams implements httpapi.Streamer: long-lived routes mounted under
 // /api/v1 without the request timeout.
 func (m *Module) Streams(r chi.Router) {
@@ -73,6 +93,13 @@ func (m *Module) Streams(r chi.Router) {
 // stream serves now-playing as Server-Sent Events: the cached snapshot first,
 // then every change, with keep-alive comments in between.
 func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
+	select {
+	case <-m.closing:
+		w.Header().Set("Retry-After", "10")
+		httpapi.Error(w, http.StatusServiceUnavailable, "shutting_down", "the server is restarting, try again shortly")
+		return
+	default:
+	}
 	release, status := m.streams.acquire(httpapi.ClientBucket(r), m.maxStreams, m.maxStreamsPerClient)
 	if release == nil {
 		w.Header().Set("Retry-After", "30")
@@ -117,10 +144,16 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 
 	ka := time.NewTicker(m.keepAlive)
 	defer ka.Stop()
+	maxAge := time.NewTimer(m.streamLifetime())
+	defer maxAge.Stop()
 	for {
 		var err error
 		select {
 		case <-r.Context().Done():
+			return
+		case <-m.closing:
+			return
+		case <-maxAge.C:
 			return
 		case <-ka.C:
 			extend()
