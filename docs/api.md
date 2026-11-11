@@ -138,6 +138,8 @@ Scripts can call the admin API with a Clerk user API key instead of a session to
   for a user who is not an admin, and 502 `auth_unavailable` when it cannot reach Clerk
   or Clerk rejects the server's own secret key.
 - The API caches a checked key for up to 60 s, so a revoked key can keep working for up to 60 s.
+- A key not shaped like `ak_…` is refused without asking Clerk. A refused key is remembered for
+  60 s. After 10 refused keys in a minute a client gets 429 `rate_limited` for new keys.
 - The same limit of 600 requests per minute per IP applies.
 
 ```
@@ -484,6 +486,9 @@ manual runs. No secret value reaches the API: `secrets` only says which ones are
     `processing`); after the last attempt it is `failed` with `"storage unavailable"`.
   - A failed upload keeps its original for `MEDIA_FAILED_RETENTION` (24 h) so
     `POST /media/{id}/retry` can queue it again; after that the retry answers 410 `gone`.
+  - A cropped upload is never published uncropped: if its conversion cannot finish it gives
+    `status: failed`, and `POST /media/{id}/retry` queues the crop again. A job whose worker
+    stopped (lease expired for `MEDIA_FALLBACK_AFTER`) falls back the same way.
 - **Dedupe:** the same uncropped original uploaded again returns the existing `Media`;
   `sha256` is computed on the stored bytes.
 - **Orphan cleanup** (Settings → Media storage):
@@ -524,4 +529,5 @@ manual runs. No secret value reaches the API: `secrets` only says which ones are
 the body. Headers: `X-Envelope-To`, `X-Envelope-From`, `X-Timestamp` (unix seconds),
 `X-Signature` = hex(HMAC-SHA256(`INBOUND_WEBHOOK_SECRET`, timestamp + "." + X-Envelope-To + "\n" + body)). The
 timestamp must be within 5 minutes. Responses: `204` handled or dropped, `401` bad signature,
-`503` retryable.
+`429` too many bad signatures from one client (signed calls are never limited), `503` retryable
+(busy, rate limit, body read failed).
