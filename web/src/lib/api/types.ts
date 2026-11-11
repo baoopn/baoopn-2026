@@ -291,7 +291,7 @@ export interface OrphanCandidate {
 	age_seconds: number;
 	reason: string;
 	eligible: boolean;
-	blocked: '' | 'grace' | 'disabled';
+	blocked: '' | 'grace' | 'disabled' | 'truncated'; // truncated: bucket listing cut short, rows kept
 	eligible_at?: string; // blocked = grace
 }
 
