@@ -8,6 +8,7 @@ import {
 	windowLimiter,
 	withSecurityHeaders
 } from '#lib/server/security-headers.js';
+import { isClientAbort, stripHopHeaders, upstreamUnavailable } from '#lib/server/proxy.js';
 import { preloadAsset, robotsHeader } from '#lib/site/seo.js';
 
 /**
@@ -23,7 +24,6 @@ import { preloadAsset, robotsHeader } from '#lib/site/seo.js';
  * Someone hitting the origin directly is not a Cloudflare IP, so their CF-*
  * headers are ignored.
  */
-const HOP_HEADERS = ['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'host'];
 const SPOOFABLE = [
 	'x-client-ip',
 	'x-client-country',
@@ -62,8 +62,8 @@ function clientHeaders(request: Request, peer: string): Headers {
 
 /** Copies request headers, dropping hop-by-hop and spoofable ones, then adds ours. */
 function forwardHeaders(from: Headers, request: Request, ip: string): Headers {
-	const headers = new Headers(from);
-	for (const k of [...HOP_HEADERS, ...SPOOFABLE]) headers.delete(k);
+	const headers = stripHopHeaders(new Headers(from));
+	for (const k of SPOOFABLE) headers.delete(k);
 	for (const [k, v] of clientHeaders(request, ip)) headers.set(k, v);
 	return headers;
 }
@@ -88,16 +88,26 @@ async function cspReport(request: Request): Promise<Response> {
 async function proxy(event: Parameters<Handle>[0]['event']): Promise<Response> {
 	const { pathname, search } = event.url;
 	const headers = forwardHeaders(event.request.headers, event.request, event.getClientAddress());
-	const res = await fetch(API_URL + pathname + search, {
-		method: event.request.method,
-		headers,
-		body: ['GET', 'HEAD'].includes(event.request.method) ? undefined : event.request.body,
-		// @ts-expect-error duplex is required by undici for streamed bodies
-		duplex: 'half',
-		redirect: 'manual',
-		// A client that goes away (e.g. a closed SSE tab) aborts the upstream request.
-		signal: event.request.signal
-	});
+	let res: Response;
+	try {
+		res = await fetch(API_URL + pathname + search, {
+			method: event.request.method,
+			headers,
+			body: ['GET', 'HEAD'].includes(event.request.method) ? undefined : event.request.body,
+			// @ts-expect-error duplex is required by undici for streamed bodies
+			duplex: 'half',
+			redirect: 'manual',
+			// A client that goes away (e.g. a closed SSE tab) aborts the upstream request.
+			signal: event.request.signal
+		});
+	} catch (err) {
+		// A client abort is routine; nobody reads this response. Anything else
+		// means the API is down or unreachable.
+		if (!isClientAbort(err, event.request.signal)) {
+			console.error(JSON.stringify({ msg: 'api proxy failed', path: pathname, error: String(err) }));
+		}
+		return upstreamUnavailable();
+	}
 	// res.body is passed through as a stream, chunk by chunk, so SSE
 	// (/api/v1/listening/now-playing/stream) is not buffered. fetch already
 	// decoded any compression, so the encoding and length no longer apply.
