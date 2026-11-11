@@ -2,6 +2,8 @@ package contact
 
 import (
 	"bufio"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -103,8 +105,9 @@ func TestInboundSlowBodyTimesOut(t *testing.T) {
 	}
 }
 
-// TestInboundBadSignaturesLimitedPerClient: one client's failed checks lock
-// out that client only; signed calls never count toward it.
+// TestInboundBadSignaturesLimitedPerClient: one client's failed checks are
+// answered 429 once over the limit, for that client only; signed calls never
+// count toward it and are never limited by it.
 func TestInboundBadSignaturesLimitedPerClient(t *testing.T) {
 	e := newEnv(t, true, testDomain)
 	_, tok := e.thread("priya@example.com")
@@ -122,10 +125,78 @@ func TestInboundBadSignaturesLimitedPerClient(t *testing.T) {
 			t.Fatalf("bad %d: %d", i, rec.Code)
 		}
 	}
-	if rec := e.serve(signedReq(replyAddr(tok), raw, "10.6.6.6:1", "")); rec.Code != 429 {
-		t.Fatalf("locked out client: %d", rec.Code)
+	if rec := e.serve(signedReq(replyAddr(tok), raw, "10.6.6.6:1", bad)); rec.Code != 429 {
+		t.Fatalf("over the limit: %d", rec.Code)
+	}
+	// Another client's failures are its own.
+	if rec := e.serve(signedReq(replyAddr(tok), raw, "10.7.7.7:1", bad)); rec.Code != 401 {
+		t.Fatalf("other client, bad: %d", rec.Code)
 	}
 	if rec := e.serve(signedReq(replyAddr(tok), raw, "10.9.9.9:1", "")); rec.Code != 204 {
 		t.Fatalf("other client: %d", rec.Code)
+	}
+}
+
+// TestInboundSignedCallNotBlockedAfterJunk: junk from the worker's own
+// address cannot lock out real deliveries. After 40 bad posts a signed post
+// still gets 204 and is stored.
+func TestInboundSignedCallNotBlockedAfterJunk(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	id, tok := e.thread("priya@example.com")
+	bad := Sign("wrong", "1", "x", nil)
+	junk := email("x@example.com", replyAddr(tok), "<j@x>", "junk")
+	for range 40 {
+		e.serve(signedReq(replyAddr(tok), junk, "10.5.5.5:1", bad))
+	}
+	raw := email("priya@example.com", replyAddr(tok), "<real-1@x>", "still here")
+	if rec := e.serve(signedReq(replyAddr(tok), raw, "10.5.5.5:1", "")); rec.Code != 204 {
+		t.Fatalf("signed after junk: %d %s", rec.Code, rec.Body)
+	}
+	if n := e.count(`SELECT count(*) FROM thread_messages WHERE thread_id = $1 AND rfc_message_id = '<real-1@x>'`, id); n != 1 {
+		t.Fatalf("stored %d", n)
+	}
+}
+
+// TestInboundBlockedClientFailureGets429: once a client is over the limit,
+// each further failure, whether at the header check or the body check, gets
+// 429 rate_limited.
+func TestInboundBlockedClientFailureGets429(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	_, tok := e.thread("priya@example.com")
+	raw := email("priya@example.com", replyAddr(tok), "<k1@x>", "hello")
+	bad := Sign("wrong", "1", "x", nil)
+	for range badSignaturesPerMinute {
+		e.serve(signedReq(replyAddr(tok), raw, "10.4.4.4:1", bad))
+	}
+	if rec := e.serve(signedReq(replyAddr(tok), raw, "10.4.4.4:1", bad)); rec.Code != 429 ||
+		!strings.Contains(rec.Body.String(), "rate_limited") {
+		t.Fatalf("bad body signature: %d %s", rec.Code, rec.Body)
+	}
+	noSig := signedReq(replyAddr(tok), raw, "10.4.4.4:1", "")
+	noSig.Header.Del("X-Signature")
+	if rec := e.serve(noSig); rec.Code != 429 || !strings.Contains(rec.Body.String(), "rate_limited") {
+		t.Fatalf("no signature header: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// failingBody fails every read with an error readInbound cannot classify.
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+// TestInboundBodyReadErrorIs503: an unclassified body read error is
+// retryable: 503 read_failed, never 400, which the worker would drop.
+func TestInboundBodyReadErrorIs503(t *testing.T) {
+	e := newEnv(t, true, testDomain)
+	_, tok := e.thread("priya@example.com")
+	req := signedReq(replyAddr(tok), "", "10.3.3.3:1", "")
+	req.Body = io.NopCloser(failingBody{})
+	req.ContentLength = -1
+	rec := e.serve(req)
+	if rec.Code != 503 || !strings.Contains(rec.Body.String(), "read_failed") {
+		t.Fatalf("read error: %d %s", rec.Code, rec.Body)
+	}
+	if n := len(e.m.reads); n != 0 {
+		t.Fatalf("%d slots still held", n)
 	}
 }

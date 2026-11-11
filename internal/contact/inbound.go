@@ -29,8 +29,9 @@ const (
 	inboundReads       = 8
 	inboundReadTimeout = 20 * time.Second
 	// badSignaturesPerMinute is how many failed signature checks one client
-	// may make; past it the hook answers 429 before any other check. Signed
-	// calls never count.
+	// may make; past it a failed check answers 429 instead of 401. Only
+	// failures count and only failures are answered 429: a call that passes
+	// the signature check never consults the limiter.
 	badSignaturesPerMinute = 30
 	// inboundPerMinute caps signed deliveries site-wide (not per IP: every
 	// call comes from Cloudflare). Past it the hook answers 503.
@@ -53,10 +54,6 @@ func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	now := m.d.Now()
 	client := httpapi.ClientBucket(r)
-	if m.failures.blocked(client, now) {
-		httpapi.Error(w, http.StatusTooManyRequests, "rate_limited", "too many bad requests")
-		return
-	}
 	// Cheap checks before a read slot is taken or the body read: the size the
 	// client announces, and signature headers that could be valid now.
 	if r.ContentLength > maxInboundBytes {
@@ -65,8 +62,7 @@ func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	ts, sig := r.Header.Get("X-Timestamp"), r.Header.Get("X-Signature")
 	if _, _, ok := signedHeaders(ts, sig, now); !ok {
-		m.failures.fail(client, now)
-		httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
+		m.badSignature(w, client, now)
 		return
 	}
 	raw, status := m.readInbound(w, r)
@@ -82,13 +78,14 @@ func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, status, "timeout", "the body took too long")
 		return
 	default:
-		httpapi.Error(w, http.StatusBadRequest, "bad_request", "could not read the body")
+		// An unclassified read error (statusReadFailed) is retryable: the
+		// hook never answers 400, which the worker would drop.
+		httpapi.Error(w, http.StatusServiceUnavailable, "read_failed", "could not read the body, try again later")
 		return
 	}
 	envTo := r.Header.Get("X-Envelope-To")
 	if !verify(m.d.InboundSecret, ts, envTo, sig, raw, m.d.Now()) {
-		m.failures.fail(client, now)
-		httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
+		m.badSignature(w, client, now)
 		return
 	}
 	if !m.inboundRate.take(m.d.Now()) {
@@ -112,6 +109,17 @@ func (m *Module) handleInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// badSignature answers a failed signature check: it counts the failure for
+// client, then answers 429 once the client is over badSignaturesPerMinute,
+// else 401.
+func (m *Module) badSignature(w http.ResponseWriter, client string, now time.Time) {
+	if !m.failures.fail(client, now) {
+		httpapi.Error(w, http.StatusTooManyRequests, "rate_limited", "too many bad signatures")
+		return
+	}
+	httpapi.Error(w, http.StatusUnauthorized, "bad_signature", "bad signature")
 }
 
 // receive stores one signed email. It returns a reject for mail that is not
