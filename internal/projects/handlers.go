@@ -3,6 +3,7 @@ package projects
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -197,8 +198,18 @@ func (m *Module) adminReorder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// adminSyncTimeout bounds an admin-triggered GitHub sync.
-const adminSyncTimeout = 5 * time.Minute
+const (
+	// adminSyncTimeout bounds an admin-triggered GitHub sync.
+	adminSyncTimeout = 5 * time.Minute
+	// adminSyncWait is how long the request waits for it: below the 60 s
+	// admin request timeout, the 2 min WriteTimeout and Cloudflare's ~100 s.
+	adminSyncWait = 50 * time.Second
+)
+
+type syncOutcome struct {
+	res SyncResult
+	err error
+}
 
 func (m *Module) adminSync(w http.ResponseWriter, r *http.Request) {
 	if m.syncer == nil || m.syncer.user == "" {
@@ -211,16 +222,45 @@ func (m *Module) adminSync(w http.ResponseWriter, r *http.Request) {
 	}
 	// The sync outlives the request timeout and a client that goes away:
 	// cancelling it mid-way would roll back the upsert and leave details
-	// half done. It gets its own, longer bound instead.
+	// half done. It runs in the background under its own, longer bound and
+	// holds the lock until it ends, so syncs never overlap.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), adminSyncTimeout)
-	res, err := m.syncer.syncLocked(ctx)
-	cancel()
-	m.syncer.mu.Unlock()
-	if err != nil {
-		m.fail(w, r, err)
-		return
+	done := make(chan syncOutcome, 1)
+	go func() {
+		defer cancel()
+		defer m.syncer.mu.Unlock()
+		res, err := m.syncer.syncLocked(ctx)
+		done <- syncOutcome{res, err}
+	}()
+	wait := time.NewTimer(m.syncWait)
+	defer wait.Stop()
+	select {
+	case o := <-done:
+		if o.err != nil {
+			m.fail(w, r, o.err)
+			return
+		}
+		httpapi.JSON(w, http.StatusOK, o.res)
+	case <-wait.C:
+		m.syncDetached(w, done)
+	case <-r.Context().Done():
+		m.syncDetached(w, done)
 	}
-	httpapi.JSON(w, http.StatusOK, res)
+}
+
+// syncDetached answers 202 while the sync goes on, and logs its outcome.
+func (m *Module) syncDetached(w http.ResponseWriter, done <-chan syncOutcome) {
+	httpapi.JSON(w, http.StatusAccepted, map[string]string{"status": "running"})
+	log := m.log
+	go func() {
+		o := <-done
+		if o.err != nil {
+			log.Warn("projects: background github sync failed", logging.Err(o.err))
+			return
+		}
+		log.Info("projects: background github sync done", slog.Int("added", o.res.Added),
+			slog.Int("updated", o.res.Updated), slog.Int("total", o.res.Total))
+	}()
 }
 
 // fail maps errors to the shared error codes.

@@ -28,6 +28,7 @@ type fakeGitHub struct {
 	remaining int
 	fail      int // status to fail repo listing with (0 = none)
 	failPaths map[string]int
+	block     chan struct{} // when set, repo listing waits for it to close
 	calls     map[string]int
 	authSeen  string
 }
@@ -52,6 +53,12 @@ func (f *fakeGitHub) count(path string) int {
 }
 
 func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	block := f.block
+	f.mu.Unlock()
+	if block != nil && r.URL.Path == "/users/bao/repos" {
+		<-block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[r.URL.Path]++

@@ -2,12 +2,12 @@ package projects
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/baoopn/baoopn-2026/internal/settings"
 )
@@ -50,18 +50,47 @@ func TestDetailsContinuePastFailingRepo(t *testing.T) {
 }
 
 // An admin sync keeps running when the request is cancelled (client gone,
-// request timeout), so the upsert is not rolled back mid-way.
+// request timeout), so the upsert is not rolled back mid-way: the handler
+// answers 202 and the sync finishes in the background, holding the lock.
 func TestAdminSyncIgnoresRequestCancel(t *testing.T) {
 	e := newEnv(t)
+	release := make(chan struct{})
+	e.gh.set(func(f *fakeGitHub) { f.block = release }) // repo listing waits
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	rec := httptest.NewRecorder()
 	e.admin.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, "POST", "/projects/sync", nil))
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"running"`) {
 		t.Fatalf("sync with cancelled request: %d %s", rec.Code, rec.Body)
 	}
-	var out struct{ Data SyncResult }
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Data.Total != 3 {
-		t.Fatalf("result %+v %v", out.Data, err)
+	// Still running: a second sync is refused.
+	if code := e.do(e.admin, "POST", "/projects/sync", nil, nil); code != http.StatusConflict {
+		t.Fatalf("overlapping sync: %d", code)
+	}
+	close(release)
+	e.s.mu.Lock() // waits for the background sync
+	e.s.mu.Unlock()
+	var n int
+	if err := e.m.db.QueryRow(context.Background(), `SELECT count(*) FROM projects`).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("projects after background sync: %d %v", n, err)
+	}
+}
+
+// A sync slower than the wait answers 202; a fast one answers 200 as before.
+func TestAdminSyncSlowAnswers202(t *testing.T) {
+	e := newEnv(t)
+	e.m.syncWait = 20 * time.Millisecond
+	release := make(chan struct{})
+	e.gh.set(func(f *fakeGitHub) { f.block = release })
+	var out struct{ Data map[string]string }
+	if code := e.do(e.admin, "POST", "/projects/sync", nil, &out); code != http.StatusAccepted || out.Data["status"] != "running" {
+		t.Fatalf("slow sync: %d %+v", code, out.Data)
+	}
+	close(release)
+	e.s.mu.Lock()
+	e.s.mu.Unlock()
+	e.gh.set(func(f *fakeGitHub) { f.block = nil })
+	if res := e.sync(); res.Total != 3 {
+		t.Fatalf("fast sync %+v", res)
 	}
 }

@@ -95,7 +95,7 @@ role claim is used only when Clerk cannot be reached; a successful Clerk lookup 
 | GET | `/projects/{id}` | – | `AdminProject` |
 | PATCH | `/projects/{id}` | `ProjectPatch` (`logo_url` follows the `cover_url` rule: http(s) URL or /path, `""` clears it. `logo_bg` is `tile` or `ink`; other values 422) | `AdminProject` |
 | DELETE | `/projects/{id}` | – | `204` (a synced repo comes back hidden on next sync unless archived) |
-| POST | `/projects/sync` | – | `SyncResult` (pull repos of `GITHUB_USER`; new ones are hidden) |
+| POST | `/projects/sync` | – | `SyncResult` (pull repos of `GITHUB_USER`; new ones are hidden). If the sync takes longer than 50 s (or the client goes away): `202` with `{ status: "running" }`, and it finishes in the background (up to 5 min); 409 `sync_running` while it runs |
 | POST | `/projects/reorder` | `{ ids: number[] }` | `204` (sort_order = index) |
 | GET | `/posts` | `state`, `category`, `q` | `AdminPost[]` |
 | POST | `/posts` | `PostInput` (`category` missing or empty = `tech`; other values 422) | `AdminPost` (409 `slug_taken`) |

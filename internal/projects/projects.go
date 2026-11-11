@@ -25,6 +25,8 @@ type Module struct {
 	db     *pgxpool.Pool
 	log    *slog.Logger
 	syncer *Syncer
+	// syncWait is how long POST /projects/sync waits before answering 202.
+	syncWait time.Duration
 }
 
 // New returns the projects module. Syncer may be nil (sync disabled).
@@ -32,7 +34,7 @@ func New(d Deps) *Module {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
-	return &Module{db: d.DB, log: d.Log, syncer: d.Syncer}
+	return &Module{db: d.DB, log: d.Log, syncer: d.Syncer, syncWait: adminSyncWait}
 }
 
 // project is one row of the projects table.
