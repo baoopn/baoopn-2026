@@ -519,7 +519,8 @@ manual runs. No secret value reaches the API: `secrets` only says which ones are
     local copy of a bucket file; only deleted when its key is sent), `original` and `temp`
     (upload leftovers older than 24 h). Processing uploads and failed ones whose original is
     kept for a retry are never candidates. Other bucket keys and files are left alone and
-    counted as `foreign`; with more than 10,000 bucket keys no bucket file is deleted.
+    counted as `foreign`; with more than 10,000 bucket keys (a truncated listing) no bucket
+    file and no `row` candidate is deleted: such rows show `blocked: "truncated"` in the plan.
   - Each run re-checks every candidate under a lock that content saves share, deletes at
     most `MEDIA_ORPHAN_MAX_PER_PASS` (50) and logs each deletion. The last run's counts are
     kept in the `media.orphans` setting.
