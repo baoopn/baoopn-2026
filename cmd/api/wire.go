@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path"
@@ -194,7 +195,10 @@ func followRename(pool *pgxpool.Pool, mediaPublicURL, sitePublicURL string) func
 		bases = append(bases, strings.TrimRight(sitePublicURL, "/")+"/media")
 	}
 	return func(ctx context.Context, oldURL, newURL string) error {
-		_, err := mediaurls.Rewrite(ctx, pool, mediaurls.Rename(path.Base(oldURL), newURL, bases...))
+		st, err := mediaurls.Rewrite(ctx, pool, mediaurls.Rename(path.Base(oldURL), newURL, bases...))
+		if err == nil && len(st.Skipped) > 0 {
+			err = fmt.Errorf("rows kept changing, links not updated: %s", strings.Join(st.Skipped, ", "))
+		}
 		return err
 	}
 }
