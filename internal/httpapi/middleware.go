@@ -70,8 +70,8 @@ func RateLimitWindow(n int, window time.Duration) func(http.Handler) http.Handle
 	if n <= 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
-	return httprate.Limit(n, window,
-		httprate.WithKeyFuncs(func(r *http.Request) (string, error) { return ipBucket(ClientIP(r)), nil }),
+	return httprate.LimitBy(n, window,
+		func(r *http.Request) (string, error) { return ipBucket(ClientIP(r)), nil },
 		httprate.WithLimitHandler(func(w http.ResponseWriter, _ *http.Request) {
 			Error(w, http.StatusTooManyRequests, "rate_limited", "too many requests, slow down")
 		}))

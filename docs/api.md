@@ -2,7 +2,13 @@
 
 The TypeScript types in `web/src/lib/api/types.ts` are the source of truth for shapes.
 Envelopes: `{ "data": …, "meta"?: PageMeta }` on success, `{ "error": { "code", "message" } }`
-on failure. The browser always calls the same origin (`/api/...`); the SvelteKit server proxies
+on failure. A JSON body that does not parse (bad syntax, wrong types, unknown fields) gets 400
+`bad_request` with the fixed message "invalid JSON body"; one over 2 MiB gets 413 `too_large`.
+An upstream failure (GitHub, spotify-tracker, the mail server, media storage) answers 503 with
+its own code (`github_unavailable`, `upstream_unavailable`, `mail_failed`, `storage_unavailable`),
+never 502: the proxy in front
+replaces 502 and 504 bodies with an HTML error page, which would hide the JSON code.
+The browser always calls the same origin (`/api/...`); the SvelteKit server proxies
 to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Country` and
 `X-Internal-Token`.
 
@@ -58,6 +64,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 - At most 500 concurrent streams: above that `503 too_many_streams` with `Retry-After`.
   At most 8 per client IP (IPv6 /64): above that `429 too_many_streams` with
   `Retry-After`. Either way the site falls back to polling.
+- Each stream ends after 30 to 35 min (jittered); the client reconnects after the
+  `retry` delay. On shutdown every open stream ends at once, and new ones get
+  `503 shutting_down` with `Retry-After: 10`.
 - Mounted under `/api/v1` with the public rate limit but without the 20 s request
   timeout. The handler clears the server's 2 min read deadline and gives each write
   its own 30 s deadline, so a client that stops reading is dropped.
@@ -71,7 +80,11 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 ## Admin — `/api/admin` (Bearer Clerk session token or user API key)
 
 `GET /config` is unauthenticated (`AdminConfig`). Everything else needs
-`Authorization: Bearer <clerk session token>`; 401 `unauthorized`, 403 `forbidden`.
+`Authorization: Bearer <clerk session token>`; 401 `unauthorized`, 403 `forbidden` (not an
+admin, or Clerk reports the user banned or locked), 503 `auth_unavailable`. The session token's
+role claim is used only when Clerk cannot be reached (network error, 5xx, 429); a successful
+Clerk lookup always wins, and any other Clerk answer is final: a deleted user (Clerk 404) gets
+401 `unauthorized`, anything else 503 `auth_unavailable`.
 
 | Method | Path | Body | Response `data` |
 |---|---|---|---|
@@ -85,7 +98,7 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 | GET | `/projects/{id}` | – | `AdminProject` |
 | PATCH | `/projects/{id}` | `ProjectPatch` (`logo_url` follows the `cover_url` rule: http(s) URL or /path, `""` clears it. `logo_bg` is `tile` or `ink`; other values 422) | `AdminProject` |
 | DELETE | `/projects/{id}` | – | `204` (a synced repo comes back hidden on next sync unless archived) |
-| POST | `/projects/sync` | – | `SyncResult` (pull repos of `GITHUB_USER`; new ones are hidden) |
+| POST | `/projects/sync` | – | `SyncResult` (pull repos of `GITHUB_USER`; new ones are hidden). If the sync takes longer than 50 s (or the client goes away): `202` with `{ status: "running" }`, and it finishes in the background (up to 5 min); 409 `sync_running` while it runs |
 | POST | `/projects/reorder` | `{ ids: number[] }` | `204` (sort_order = index) |
 | GET | `/posts` | `state`, `category`, `q` | `AdminPost[]` |
 | POST | `/posts` | `PostInput` (`category` missing or empty = `tech`; other values 422) | `AdminPost` (409 `slug_taken`) |
@@ -134,8 +147,8 @@ Scripts can call the admin API with a Clerk user API key instead of a session to
 
 - Create the key in `/admin/account`, on the API keys tab. Only keys that belong to an admin work.
 - Send it as `Authorization: Bearer <key>`. The API sees the `ak_` prefix and checks the key with Clerk.
-- The API returns 401 `unauthorized` for an invalid, revoked or expired key, 403 `forbidden`
-  for a user who is not an admin, and 503 `auth_unavailable` when it cannot reach Clerk
+- The API returns 401 `unauthorized` for an invalid, revoked or expired key (or one whose user was deleted), 403 `forbidden`
+  for a user who is not an admin or is banned or locked, and 503 `auth_unavailable` when it cannot reach Clerk
   or Clerk rejects the server's own secret key.
 - The API caches a checked key for up to 60 s, so a revoked key can keep working for up to 60 s.
 - A key not shaped like `ak_…` is refused without asking Clerk. A refused key is remembered for
@@ -507,7 +520,8 @@ manual runs. No secret value reaches the API: `secrets` only says which ones are
     local copy of a bucket file; only deleted when its key is sent), `original` and `temp`
     (upload leftovers older than 24 h). Processing uploads and failed ones whose original is
     kept for a retry are never candidates. Other bucket keys and files are left alone and
-    counted as `foreign`; with more than 10,000 bucket keys no bucket file is deleted.
+    counted as `foreign`; with more than 10,000 bucket keys (a truncated listing) no bucket
+    file and no `row` candidate is deleted: such rows show `blocked: "truncated"` in the plan.
   - Each run re-checks every candidate under a lock that content saves share, deletes at
     most `MEDIA_ORPHAN_MAX_PER_PASS` (50) and logs each deletion. The last run's counts are
     kept in the `media.orphans` setting.
