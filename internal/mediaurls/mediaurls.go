@@ -69,6 +69,26 @@ func LegacyToPublic(publicURL string) func(string) string {
 	}
 }
 
+// Rename rewrites standalone links to the stored file oldName to newURL, in
+// every form a link to it can take: <base>/<oldName> for each non-empty base
+// (the bucket's public domain, the site's own /media URL), then the
+// site-relative /media/<oldName>.
+func Rename(oldName, newURL string, bases ...string) func(string) string {
+	fns := make([]func(string) string, 0, len(bases)+1)
+	for _, b := range bases {
+		if b = strings.TrimRight(b, "/"); b != "" {
+			fns = append(fns, Replace(b+"/"+oldName, newURL))
+		}
+	}
+	fns = append(fns, Replace("/media/"+oldName, newURL))
+	return func(s string) string {
+		for _, fn := range fns {
+			s = fn(s)
+		}
+		return s
+	}
+}
+
 // Replace rewrites standalone occurrences of the URL old to new.
 func Replace(old, new string) func(string) string {
 	return func(s string) string {

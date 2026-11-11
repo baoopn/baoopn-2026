@@ -50,6 +50,24 @@ func TestReplace(t *testing.T) {
 	}
 }
 
+// A fallback rename follows every link form to the old file, and only it.
+func TestRename(t *testing.T) {
+	const old, other = "0123456789abcdef01234567.webp", "fedcba9876543210fedcba98.webp"
+	newURL := pub + "/0123456789abcdef01234567.png"
+	fn := Rename(old, newURL, pub, "https://baoopn.com/media", "")
+	in := "![a](" + pub + "/" + old + ") ![b](/media/" + old + ") ![c](https://baoopn.com/media/" + old +
+		") ![d](/media/" + other + ") ![e](/media/" + old + "x)"
+	want := "![a](" + newURL + ") ![b](" + newURL + ") ![c](" + newURL +
+		") ![d](/media/" + other + ") ![e](/media/" + old + "x)"
+	if got := fn(in); got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+	// Without a public domain the new URL is site-relative.
+	if got := Rename(old, "/media/x.png")("[f](/media/" + old + ")"); got != "[f](/media/x.png)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestRewriteDB(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
