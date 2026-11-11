@@ -221,12 +221,20 @@ func (s *Store) Fail(ctx context.Context, jobID int64, token, msg string, retrya
 	return retry, err
 }
 
-// jobRow is a locked media_jobs row.
+// jobRow is a locked media_jobs row. cropped is true when the upload asked
+// for a crop, which only the worker applies.
 type jobRow struct {
 	id, mediaID           int64
 	phase, ctype          string
 	attempts, maxAttempts int
+	cropped               bool
 }
+
+// msgCropKept ends the error of a cropped upload that could not be converted.
+// Publishing its original would leak the pixels the crop removed, so it fails
+// instead; the original is kept for FailedRetention and Retry re-queues the
+// conversion with the crop.
+const msgCropKept = "; not published uncropped"
 
 // withJob locks job id (if cond, with extra args from $2, holds) and runs fn
 // in a transaction. It waits for a row another transaction holds (the lock is
@@ -235,9 +243,9 @@ type jobRow struct {
 func (s *Store) withJob(ctx context.Context, id int64, cond string, args []any, fn func(pgx.Tx, jobRow) error) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		var j jobRow
-		err := tx.QueryRow(ctx, `SELECT id, media_id, phase, original_content_type, attempts, max_attempts
-			FROM media_jobs WHERE id = $1 AND `+cond+` FOR UPDATE`, append([]any{id}, args...)...).
-			Scan(&j.id, &j.mediaID, &j.phase, &j.ctype, &j.attempts, &j.maxAttempts)
+		err := tx.QueryRow(ctx, `SELECT id, media_id, phase, original_content_type, attempts, max_attempts,
+			crop_w IS NOT NULL FROM media_jobs WHERE id = $1 AND `+cond+` FOR UPDATE`, append([]any{id}, args...)...).
+			Scan(&j.id, &j.mediaID, &j.phase, &j.ctype, &j.attempts, &j.maxAttempts, &j.cropped)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrLeaseLost
 		}
@@ -267,8 +275,13 @@ func (s *Store) requeue(ctx context.Context, tx pgx.Tx, j jobRow, msg string) er
 }
 
 // toFallback turns a conversion that cannot succeed into a fallback job when
-// the original is browser-safe, and fails the media otherwise.
+// the original is browser-safe and uncropped, and fails the media otherwise.
+// Only the worker applies a crop (after orientation), so a cropped upload is
+// never published as its original.
 func (s *Store) toFallback(ctx context.Context, tx pgx.Tx, j jobRow, reason string) error {
+	if j.cropped {
+		return s.markFailed(ctx, tx, j, reason+msgCropKept)
+	}
 	if !imagestrip.BrowserSafe(j.ctype) {
 		return s.markFailed(ctx, tx, j, reason)
 	}

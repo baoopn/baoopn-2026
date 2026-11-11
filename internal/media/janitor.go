@@ -49,7 +49,9 @@ func (s *Store) safeTick(ctx context.Context) (err error) {
 // Tick is one janitor pass:
 //  1. jobs whose lease expired on their last attempt fall back / fail;
 //  2. conversion jobs nobody leased for FallbackAfter fall back
-//     ("converter unavailable");
+//     ("converter unavailable"), and so do running ones whose lease expired
+//     FallbackAfter ago, at any attempt count, because no worker re-leased
+//     them (cropped uploads fail instead; see toFallback);
 //  3. due fallback jobs publish their stripped original;
 //  4. originals of jobs failed longer than FailedRetention ago are deleted;
 //  5. once a day, when turned on, unused media are deleted (orphans.go).
@@ -105,19 +107,46 @@ func (s *Store) expireLeases(ctx context.Context) error {
 	return nil
 }
 
+// staleJobs are the conversion jobs fallbackStale gives up on: sel picks ids
+// ($1 = FallbackAfter in seconds) and cond re-checks the row under its lock
+// (args from $2), so a job a worker leased meanwhile is skipped (ErrLeaseLost).
+var staleJobs = []struct {
+	sel, cond, reason string
+	afterArg          bool // cond takes FallbackAfter as $2
+}{
+	{
+		sel:    `phase = 'convert' AND status = 'queued' AND next_attempt_at < now() - make_interval(secs => $1)`,
+		cond:   `phase = 'convert' AND status = 'queued'`,
+		reason: "converter unavailable",
+	},
+	{
+		sel:      `phase = 'convert' AND status = 'running' AND lease_until < now() - make_interval(secs => $1)`,
+		cond:     `phase = 'convert' AND status = 'running' AND lease_until < now() - make_interval(secs => $2)`,
+		reason:   "converter unavailable: the worker stopped responding",
+		afterArg: true,
+	},
+}
+
 func (s *Store) fallbackStale(ctx context.Context) error {
-	ids, err := s.ids(ctx, `SELECT id FROM media_jobs WHERE phase = 'convert' AND status = 'queued'
-		AND next_attempt_at < now() - make_interval(secs => $1)`, s.fallbackAfter.Seconds())
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		err := s.withJob(ctx, id, `phase = 'convert' AND status = 'queued'`, nil, func(tx pgx.Tx, j jobRow) error {
-			s.log.Warn("media: converter unavailable, falling back", slog.Int64("job", j.id), slog.Int64("media", j.mediaID))
-			return s.toFallback(ctx, tx, j, "converter unavailable")
-		})
-		if err != nil && !errors.Is(err, ErrLeaseLost) {
+	after := s.fallbackAfter.Seconds()
+	for _, st := range staleJobs {
+		ids, err := s.ids(ctx, `SELECT id FROM media_jobs WHERE `+st.sel, after)
+		if err != nil {
 			return err
+		}
+		var args []any
+		if st.afterArg {
+			args = []any{after}
+		}
+		for _, id := range ids {
+			err := s.withJob(ctx, id, st.cond, args, func(tx pgx.Tx, j jobRow) error {
+				s.log.Warn("media: converter unavailable, falling back", slog.Int64("job", j.id),
+					slog.Int64("media", j.mediaID), slog.String("reason", st.reason))
+				return s.toFallback(ctx, tx, j, st.reason)
+			})
+			if err != nil && !errors.Is(err, ErrLeaseLost) {
+				return err
+			}
 		}
 	}
 	return nil
@@ -138,6 +167,12 @@ func (s *Store) publishOriginal(ctx context.Context, j *Job) {
 	var reason string
 	if err := s.db.QueryRow(ctx, `SELECT error FROM media WHERE id = $1`, j.MediaID).Scan(&reason); err != nil {
 		log.Warn("media fallback: load media", logging.Err(err))
+		return
+	}
+	if j.Crop != nil {
+		// A cropped fallback row queued before cropped uploads stopped
+		// falling back: publishing the original would undo the crop.
+		fail(reason + msgCropKept)
 		return
 	}
 	data, err := os.ReadFile(s.originalPath(stem))
