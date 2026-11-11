@@ -36,7 +36,10 @@ const (
 // scratchAge is how old an original or a temp file must be before cleanup.
 const scratchAge = 24 * time.Hour
 
-var tempPrefixes = []string{".up-", ".rq-", ".fb-"}
+// tempPrefixes are the temp files written straight into MEDIA_DIR: uploads,
+// requeues, fallbacks and worker results (mediagrpc CompleteJob). Brand
+// files use .tmp- inside brand/, which the scan does not enter.
+var tempPrefixes = []string{".up-", ".rq-", ".fb-", ".wk-"}
 
 // OrphanCandidate is one thing the cleanup would delete (types.ts).
 type OrphanCandidate struct {

@@ -262,6 +262,7 @@ func TestOrphanLocalDisk(t *testing.T) {
 	writeAged(t, filepath.Join(s.dir, stemN(2)+".png"), time.Hour) // fresh
 	writeAged(t, filepath.Join(s.dir, ".up-old"), 25*time.Hour)
 	writeAged(t, filepath.Join(s.dir, ".rq-new"), time.Hour)
+	writeAged(t, filepath.Join(s.dir, ".wk-old"), 25*time.Hour) // interrupted worker result
 	writeAged(t, filepath.Join(s.dir, "notes.txt"), 30*day) // foreign
 	writeAged(t, filepath.Join(s.dir, "other", "x"), 30*day)
 	writeAged(t, filepath.Join(s.originalsDir(), stemN(3)), 25*time.Hour) // no row
@@ -272,7 +273,7 @@ func TestOrphanLocalDisk(t *testing.T) {
 
 	p := mustPlan(t, s)
 	want := map[string]bool{"local:" + stray: true, "local:" + stemN(2) + ".png": false, "temp:.up-old": true,
-		"temp:.rq-new": false, "original:" + stemN(3): true}
+		"temp:.rq-new": false, "temp:.wk-old": true, "original:" + stemN(3): true}
 	if len(p.Candidates) != len(want) {
 		t.Fatalf("candidates = %v", keys(p))
 	}
@@ -289,10 +290,10 @@ func TestOrphanLocalDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Deleted.Local != 1 || res.Deleted.Temp != 1 || res.Deleted.Originals != 1 || res.Errors != 0 || res.Bytes != 30 {
+	if res.Deleted.Local != 1 || res.Deleted.Temp != 2 || res.Deleted.Originals != 1 || res.Errors != 0 || res.Bytes != 40 {
 		t.Fatalf("result = %+v", res)
 	}
-	for name, exists := range map[string]bool{stray: false, ".up-old": false, ".rq-new": true, "notes.txt": true,
+	for name, exists := range map[string]bool{stray: false, ".up-old": false, ".wk-old": false, ".rq-new": true, "notes.txt": true,
 		stemN(5) + ".png": true, "originals/" + stemN(3): false, "originals/" + stemN(4): true} {
 		if _, err := os.Stat(filepath.Join(s.dir, name)); (err == nil) != exists {
 			t.Errorf("%s exists=%v, want %v", name, err == nil, exists)
