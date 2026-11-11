@@ -217,7 +217,7 @@
 			{/if}
 
 			<div class="prose">
-				<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized server-rendered Markdown -->
+				<!-- eslint-disable-next-line svelte/no-at-html-tags -- admin-authored Markdown; the API keeps its raw HTML as-is (trusted), it is not sanitized -->
 				{@html part.content_html}
 			</div>
 

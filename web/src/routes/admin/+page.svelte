@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { LoaderCircle, Plus, RefreshCw } from '@lucide/svelte';
-	import type { Overview, SyncResult } from '#lib/api/types.js';
+	import type { Overview, SyncResponse } from '#lib/api/types.js';
 	import PageHeader from '#lib/admin/components/PageHeader.svelte';
 	import KpiRow, { type Kpi } from '#lib/admin/components/KpiRow.svelte';
 	import BarTable from '#lib/admin/components/BarTable.svelte';
@@ -9,7 +9,7 @@
 	import RelTime from '#lib/admin/components/RelTime.svelte';
 	import { get, post } from '#lib/admin/api.js';
 	import { Resource } from '#lib/admin/resource.svelte.js';
-	import { compact, errorMessage } from '#lib/admin/format.js';
+	import { SYNC_RUNNING_MESSAGE, compact, errorMessage } from '#lib/admin/format.js';
 	import { toasts } from '#lib/admin/toast.svelte.js';
 	import { auth } from '#lib/admin/auth.svelte.js';
 
@@ -55,11 +55,15 @@
 	async function sync() {
 		syncing = true;
 		try {
-			const r = await post<SyncResult>('/projects/sync');
-			toasts.success(
-				'GitHub synced',
-				`${r.added} added, ${r.updated} updated, ${r.total} repos in total.`
-			);
+			const r = await post<SyncResponse>('/projects/sync');
+			if ('status' in r) {
+				toasts.info('GitHub sync started', SYNC_RUNNING_MESSAGE);
+			} else {
+				toasts.success(
+					'GitHub synced',
+					`${r.added} added, ${r.updated} updated, ${r.total} repos in total.`
+				);
+			}
 			void overview.load(true);
 		} catch (err) {
 			toasts.error('Sync failed', errorMessage(err));

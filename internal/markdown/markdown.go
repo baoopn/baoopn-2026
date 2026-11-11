@@ -1,5 +1,10 @@
 // Package markdown renders Markdown (GFM + footnotes) to HTML with chroma
 // syntax highlighting (CSS classes), heading anchors and a table of contents.
+//
+// Nothing here sanitizes HTML. Trusted renders (admin-authored posts, profile,
+// project bodies) keep raw HTML exactly as written. Untrusted renders (GitHub
+// READMEs) drop raw HTML and dangerous link schemes, which is goldmark's
+// default without html.WithUnsafe.
 package markdown
 
 import (
@@ -146,7 +151,9 @@ func resolve(dest, base string) string {
 
 var imgSrc = regexp.MustCompile(`(<img[^>]*\ssrc=")([^"]+)(")`)
 
-// rewriteRawImgs fixes relative <img src> inside raw HTML blocks (READMEs).
+// rewriteRawImgs resolves relative <img src> in the rendered output against
+// base. Raw HTML only survives a trusted render, so for untrusted READMEs this
+// touches only the <img> tags goldmark emitted itself.
 func rewriteRawImgs(h, base string) string {
 	return imgSrc.ReplaceAllStringFunc(h, func(m string) string {
 		p := imgSrc.FindStringSubmatch(m)

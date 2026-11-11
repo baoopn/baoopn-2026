@@ -95,6 +95,7 @@ jobs:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           DEPLOYMENT: ${{ steps.deploy.outputs.deployment_uuid }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Builds the Go API and the SvelteKit app on the server: allow 20 min.
@@ -110,7 +111,16 @@ jobs:
                 built=$(echo "$resp" | jq -r '.commit // ""')
                 if [[ "$built" =~ ^[0-9a-f]{40}$ ]]; then
                   if [ "$built" != "${{ github.sha }}" ]; then
-                    echo "::warning::Coolify built $built, not the tested commit ${{ github.sha }}."
+                    # main may have moved after the head check: Coolify then built
+                    # the newer commit, which passed PR CI and has its own run
+                    # queued in this concurrency group.
+                    head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+                    if [ "$head" != "${{ github.sha }}" ] && [ "$built" = "$head" ]; then
+                      echo "::notice::main moved to $head while deploying; Coolify built that commit. Its own run follows."
+                      exit 0
+                    fi
+                    echo "::error::Coolify built $built, not the tested commit ${{ github.sha }} (main is at $head). The live site may run untested code; redeploy the tested commit or check the Coolify resource's branch."
+                    exit 1
                   else
                     echo "Coolify built the tested commit."
                   fi

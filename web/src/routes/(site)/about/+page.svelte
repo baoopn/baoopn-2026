@@ -55,7 +55,7 @@
 		<div class="min-w-0">
 			{#if profile.bio_html}
 				<div class="prose max-w-[68ch]">
-					<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized server-rendered Markdown -->
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- admin-authored Markdown; the API keeps its raw HTML as-is (trusted), it is not sanitized -->
 					{@html profile.bio_html}
 				</div>
 			{:else}
@@ -135,7 +135,7 @@
 							</p>
 							{#if job.summary_html}
 								<div class="prose mt-2 text-base!">
-									<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized server-rendered Markdown -->
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -- admin-authored Markdown; the API keeps its raw HTML as-is (trusted), it is not sanitized -->
 									{@html job.summary_html}
 								</div>
 							{/if}

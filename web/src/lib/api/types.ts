@@ -157,6 +157,13 @@ export interface SyncResult {
 	synced_at: string;
 }
 
+/** 202 from POST /projects/sync: the sync outlived the request and goes on in the background. */
+export interface SyncRunning {
+	status: 'running';
+}
+
+export type SyncResponse = SyncResult | SyncRunning;
+
 // ── Blog ────────────────────────────────────────────────────────────────────
 // A post is one entry in the blog list and has 1–20 ordered parts. Readers
 // move through parts at /blog/<slug> (part 1) and /blog/<slug>/<n>. Every post
@@ -291,7 +298,7 @@ export interface OrphanCandidate {
 	age_seconds: number;
 	reason: string;
 	eligible: boolean;
-	blocked: '' | 'grace' | 'disabled';
+	blocked: '' | 'grace' | 'disabled' | 'truncated'; // truncated: bucket listing cut short, rows kept
 	eligible_at?: string; // blocked = grace
 }
 
