@@ -27,6 +27,7 @@ type fakeGitHub struct {
 	pushedA   time.Time
 	remaining int
 	fail      int // status to fail repo listing with (0 = none)
+	failPaths map[string]int
 	calls     map[string]int
 	authSeen  string
 }
@@ -57,6 +58,10 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	f.authSeen = r.Header.Get("Authorization")
 	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(f.remaining))
 	w.Header().Set("X-RateLimit-Reset", "1900000000")
+	if st := f.failPaths[r.URL.Path]; st != 0 {
+		w.WriteHeader(st)
+		return
+	}
 	repo := func(id int, name string, pushed time.Time, private bool) map[string]any {
 		return map[string]any{"id": id, "name": name, "full_name": "bao/" + name, "html_url": "https://github.com/bao/" + name,
 			"homepage": nil, "description": name + " desc", "language": "Go", "topics": []string{"go"},
