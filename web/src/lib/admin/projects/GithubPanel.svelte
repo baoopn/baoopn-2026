@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ExternalLink } from '@lucide/svelte';
 	import type { AdminProject } from '#lib/api/types.js';
+	import { safeUrl } from '#lib/site/format.js';
 	import RelTime from '../components/RelTime.svelte';
 	import { compact } from '../format';
 
@@ -23,7 +24,7 @@
 				<dt class="sr-only">Repository</dt>
 				<dd>
 					<a
-						href={p.repo_url}
+						href={safeUrl(p.repo_url)}
 						target="_blank"
 						rel="noopener"
 						class="link inline-flex items-center gap-1 font-mono"
@@ -91,7 +92,7 @@
 				<div>
 					<dt class="eyebrow">Homepage</dt>
 					<dd class="truncate">
-						<a href={p.gh_homepage} target="_blank" rel="noopener" class="link">{p.gh_homepage}</a>
+						<a href={safeUrl(p.gh_homepage)} target="_blank" rel="noopener" class="link">{p.gh_homepage}</a>
 					</dd>
 				</div>
 			{/if}

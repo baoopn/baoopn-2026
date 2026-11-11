@@ -23,11 +23,15 @@ export type AuthStatus =
 	| 'forbidden'
 	| 'error';
 
-/** Navigate within the SPA when same-origin, otherwise do a full page load. */
+/**
+ * Navigate within the SPA when same-origin, otherwise do a full page load.
+ * A cross-origin target must be http(s); anything else (javascript:, data:)
+ * is ignored.
+ */
 async function navigateTo(to: string, replaceState = false): Promise<void> {
 	const url = new URL(to, window.location.href);
 	if (url.origin !== window.location.origin) {
-		window.location.href = url.href;
+		if (url.protocol === 'https:' || url.protocol === 'http:') window.location.href = url.href;
 		return;
 	}
 	await goto(url.pathname + url.search + url.hash, { replaceState });
