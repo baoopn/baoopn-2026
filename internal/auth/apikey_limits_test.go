@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,9 +252,107 @@ func TestKeyFailLimiterBounded(t *testing.T) {
 	f := newKeyFailLimiter(keyFailuresPerMinute)
 	now := time.Unix(1_800_000_000, 0)
 	for i := range maxKeyFailClients + 10 {
-		f.fail(fmt.Sprintf("10.%d.%d.1", i/256, i%256), now)
+		f.reserve(fmt.Sprintf("10.%d.%d.1", i/256, i%256), now)
 	}
 	if n := len(f.clients); n > maxKeyFailClients {
 		t.Fatalf("clients = %d, max %d", n, maxKeyFailClients)
+	}
+}
+
+// TestAPIKeyLimiterHoldsUnderParallelRequests: the failure is reserved before
+// Clerk answers, so 30 fresh keys sent at once from one client reach Clerk at
+// most keyFailuresPerMinute times.
+func TestAPIKeyLimiterHoldsUnderParallelRequests(t *testing.T) {
+	h := newKeyHarness(t)
+	release := make(chan struct{})
+	h.key = func(string) (*clerk.APIKey, error) {
+		<-release // every caller is inside Clerk at the same time
+		return nil, &clerk.APIErrorResponse{HTTPStatusCode: http.StatusNotFound}
+	}
+	const n = 30
+	codes := make([]int, n)
+	var done atomic.Int32
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = h.doFrom(t, "10.0.0.1:1", fmt.Sprintf("Bearer ak_live_par%02d_0123456789abcdef", i)).Code
+			done.Add(1)
+		}()
+	}
+	// Every request is either answered or waiting inside Clerk before Clerk
+	// answers any of them.
+	deadline := time.Now().Add(10 * time.Second)
+	for h.calls.Load()+done.Load() < n {
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatalf("stuck: %d in Clerk, %d answered", h.calls.Load(), done.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	wg.Wait()
+	if c := h.calls.Load(); c > keyFailuresPerMinute {
+		t.Fatalf("Clerk calls = %d, want at most %d", c, keyFailuresPerMinute)
+	}
+	got := map[int]int{}
+	for _, c := range codes {
+		got[c]++
+	}
+	if got[http.StatusUnauthorized] > keyFailuresPerMinute || got[http.StatusUnauthorized]+got[http.StatusTooManyRequests] != n {
+		t.Fatalf("codes = %v", got)
+	}
+}
+
+// TestAPIKeyValidAndOutageRefunded: keys Clerk accepts, and Clerk outages,
+// give their reservation back, so they never use up a client's failures.
+func TestAPIKeyValidAndOutageRefunded(t *testing.T) {
+	h := newKeyHarness(t)
+	for i := range keyFailuresPerMinute * 3 {
+		if rec := h.doFrom(t, "10.0.0.1:1", fmt.Sprintf("Bearer ak_live_ok%02d_0123456789abcdef", i)); rec.Code != http.StatusOK {
+			t.Fatalf("valid %d: %d", i, rec.Code)
+		}
+	}
+	h.key = func(string) (*clerk.APIKey, error) { return nil, &clerk.APIErrorResponse{HTTPStatusCode: 503} }
+	for i := range keyFailuresPerMinute * 3 {
+		if rec := h.doFrom(t, "10.0.0.1:1", fmt.Sprintf("Bearer ak_live_out%02d_0123456789abcdef", i)); rec.Code != http.StatusBadGateway {
+			t.Fatalf("outage %d: %d", i, rec.Code)
+		}
+	}
+}
+
+// TestAPIKeyUncachedValidKeyFromBlockedClient: a blocked client gets 429 even
+// for a valid key that is not cached yet.
+func TestAPIKeyUncachedValidKeyFromBlockedClient(t *testing.T) {
+	h := newKeyHarness(t)
+	for range keyFailuresPerMinute {
+		h.doFrom(t, "10.0.0.1:1", "Bearer ak_bad")
+	}
+	if rec := h.doFrom(t, "10.0.0.1:1", "Bearer ak_live_fresh_0123456789abcdef"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if n := h.calls.Load(); n != 0 {
+		t.Fatalf("Clerk calls = %d", n)
+	}
+}
+
+func TestKeyFailLimiterRefundOnce(t *testing.T) {
+	f := newKeyFailLimiter(1)
+	now := time.Unix(1_800_000_000, 0)
+	refund, ok := f.reserve("a", now)
+	if !ok {
+		t.Fatal("first reserve")
+	}
+	if _, ok := f.reserve("a", now); ok {
+		t.Fatal("second reserve passed a limit of 1")
+	}
+	refund()
+	refund()
+	if _, ok := f.reserve("a", now); !ok {
+		t.Fatal("refund did not give the failure back")
+	}
+	if _, ok := f.reserve("a", now); ok {
+		t.Fatal("a double refund gave back two")
 	}
 }

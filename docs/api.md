@@ -139,7 +139,9 @@ Scripts can call the admin API with a Clerk user API key instead of a session to
   or Clerk rejects the server's own secret key.
 - The API caches a checked key for up to 60 s, so a revoked key can keep working for up to 60 s.
 - A key not shaped like `ak_…` is refused without asking Clerk. A refused key is remembered for
-  60 s. After 10 refused keys in a minute a client gets 429 `rate_limited` for new keys.
+  60 s. After 10 refused keys in a minute a client gets 429 `rate_limited` for new keys,
+  with `Retry-After: 60`. That includes a valid key the API has not cached yet; a key it has
+  already cached keeps working.
 - The same limit of 600 requests per minute per IP applies.
 
 ```

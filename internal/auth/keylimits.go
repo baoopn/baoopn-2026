@@ -52,23 +52,27 @@ func (b *keyBucket) refill(now time.Time) {
 	b.last = now
 }
 
-func (b *keyBucket) take(now time.Time) {
+// take uses one token at now, or reports false when none is left.
+func (b *keyBucket) take(now time.Time) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.refill(now)
-	if b.tokens >= 1 {
-		b.tokens--
+	if b.tokens < 1 {
+		return false
 	}
+	b.tokens--
+	return true
 }
 
-func (b *keyBucket) empty(now time.Time) bool {
+// give returns one token, up to size.
+func (b *keyBucket) give() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.refill(now)
-	return b.tokens < 1
+	b.tokens = min(b.size, b.tokens+1)
 }
 
-// keyFailLimiter counts refused API keys per client. Only refusals count.
+// keyFailLimiter counts refused API keys per client. Every uncached key
+// reserves a failure first; only refusals keep it.
 type keyFailLimiter struct {
 	mu      sync.Mutex
 	perMin  int
@@ -79,16 +83,11 @@ func newKeyFailLimiter(perMinute int) *keyFailLimiter {
 	return &keyFailLimiter{perMin: perMinute, clients: map[string]*keyBucket{}}
 }
 
-// blocked reports whether client used up its failures.
-func (f *keyFailLimiter) blocked(client string, now time.Time) bool {
-	f.mu.Lock()
-	b := f.clients[client]
-	f.mu.Unlock()
-	return b != nil && b.empty(now)
-}
-
-// fail counts one refused key for client.
-func (f *keyFailLimiter) fail(client string, now time.Time) {
+// reserve takes one of client's failures at now, atomically, before the
+// outcome is known. It reports false when none is left. refund gives the
+// failure back, for an outcome that must not count; calling it more than
+// once gives back only one.
+func (f *keyFailLimiter) reserve(client string, now time.Time) (refund func(), ok bool) {
 	f.mu.Lock()
 	b := f.clients[client]
 	if b == nil {
@@ -99,7 +98,11 @@ func (f *keyFailLimiter) fail(client string, now time.Time) {
 		f.clients[client] = b
 	}
 	f.mu.Unlock()
-	b.take(now)
+	if !b.take(now) {
+		return func() {}, false
+	}
+	var once sync.Once
+	return func() { once.Do(b.give) }, true
 }
 
 // keyRefused reports whether secret was refused less than rejectTTL ago.
