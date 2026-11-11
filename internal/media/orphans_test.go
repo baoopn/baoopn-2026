@@ -263,7 +263,7 @@ func TestOrphanLocalDisk(t *testing.T) {
 	writeAged(t, filepath.Join(s.dir, ".up-old"), 25*time.Hour)
 	writeAged(t, filepath.Join(s.dir, ".rq-new"), time.Hour)
 	writeAged(t, filepath.Join(s.dir, ".wk-old"), 25*time.Hour) // interrupted worker result
-	writeAged(t, filepath.Join(s.dir, "notes.txt"), 30*day) // foreign
+	writeAged(t, filepath.Join(s.dir, "notes.txt"), 30*day)     // foreign
 	writeAged(t, filepath.Join(s.dir, "other", "x"), 30*day)
 	writeAged(t, filepath.Join(s.originalsDir(), stemN(3)), 25*time.Hour) // no row
 	addRow(t, s, 4, rowOpt{age: 30 * day, status: StatusFailed, job: "failed"})
