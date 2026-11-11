@@ -230,7 +230,7 @@ func (m *Module) fail(w http.ResponseWriter, r *http.Request, err error) {
 			"GitHub rate limit reached; resets at "+ge.Reset.UTC().Format(time.RFC3339))
 	case errors.As(err, &ge):
 		m.log.WarnContext(r.Context(), "projects: github", logging.Err(err))
-		httpapi.Error(w, http.StatusBadGateway, "github_unavailable", "GitHub is unavailable, try again later")
+		httpapi.Error(w, http.StatusServiceUnavailable, "github_unavailable", "GitHub is unavailable, try again later")
 	default:
 		m.internal(w, r, "projects", err)
 	}

@@ -110,7 +110,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, path string, ttl 
 			m.log.WarnContext(r.Context(), "listening: serving stale", slog.String("path", path), logging.Err(err))
 		default:
 			m.log.WarnContext(r.Context(), "listening: upstream failed", slog.String("path", path), logging.Err(err))
-			httpapi.Error(w, http.StatusBadGateway, "upstream_unavailable", "listening data is unavailable right now")
+			httpapi.Error(w, http.StatusServiceUnavailable, "upstream_unavailable", "listening data is unavailable right now")
 			return
 		}
 	}

@@ -276,7 +276,7 @@ func TestSyncAgainstFakeGitHub(t *testing.T) {
 		t.Fatalf("rate limited: %d", code)
 	}
 	e.gh.set(func(f *fakeGitHub) { f.fail = http.StatusInternalServerError })
-	if code := e.do(e.admin, "POST", "/projects/sync", nil, nil); code != http.StatusBadGateway {
+	if code := e.do(e.admin, "POST", "/projects/sync", nil, nil); code != http.StatusServiceUnavailable {
 		t.Fatalf("unavailable: %d", code)
 	}
 	e.s.mu.Lock()

@@ -4,6 +4,9 @@ The TypeScript types in `web/src/lib/api/types.ts` are the source of truth for s
 Envelopes: `{ "data": …, "meta"?: PageMeta }` on success, `{ "error": { "code", "message" } }`
 on failure. A JSON body that does not parse (bad syntax, wrong types, unknown fields) gets 400
 `bad_request` with the fixed message "invalid JSON body"; one over 2 MiB gets 413 `too_large`.
+An upstream failure (GitHub, spotify-tracker, the mail server) answers 503 with its own code
+(`github_unavailable`, `upstream_unavailable`, `mail_failed`), never 502: the proxy in front
+replaces 502 and 504 bodies with an HTML error page, which would hide the JSON code.
 The browser always calls the same origin (`/api/...`); the SvelteKit server proxies
 to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Country` and
 `X-Internal-Token`.
@@ -60,6 +63,9 @@ data: {"is_playing":true,"progress_ms":81234,"fetched_at":"…","track":{…}}
 - At most 500 concurrent streams: above that `503 too_many_streams` with `Retry-After`.
   At most 8 per client IP (IPv6 /64): above that `429 too_many_streams` with
   `Retry-After`. Either way the site falls back to polling.
+- Each stream ends after 30 to 35 min (jittered); the client reconnects after the
+  `retry` delay. On shutdown every open stream ends at once, and new ones get
+  `503 shutting_down` with `Retry-After: 10`.
 - Mounted under `/api/v1` with the public rate limit but without the 20 s request
   timeout. The handler clears the server's 2 min read deadline and gives each write
   its own 30 s deadline, so a client that stops reading is dropped.
