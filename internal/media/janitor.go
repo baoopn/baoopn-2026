@@ -23,6 +23,13 @@ const JanitorInterval = 15 * time.Second
 // stall the janitor forever. It is longer than the orphan pass's own 2 min.
 const tickTimeout = 5 * time.Minute
 
+// fallbackMinLeft is the tick time a new fallback job needs; with less left
+// the janitor stops leasing and leaves the rest to the next tick.
+const fallbackMinLeft = 90 * time.Second
+
+// renameTimeout bounds the reference rewrite after a fallback rename.
+const renameTimeout = 2 * time.Minute
+
 // RunJanitor runs Tick every interval until ctx is done.
 func (s *Store) RunJanitor(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
@@ -70,6 +77,9 @@ func (s *Store) Tick(ctx context.Context) error {
 		return fmt.Errorf("stale jobs: %w", err)
 	}
 	for range 20 {
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < fallbackMinLeft {
+			break // the rest waits for the next tick
+		}
 		j, err := s.lease(ctx, PhaseFallback, "api", s.jobLease)
 		if err != nil {
 			return err
@@ -230,10 +240,22 @@ func (s *Store) publishOriginal(ctx context.Context, j *Job) {
 	}
 	s.removeOriginal(stem)
 	log.Warn("media: published the original instead of a WebP", slog.String("reason", reason))
-	if name != j.Filename && s.onRename != nil {
-		if err := s.onRename(ctx, s.URL(j.Filename), s.URL(name)); err != nil {
-			log.Warn("media fallback: update references", logging.Err(err))
-		}
+	if name != j.Filename {
+		s.followRename(ctx, j.Filename, name)
+	}
+}
+
+// followRename runs the rename hook. The rename is committed and is never
+// retried, so the hook runs detached from the tick's deadline, on its own.
+func (s *Store) followRename(ctx context.Context, oldName, newName string) {
+	if s.onRename == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), renameTimeout)
+	defer cancel()
+	if err := s.onRename(rctx, s.URL(oldName), s.URL(newName)); err != nil {
+		s.log.Warn("media fallback: update references", slog.String("old", oldName), slog.String("new", newName),
+			logging.Err(err))
 	}
 }
 
