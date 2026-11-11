@@ -16,7 +16,7 @@ The web server is the only public service. It proxies `/api/*` and `/media/*` to
 Coolify builds every image on the server from the repository, so no registry is used.
 
 The api, web and mediaworker containers run with `no-new-privileges`, all Linux
-capabilities dropped and a memory limit (api and web 512 MB, mediaworker
+capabilities dropped and a memory limit (api and web 512 MB, api `GOMEMLIMIT` 400MiB; mediaworker
 `MEDIAWORKER_MEM_LIMIT`, default 1 GB). Postgres, api, web, mediaworker and
 backup restart `unless-stopped`. If the API is down, the web proxy answers
 `/api/*` and `/media/*` with a JSON 503 (`upstream_unavailable`), not a 502,

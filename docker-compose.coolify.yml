@@ -72,6 +72,8 @@ services:
     cap_drop:
       - ALL
     environment:
+      # Go GC target below mem_limit (512m) so the api collects before an OOM kill.
+      - GOMEMLIMIT=400MiB
       - APP_ENV=production
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=json
