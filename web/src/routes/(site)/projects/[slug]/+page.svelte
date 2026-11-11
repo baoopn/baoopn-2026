@@ -161,7 +161,7 @@
 					<p class="label mb-6 text-ink-soft">From the README</p>
 				{/if}
 				<div class="prose max-w-[70ch]">
-					<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized server-rendered Markdown -->
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- not sanitized: admin-authored body HTML is rendered raw (trusted); for a GitHub README the API drops raw HTML -->
 					{@html p.body_html}
 				</div>
 			{:else}
