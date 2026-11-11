@@ -164,11 +164,11 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 		"clerk 404": {&clerk.APIErrorResponse{HTTPStatusCode: 404, TraceID: "tr_1"}, 401, "unauthorized"},
 		"clerk 400": {&clerk.APIErrorResponse{HTTPStatusCode: 400}, 401, "unauthorized"},
 		"clerk 422": {&clerk.APIErrorResponse{HTTPStatusCode: 422}, 401, "unauthorized"},
-		"clerk 401": {&clerk.APIErrorResponse{HTTPStatusCode: 401, TraceID: "tr_2"}, 502, "auth_unavailable"},
-		"clerk 403": {&clerk.APIErrorResponse{HTTPStatusCode: 403}, 502, "auth_unavailable"},
-		"clerk 429": {&clerk.APIErrorResponse{HTTPStatusCode: 429}, 502, "auth_unavailable"},
-		"clerk 503": {&clerk.APIErrorResponse{HTTPStatusCode: 503}, 502, "auth_unavailable"},
-		"network":   {errors.New("dial tcp: ak_live_err_0123456789abcdef refused"), 502, "auth_unavailable"},
+		"clerk 401": {&clerk.APIErrorResponse{HTTPStatusCode: 401, TraceID: "tr_2"}, 503, "auth_unavailable"},
+		"clerk 403": {&clerk.APIErrorResponse{HTTPStatusCode: 403}, 503, "auth_unavailable"},
+		"clerk 429": {&clerk.APIErrorResponse{HTTPStatusCode: 429}, 503, "auth_unavailable"},
+		"clerk 503": {&clerk.APIErrorResponse{HTTPStatusCode: 503}, 503, "auth_unavailable"},
+		"network":   {errors.New("dial tcp: ak_live_err_0123456789abcdef refused"), 503, "auth_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newKeyHarness(t)
@@ -180,8 +180,8 @@ func TestAPIKeyVerifyErrors(t *testing.T) {
 			if code, _ := errBody(t, rec); code != tc.code {
 				t.Fatalf("code = %s", code)
 			}
-			if tc.status == http.StatusBadGateway && !strings.Contains(h.logs.String(), "level=ERROR") {
-				t.Fatalf("502 not logged at Error: %s", h.logs.String())
+			if tc.status == http.StatusServiceUnavailable && !strings.Contains(h.logs.String(), "level=ERROR") {
+				t.Fatalf("503 not logged at Error: %s", h.logs.String())
 			}
 			h.assertNoSecret(t, "ak_live_err_0123456789abcdef")
 		})
@@ -210,8 +210,8 @@ func TestAPIKeyCache(t *testing.T) {
 
 	h.clock = h.clock.Add(61 * time.Second)
 	h.key = func(string) (*clerk.APIKey, error) { return nil, errors.New("dial") }
-	if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusBadGateway {
-		t.Fatalf("status after expiry with network error = %d, want 502", rec.Code)
+	if rec, _ := h.do(t, "Bearer ak_live_x_0123456789abcdef"); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status after expiry with network error = %d, want 503", rec.Code)
 	}
 	if n := h.calls.Load(); n != 3 {
 		t.Fatalf("verify calls = %d, want 3", n)
