@@ -1,5 +1,5 @@
 // Package imagestrip removes metadata (EXIF with GPS, XMP, IPTC, comments,
-// text chunks) from browser-safe images without decoding their pixels. The
+// text chunks, C2PA) from browser-safe images without decoding their pixels. The
 // API uses it to publish an original when WebP conversion is impossible.
 package imagestrip
 
@@ -109,10 +109,18 @@ func orientationAPP1(o int) []byte {
 	return append(seg, body...)
 }
 
-// pngDrop are the ancillary chunks that carry metadata.
-var pngDrop = map[string]bool{"eXIf": true, "tEXt": true, "iTXt": true, "zTXt": true, "tIME": true}
+// pngKeep are the chunks PNG keeps: image data, palette and transparency,
+// colour information (gAMA, cHRM, sRGB, iCCP, sBIT, and the HDR chunks cICP,
+// mDCV, cLLI), pixel size (pHYs) and APNG animation. Everything else goes,
+// including chunks no one knows yet (eXIf, text, tIME, C2PA caBX ...).
+var pngKeep = map[string]bool{
+	"IHDR": true, "PLTE": true, "IDAT": true, "IEND": true, "tRNS": true,
+	"gAMA": true, "cHRM": true, "sRGB": true, "iCCP": true, "sBIT": true,
+	"cICP": true, "mDCV": true, "cLLI": true, "pHYs": true,
+	"acTL": true, "fcTL": true, "fdAT": true,
+}
 
-// PNG drops eXIf, tEXt, iTXt, zTXt and tIME chunks.
+// PNG keeps only the pngKeep chunks and ends at IEND.
 func PNG(d []byte) ([]byte, error) {
 	if len(d) < 8 || string(d[:8]) != "\x89PNG\r\n\x1a\n" {
 		return nil, ErrMalformed
@@ -127,7 +135,7 @@ func PNG(d []byte) ([]byte, error) {
 			return nil, ErrMalformed
 		}
 		typ := string(d[i+4 : i+8])
-		if !pngDrop[typ] {
+		if pngKeep[typ] {
 			out = append(out, d[i:i+12+n]...)
 		}
 		i += 12 + n
@@ -137,31 +145,41 @@ func PNG(d []byte) ([]byte, error) {
 	}
 }
 
-// WebP drops the EXIF and XMP chunks and clears their VP8X flags.
+// webpKeep are the chunks WebP keeps: image data, alpha, the ICC profile and
+// animation. EXIF, XMP and unknown chunks go.
+var webpKeep = map[string]bool{
+	"VP8 ": true, "VP8L": true, "VP8X": true, "ALPH": true, "ICCP": true, "ANIM": true, "ANMF": true,
+}
+
+// WebP keeps only the webpKeep chunks, clears the EXIF and XMP flags of
+// VP8X, and stops at the end the RIFF header gives: trailing bytes go.
 func WebP(d []byte) ([]byte, error) {
 	if len(d) < 12 || string(d[:4]) != "RIFF" || string(d[8:12]) != "WEBP" {
 		return nil, ErrMalformed
 	}
-	out := append(make([]byte, 0, len(d)), d[:12]...)
-	for i := 12; i < len(d); {
-		if i+8 > len(d) {
+	size := int64(binary.LittleEndian.Uint32(d[4:])) + 8
+	if size < 12 {
+		return nil, ErrMalformed
+	}
+	limit := int(min(size, int64(len(d))))
+	out := append(make([]byte, 0, limit), d[:12]...)
+	for i := 12; i < limit; {
+		if i+8 > limit {
 			return nil, ErrMalformed
 		}
 		n := int(binary.LittleEndian.Uint32(d[i+4:]))
-		end := i + 8 + n + n&1
-		if n < 0 || i+8+n > len(d) {
+		if n < 0 || n > limit-i-8 {
 			return nil, ErrMalformed
 		}
-		end = min(end, len(d))
-		switch string(d[i : i+4]) {
-		case "EXIF", "XMP ":
-		case "VP8X":
+		end := min(i+8+n+n&1, limit)
+		switch typ := string(d[i : i+4]); {
+		case typ == "VP8X":
 			c := append([]byte{}, d[i:end]...)
 			if n >= 1 {
 				c[8] &^= 0x08 | 0x04 // EXIF and XMP present flags
 			}
 			out = append(out, c...)
-		default:
+		case webpKeep[typ]:
 			out = append(out, d[i:end]...)
 		}
 		i = end

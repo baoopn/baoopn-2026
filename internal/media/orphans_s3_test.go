@@ -75,6 +75,14 @@ func TestOrphanBucketPagingAndTruncation(t *testing.T) {
 	if !p.Truncated || len(p.Candidates) != 1 || p.Candidates[0].Kind != KindRow || len(p.Missing) != 0 {
 		t.Fatalf("truncated plan: %v %v", p.Truncated, keys(p))
 	}
+	// The row's files may be past the cap: it is kept, also when asked by key.
+	if c := p.Candidates[0]; c.Eligible || c.Blocked != BlockedTruncated {
+		t.Fatalf("row on a truncated listing = %+v", c)
+	}
+	res, err := s.CleanOrphans(context.Background(), TriggerManual, []string{p.Candidates[0].Key})
+	if err != nil || res.Deleted.total() != 0 || len(res.Skipped) != 1 || res.Skipped[0].Why != BlockedTruncated {
+		t.Fatalf("clean on a truncated listing = %+v %v", res, err)
+	}
 }
 
 // A ready row's local copy (left by the move to the bucket) is a separate,

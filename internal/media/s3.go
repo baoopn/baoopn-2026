@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
@@ -64,10 +66,25 @@ func newS3Backend(c S3Config) *s3Backend {
 		ResponseChecksumValidation:                aws.ResponseChecksumValidationWhenRequired,
 		DisableLogOutputChecksumValidationSkipped: true,
 	}
+	opts.HTTPClient = s3HTTPClient()
 	if c.HTTPClient != nil {
 		opts.HTTPClient = c.HTTPClient
 	}
 	return &s3Backend{client: s3.New(opts), bucket: c.Bucket}
+}
+
+// S3 transport timeouts. A bucket that accepts a connection and never answers
+// fails the call instead of hanging it. There is no total client timeout, so a
+// large upload or a long download is never cut off while it makes progress.
+const (
+	s3DialTimeout           = 10 * time.Second
+	s3ResponseHeaderTimeout = time.Minute // after the request body is sent
+)
+
+func s3HTTPClient() *awshttp.BuildableClient {
+	return awshttp.NewBuildableClient().
+		WithDialerOptions(func(d *net.Dialer) { d.Timeout = s3DialTimeout }).
+		WithTransportOptions(func(tr *http.Transport) { tr.ResponseHeaderTimeout = s3ResponseHeaderTimeout })
 }
 
 // putDisposition returns the Content-Disposition stored with an object. An SVG

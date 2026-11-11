@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -69,6 +70,26 @@ func LegacyToPublic(publicURL string) func(string) string {
 	}
 }
 
+// Rename rewrites standalone links to the stored file oldName to newURL, in
+// every form a link to it can take: <base>/<oldName> for each non-empty base
+// (the bucket's public domain, the site's own /media URL), then the
+// site-relative /media/<oldName>.
+func Rename(oldName, newURL string, bases ...string) func(string) string {
+	fns := make([]func(string) string, 0, len(bases)+1)
+	for _, b := range bases {
+		if b = strings.TrimRight(b, "/"); b != "" {
+			fns = append(fns, Replace(b+"/"+oldName, newURL))
+		}
+	}
+	fns = append(fns, Replace("/media/"+oldName, newURL))
+	return func(s string) string {
+		for _, fn := range fns {
+			s = fn(s)
+		}
+		return s
+	}
+}
+
 // Replace rewrites standalone occurrences of the URL old to new.
 func Replace(old, new string) func(string) string {
 	return func(s string) string {
@@ -99,31 +120,38 @@ func Replace(old, new string) func(string) string {
 	}
 }
 
-// Stats counts the rows changed.
+// Stats counts the rows changed. Skipped names the rows ("post_parts:12")
+// that kept changing under the rewrite and still hold their old links.
 type Stats struct {
 	Parts, Posts, Projects int
 	Profile                bool
+	Skipped                []string
 }
+
+// casAttempts is how often a row is read and rewritten when a save keeps
+// landing between the read and the compare-and-swap write.
+const casAttempts = 3
 
 // Rewrite applies fn to every stored field that may reference media and
 // writes back (re-rendered) only the rows that changed.
 //
-// Each write is a compare-and-swap on the text it read: a row an admin saved
-// in the meantime is skipped rather than overwritten with the old text. It
-// still holds its old links, which the next run (or the /media 301) covers.
+// Each write is a compare-and-swap on the text it read, so an admin save in
+// the meantime is never overwritten with the old text. The row is then read
+// again and rewritten, up to casAttempts times; a row that still changes is
+// left as it is and listed in Stats.Skipped for the caller to report.
 func Rewrite(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (Stats, error) {
 	var st Stats
 	var err error
-	if st.Parts, err = rewriteParts(ctx, db, fn); err != nil {
+	if st.Parts, err = rewriteParts(ctx, db, fn, &st.Skipped); err != nil {
 		return st, fmt.Errorf("post parts: %w", err)
 	}
-	if st.Posts, err = rewriteColumn(ctx, db, "posts", "cover_url", fn); err != nil {
+	if st.Posts, err = rewriteColumn(ctx, db, "posts", "cover_url", fn, &st.Skipped); err != nil {
 		return st, fmt.Errorf("post covers: %w", err)
 	}
-	if st.Projects, err = rewriteProjects(ctx, db, fn); err != nil {
+	if st.Projects, err = rewriteProjects(ctx, db, fn, &st.Skipped); err != nil {
 		return st, fmt.Errorf("projects: %w", err)
 	}
-	if st.Profile, err = rewriteProfile(ctx, db, fn); err != nil {
+	if st.Profile, err = rewriteProfile(ctx, db, fn, &st.Skipped); err != nil {
 		return st, fmt.Errorf("profile: %w", err)
 	}
 	return st, nil
@@ -145,62 +173,96 @@ func collect(ctx context.Context, db *pgxpool.Pool, q string) ([]idText, error) 
 	})
 }
 
-func rewriteParts(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (int, error) {
+// casRow rewrites one row read as text. write stores next only if the row
+// still holds old; on a miss the row is read again (q, by id) and rewritten,
+// up to casAttempts times. It reports whether the row changed; a row that
+// kept changing is added to skipped as name:id.
+func casRow(ctx context.Context, db *pgxpool.Pool, name, q string, row idText, fn func(string) string,
+	write func(old, next string) (bool, error), skipped *[]string) (bool, error) {
+	text := row.text
+	for attempt := 1; ; attempt++ {
+		next := fn(text)
+		if next == text {
+			return false, nil
+		}
+		ok, err := write(text, next)
+		if err != nil || ok {
+			return ok, err
+		}
+		if attempt == casAttempts {
+			*skipped = append(*skipped, name+":"+strconv.FormatInt(row.id, 10))
+			return false, nil
+		}
+		err = db.QueryRow(ctx, q, row.id).Scan(&text)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // deleted meanwhile
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+}
+
+func rewriteParts(ctx context.Context, db *pgxpool.Pool, fn func(string) string, skipped *[]string) (int, error) {
 	parts, err := collect(ctx, db, `SELECT id, content_md FROM post_parts ORDER BY id`)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	for _, p := range parts {
-		md := fn(p.text)
-		if md == p.text {
-			continue
+		write := func(old, md string) (bool, error) {
+			res, err := markdown.Render(md, markdown.Options{Trusted: true})
+			if err != nil {
+				return false, err
+			}
+			toc, err := json.Marshal(res.TOC)
+			if err != nil {
+				return false, err
+			}
+			tag, err := db.Exec(ctx, `UPDATE post_parts SET content_md = $2, content_html = $3, toc = $4::jsonb
+				WHERE id = $1 AND content_md = $5`, p.id, md, res.HTML, string(toc), old)
+			return tag.RowsAffected() > 0, err
 		}
-		res, err := markdown.Render(md, markdown.Options{Trusted: true})
+		ok, err := casRow(ctx, db, "post_parts", `SELECT content_md FROM post_parts WHERE id = $1`, p, fn, write, skipped)
 		if err != nil {
 			return n, err
 		}
-		toc, err := json.Marshal(res.TOC)
-		if err != nil {
-			return n, err
+		if ok {
+			n++
 		}
-		tag, err := db.Exec(ctx, `UPDATE post_parts SET content_md = $2, content_html = $3, toc = $4::jsonb
-			WHERE id = $1 AND content_md = $5`, p.id, md, res.HTML, string(toc), p.text)
-		if err != nil {
-			return n, err
-		}
-		n += int(tag.RowsAffected())
 	}
 	return n, nil
 }
 
 // rewriteColumn rewrites a plain text column (table and column are constants).
-func rewriteColumn(ctx context.Context, db *pgxpool.Pool, table, col string, fn func(string) string) (int, error) {
+func rewriteColumn(ctx context.Context, db *pgxpool.Pool, table, col string, fn func(string) string, skipped *[]string) (int, error) {
 	rows, err := collect(ctx, db, `SELECT id, `+col+` FROM `+table+` WHERE `+col+` <> '' ORDER BY id`)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	for _, r := range rows {
-		if v := fn(r.text); v != r.text {
-			tag, err := db.Exec(ctx, `UPDATE `+table+` SET `+col+` = $2 WHERE id = $1 AND `+col+` = $3`,
-				r.id, v, r.text)
-			if err != nil {
-				return n, err
-			}
-			n += int(tag.RowsAffected())
+		write := func(old, v string) (bool, error) {
+			tag, err := db.Exec(ctx, `UPDATE `+table+` SET `+col+` = $2 WHERE id = $1 AND `+col+` = $3`, r.id, v, old)
+			return tag.RowsAffected() > 0, err
+		}
+		ok, err := casRow(ctx, db, table+"."+col, `SELECT `+col+` FROM `+table+` WHERE id = $1`, r, fn, write, skipped)
+		if err != nil {
+			return n, err
+		}
+		if ok {
+			n++
 		}
 	}
 	return n, nil
 }
 
-func rewriteProjects(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (int, error) {
-	changed := map[int64]bool{}
-	n, err := rewriteColumn(ctx, db, "projects", "cover_url", fn)
+func rewriteProjects(ctx context.Context, db *pgxpool.Pool, fn func(string) string, skipped *[]string) (int, error) {
+	n, err := rewriteColumn(ctx, db, "projects", "cover_url", fn, skipped)
 	if err != nil {
 		return 0, err
 	}
-	m, err := rewriteColumn(ctx, db, "projects", "logo_url", fn)
+	m, err := rewriteColumn(ctx, db, "projects", "logo_url", fn, skipped)
 	if err != nil {
 		return n, err
 	}
@@ -210,38 +272,51 @@ func rewriteProjects(ctx context.Context, db *pgxpool.Pool, fn func(string) stri
 		return n, err
 	}
 	for _, b := range bodies {
-		md := fn(b.text)
-		if md == b.text {
-			continue
+		write := func(old, md string) (bool, error) {
+			res, err := markdown.Render(md, markdown.Options{Trusted: true})
+			if err != nil {
+				return false, err
+			}
+			tag, err := db.Exec(ctx, `UPDATE projects SET body_md = $2, body_html = $3 WHERE id = $1 AND body_md = $4`,
+				b.id, md, res.HTML, old)
+			return tag.RowsAffected() > 0, err
 		}
-		res, err := markdown.Render(md, markdown.Options{Trusted: true})
+		ok, err := casRow(ctx, db, "projects.body_md", `SELECT body_md FROM projects WHERE id = $1`, b, fn, write, skipped)
 		if err != nil {
 			return n, err
 		}
-		tag, err := db.Exec(ctx, `UPDATE projects SET body_md = $2, body_html = $3 WHERE id = $1 AND body_md = $4`,
-			b.id, md, res.HTML, b.text)
-		if err != nil {
-			return n, err
-		}
-		if tag.RowsAffected() > 0 {
-			changed[b.id] = true
+		if ok {
+			n++
 		}
 	}
-	return n + len(changed), nil
+	return n, nil
 }
 
-func rewriteProfile(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (bool, error) {
+func rewriteProfile(ctx context.Context, db *pgxpool.Pool, fn func(string) string, skipped *[]string) (bool, error) {
+	for range casAttempts {
+		done, ok, err := rewriteProfileOnce(ctx, db, fn)
+		if err != nil || done {
+			return ok, err
+		}
+	}
+	*skipped = append(*skipped, "settings:"+profile.SettingsKey)
+	return false, nil
+}
+
+// rewriteProfileOnce reports done when nothing is left to try: the profile
+// is missing, needs no change, or was written (ok).
+func rewriteProfileOnce(ctx context.Context, db *pgxpool.Pool, fn func(string) string) (done, ok bool, err error) {
 	var raw string
-	err := db.QueryRow(ctx, `SELECT value::text FROM settings WHERE key = $1`, profile.SettingsKey).Scan(&raw)
+	err = db.QueryRow(ctx, `SELECT value::text FROM settings WHERE key = $1`, profile.SettingsKey).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return true, false, nil
 	}
 	if err != nil {
-		return false, err
+		return true, false, err
 	}
 	var p profile.Profile
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
-		return false, err
+		return true, false, err
 	}
 	changed := false
 	apply := func(s *string) {
@@ -258,22 +333,22 @@ func rewriteProfile(ctx context.Context, db *pgxpool.Pool, fn func(string) strin
 		apply(&p.Experience[i].SummaryMD)
 	}
 	if !changed {
-		return false, nil
+		return true, false, nil
 	}
 	if err := profile.RenderHTML(&p); err != nil {
-		return false, err
+		return true, false, err
 	}
 	next, err := json.Marshal(p)
 	if err != nil {
-		return false, err
+		return true, false, err
 	}
 	// Only if the profile is still the one read above.
 	tag, err := db.Exec(ctx, `UPDATE settings SET value = $2::jsonb, updated_at = now()
 		WHERE key = $1 AND value = $3::jsonb`, profile.SettingsKey, string(next), raw)
 	if err != nil {
-		return false, err
+		return true, false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	return tag.RowsAffected() > 0, tag.RowsAffected() > 0, nil
 }
 
 // RunLegacyRewrite is the startup job: with a public media domain, every
@@ -288,6 +363,11 @@ func RunLegacyRewrite(ctx context.Context, db *pgxpool.Pool, publicURL string, l
 		slog.Int("projects", st.Projects), slog.Bool("profile", st.Profile)}
 	if err != nil {
 		log.Warn("media link rewrite stopped", append(attrs, slog.String("error", err.Error()))...)
+		return
+	}
+	if len(st.Skipped) > 0 {
+		log.Warn("media link rewrite skipped rows that kept changing", append(attrs,
+			slog.String("skipped", strings.Join(st.Skipped, ", ")))...)
 		return
 	}
 	log.Info("media link rewrite done", attrs...)

@@ -19,12 +19,26 @@ import (
 // JanitorInterval is how often RunJanitor ticks.
 const JanitorInterval = 15 * time.Second
 
+// tickTimeout bounds one janitor pass, so a hung database or S3 call cannot
+// stall the janitor forever. It is longer than the orphan pass's own 2 min.
+const tickTimeout = 5 * time.Minute
+
+// fallbackMinLeft is the tick time a new fallback job needs; with less left
+// the janitor stops leasing and leaves the rest to the next tick.
+const fallbackMinLeft = 90 * time.Second
+
+// renameTimeout bounds the reference rewrite after a fallback rename.
+const renameTimeout = 2 * time.Minute
+
 // RunJanitor runs Tick every interval until ctx is done.
 func (s *Store) RunJanitor(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		if err := s.safeTick(ctx); err != nil && ctx.Err() == nil {
+		tctx, cancel := context.WithTimeout(ctx, tickTimeout)
+		err := s.safeTick(tctx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
 			s.log.Warn("media janitor", logging.Err(err))
 		}
 		select {
@@ -63,6 +77,9 @@ func (s *Store) Tick(ctx context.Context) error {
 		return fmt.Errorf("stale jobs: %w", err)
 	}
 	for range 20 {
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < fallbackMinLeft {
+			break // the rest waits for the next tick
+		}
 		j, err := s.lease(ctx, PhaseFallback, "api", s.jobLease)
 		if err != nil {
 			return err
@@ -223,37 +240,61 @@ func (s *Store) publishOriginal(ctx context.Context, j *Job) {
 	}
 	s.removeOriginal(stem)
 	log.Warn("media: published the original instead of a WebP", slog.String("reason", reason))
-	if name != j.Filename && s.onRename != nil {
-		if err := s.onRename(ctx, s.URL(j.Filename), s.URL(name)); err != nil {
-			log.Warn("media fallback: update references", logging.Err(err))
-		}
+	if name != j.Filename {
+		s.followRename(ctx, j.Filename, name)
+	}
+}
+
+// followRename runs the rename hook. The rename is committed and is never
+// retried, so the hook runs detached from the tick's deadline, on its own.
+func (s *Store) followRename(ctx context.Context, oldName, newName string) {
+	if s.onRename == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), renameTimeout)
+	defer cancel()
+	if err := s.onRename(rctx, s.URL(oldName), s.URL(newName)); err != nil {
+		s.log.Warn("media fallback: update references", slog.String("old", oldName), slog.String("new", newName),
+			logging.Err(err))
 	}
 }
 
 func (s *Store) cleanupOriginals(ctx context.Context) error {
-	rows, err := s.db.Query(ctx, `SELECT j.id, m.filename FROM media_jobs j JOIN media m ON m.id = j.media_id
-		WHERE j.status = 'failed' AND NOT j.original_deleted AND j.failed_at < now() - make_interval(secs => $1)`,
-		s.failedRetention.Seconds())
+	list, err := s.staleOriginals(ctx)
 	if err != nil {
 		return err
 	}
-	type row struct {
-		id       int64
-		filename string
-	}
-	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
-		var x row
-		return x, r.Scan(&x.id, &x.filename)
-	})
-	if err != nil {
-		return err
-	}
-	for _, x := range list {
-		s.removeOriginal(stemOf(x.filename))
-		if _, err := s.db.Exec(ctx, `UPDATE media_jobs SET original_deleted = true, updated_at = now() WHERE id = $1`, x.id); err != nil {
+	for _, id := range list {
+		if err := s.dropOriginal(ctx, id); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// staleOriginals lists the jobs failed longer than FailedRetention ago whose
+// original is still kept.
+func (s *Store) staleOriginals(ctx context.Context) ([]int64, error) {
+	return s.ids(ctx, `SELECT id FROM media_jobs
+		WHERE status = 'failed' AND NOT original_deleted AND failed_at < now() - make_interval(secs => $1)`,
+		s.failedRetention.Seconds())
+}
+
+// dropOriginal claims job id's original first and deletes the file only when
+// the claim took. The claim re-checks the row, so a Retry that requeued the
+// job after staleOriginals listed it keeps its original.
+func (s *Store) dropOriginal(ctx context.Context, id int64) error {
+	var filename string
+	err := s.db.QueryRow(ctx, `UPDATE media_jobs j SET original_deleted = true, updated_at = now()
+		FROM media m WHERE m.id = j.media_id AND j.id = $1 AND j.status = 'failed' AND NOT j.original_deleted
+		RETURNING m.filename`, id).Scan(&filename)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.removeOriginal(stemOf(filename))
 	return nil
 }
 

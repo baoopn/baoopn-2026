@@ -2,6 +2,7 @@ package imagestrip
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
@@ -46,14 +47,21 @@ func TestPNG(t *testing.T) {
 	p = testimg.PNGChunk(p, "tEXt", []byte("Comment\x00SECRETTEXT"))
 	p = testimg.PNGChunk(p, "eXIf", testimg.ExifTIFF(1, true))
 	p = testimg.PNGChunk(p, "iTXt", []byte("XML:com.adobe.xmp\x00\x00\x00\x00\x00XMPSECRET"))
+	p = testimg.PNGChunk(p, "caBX", []byte("C2PAMANIFEST")) // C2PA content credentials
+	p = testimg.PNGChunk(p, "prVt", []byte("UNKNOWNCHUNK")) // unknown: dropped too
+	p = testimg.PNGChunk(p, "pHYs", make([]byte, 9))        // kept
 	out, err := Strip(p, "image/png", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"SECRETTEXT", "GPSDATA", "XMPSECRET", "eXIf", "tEXt", "iTXt"} {
+	for _, s := range []string{"SECRETTEXT", "GPSDATA", "XMPSECRET", "eXIf", "tEXt", "iTXt", "caBX",
+		"C2PAMANIFEST", "UNKNOWNCHUNK"} {
 		if bytes.Contains(out, []byte(s)) {
 			t.Errorf("%q still present", s)
 		}
+	}
+	if !bytes.Contains(out, []byte("pHYs")) {
+		t.Error("pHYs dropped")
 	}
 	if _, err := png.Decode(bytes.NewReader(out)); err != nil {
 		t.Fatalf("stripped png does not decode: %v", err)
@@ -76,6 +84,35 @@ func TestWebP(t *testing.T) {
 	}
 	if int(out[4])+8 != len(out) {
 		t.Errorf("RIFF size %d for %d bytes", out[4], len(out))
+	}
+}
+
+// Only known image chunks survive, and bytes past the RIFF size are dropped.
+func TestWebPAllowlist(t *testing.T) {
+	w := testimg.RIFF([2]string{"VP8X", "\x2c\x00\x00\x00\x07\x00\x00\x07\x00\x00"},
+		[2]string{"ICCP", "iccprofile"}, [2]string{"VP8 ", "fakeframe"},
+		[2]string{"C2PA", "C2PAMANIFEST"}, [2]string{"zzzz", "UNKNOWNCHUNK"})
+	w = append(w, "TRAILINGJUNK"...)
+	out, err := Strip(w, "image/webp", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"C2PAMANIFEST", "UNKNOWNCHUNK", "TRAILINGJUNK"} {
+		if bytes.Contains(out, []byte(s)) {
+			t.Errorf("%q still present", s)
+		}
+	}
+	if !bytes.Contains(out, []byte("iccprofile")) || !bytes.Contains(out, []byte("fakeframe")) {
+		t.Fatalf("image chunks dropped: % x", out)
+	}
+	if out[20] != 0x20 {
+		t.Errorf("VP8X flags = %#x, want only ICC", out[20])
+	}
+	if int(binary.LittleEndian.Uint32(out[4:]))+8 != len(out) {
+		t.Errorf("RIFF size %d for %d bytes", out[4], len(out))
+	}
+	if _, err := WebP([]byte("RIFF\x02\x00\x00\x00WEBP")); err == nil {
+		t.Error("RIFF size below the header accepted")
 	}
 }
 

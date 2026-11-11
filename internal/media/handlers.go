@@ -359,7 +359,7 @@ func (s *Store) serveObject(w http.ResponseWriter, r *http.Request, name string)
 			httpapi.Error(w, code, "bad_range", "range not satisfiable")
 		default:
 			s.log.ErrorContext(r.Context(), "media: get object", slog.String("filename", name), logging.Err(err))
-			httpapi.Error(w, http.StatusBadGateway, "storage_unavailable", "storage unavailable")
+			httpapi.Error(w, http.StatusServiceUnavailable, "storage_unavailable", "storage unavailable")
 		}
 		return
 	}

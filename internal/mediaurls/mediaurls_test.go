@@ -2,6 +2,8 @@ package mediaurls
 
 import (
 	"context"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,6 +48,24 @@ func TestReplace(t *testing.T) {
 	old := pub + "/0123456789abcdef01234567.webp"
 	fn := Replace(old, pub+"/0123456789abcdef01234567.jpg")
 	if got := fn("![x](" + old + ") and " + old + "x"); got != "![x]("+pub+"/0123456789abcdef01234567.jpg) and "+old+"x" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A fallback rename follows every link form to the old file, and only it.
+func TestRename(t *testing.T) {
+	const old, other = "0123456789abcdef01234567.webp", "fedcba9876543210fedcba98.webp"
+	newURL := pub + "/0123456789abcdef01234567.png"
+	fn := Rename(old, newURL, pub, "https://baoopn.com/media", "")
+	in := "![a](" + pub + "/" + old + ") ![b](/media/" + old + ") ![c](https://baoopn.com/media/" + old +
+		") ![d](/media/" + other + ") ![e](/media/" + old + "x)"
+	want := "![a](" + newURL + ") ![b](" + newURL + ") ![c](" + newURL +
+		") ![d](/media/" + other + ") ![e](/media/" + old + "x)"
+	if got := fn(in); got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+	// Without a public domain the new URL is site-relative.
+	if got := Rename(old, "/media/x.png")("[f](/media/" + old + ")"); got != "[f](/media/x.png)" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -106,7 +126,7 @@ func TestRewriteDB(t *testing.T) {
 
 	// Second run: nothing left to change.
 	st, err = Rewrite(ctx, pool, LegacyToPublic(pub))
-	if err != nil || st != (Stats{}) {
+	if err != nil || !reflect.DeepEqual(st, Stats{}) {
 		t.Fatalf("second run %+v %v", st, err)
 	}
 }
@@ -154,7 +174,7 @@ func TestRewriteSkipsConcurrentSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st != (Stats{}) {
+	if !reflect.DeepEqual(st, Stats{}) {
 		t.Fatalf("stats %+v, want nothing written", st)
 	}
 	var part, cover, body string
@@ -168,5 +188,54 @@ func TestRewriteSkipsConcurrentSave(t *testing.T) {
 	_, _ = settings.Get(ctx, pool, profile.SettingsKey, &got)
 	if got.Name != "Admin" || got.BioMD != "admin bio" {
 		t.Fatalf("profile save lost: %+v", got)
+	}
+}
+
+// A save that keeps the link is re-read and rewritten: the admin's text and
+// the new link both land. A row that changes on every attempt is reported.
+func TestRewriteRetriesConcurrentSave(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	ref := "/media/" + file
+	q := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q(`INSERT INTO posts (id, slug, title) VALUES (1, 'p', 'P'), (2, 'q', 'Q')`)
+	q(`INSERT INTO post_parts (post_id, part_no, content_md, content_html) VALUES (1, 1, $1, 'old'), (2, 1, $2, 'old')`,
+		"![a]("+ref+")", "busy ![b]("+ref+")")
+	var busyID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM post_parts WHERE post_id = 2`).Scan(&busyID); err != nil {
+		t.Fatal(err)
+	}
+
+	saved, busy := false, 0
+	fn := func(s string) string {
+		switch {
+		case s == "![a]("+ref+")" && !saved: // one save between read and write
+			saved = true
+			q(`UPDATE post_parts SET content_md = $1 WHERE post_id = 1`, "edited ![a]("+ref+")")
+		case strings.HasPrefix(s, "busy"): // saved before every write
+			busy++
+			q(`UPDATE post_parts SET content_md = $1 WHERE post_id = 2`, "busy "+strconv.Itoa(busy)+" ![b]("+ref+")")
+		}
+		return LegacyToPublic(pub)(s)
+	}
+	st, err := Rewrite(ctx, pool, fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Parts != 1 || !reflect.DeepEqual(st.Skipped, []string{"post_parts:" + strconv.FormatInt(busyID, 10)}) {
+		t.Fatalf("stats %+v", st)
+	}
+	if busy != casAttempts {
+		t.Fatalf("busy row tried %d times, want %d", busy, casAttempts)
+	}
+	var md string
+	_ = pool.QueryRow(ctx, `SELECT content_md FROM post_parts WHERE post_id = 1`).Scan(&md)
+	if md != "edited ![a]("+pub+"/"+file+")" {
+		t.Fatalf("part = %q", md)
 	}
 }

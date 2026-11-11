@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,7 +59,7 @@ func buildModules(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, lo
 	mediaStore, err := media.New(media.Deps{DB: pool, Log: log, Dir: cfg.MediaDir, MaxBytes: cfg.MaxUploadMB << 20,
 		MaxPixels: cfg.MediaMaxPixels, UploadWait: cfg.MediaUploadWait, JobLease: cfg.MediaJobLease,
 		MaxAttempts: cfg.MediaJobMaxAttempts, FallbackAfter: cfg.MediaFallbackAfter,
-		FailedRetention: cfg.MediaFailedRetention, OnRename: followRename(pool),
+		FailedRetention: cfg.MediaFailedRetention, OnRename: followRename(pool, cfg.MediaPublicURL, cfg.PublicURL),
 		OrphanGrace: orphanGrace(cfg.MediaOrphanGrace), OrphanMaxPerPass: cfg.MediaOrphanMaxPerPass,
 		S3: mediaS3(cfg)})
 	if err != nil {
@@ -183,10 +186,21 @@ func migrateThenRewrite(ctx context.Context, migrate func(context.Context) (medi
 }
 
 // followRename points stored references at a file the media fallback
-// published under a new name.
-func followRename(pool *pgxpool.Pool) func(ctx context.Context, oldURL, newURL string) error {
+// published under a new name. Every link form to the old file follows: the
+// bucket's public domain, the site's absolute /media URL and /media/<file>.
+func followRename(pool *pgxpool.Pool, mediaPublicURL, sitePublicURL string) func(ctx context.Context, oldURL, newURL string) error {
+	var bases []string
+	if mediaPublicURL != "" {
+		bases = append(bases, mediaPublicURL)
+	}
+	if sitePublicURL != "" {
+		bases = append(bases, strings.TrimRight(sitePublicURL, "/")+"/media")
+	}
 	return func(ctx context.Context, oldURL, newURL string) error {
-		_, err := mediaurls.Rewrite(ctx, pool, mediaurls.Replace(oldURL, newURL))
+		st, err := mediaurls.Rewrite(ctx, pool, mediaurls.Rename(path.Base(oldURL), newURL, bases...))
+		if err == nil && len(st.Skipped) > 0 {
+			err = fmt.Errorf("rows kept changing, links not updated: %s", strings.Join(st.Skipped, ", "))
+		}
 		return err
 	}
 }
