@@ -110,7 +110,8 @@ jobs:
                 built=$(echo "$resp" | jq -r '.commit // ""')
                 if [[ "$built" =~ ^[0-9a-f]{40}$ ]]; then
                   if [ "$built" != "${{ github.sha }}" ]; then
-                    echo "::warning::Coolify built $built, not the tested commit ${{ github.sha }}."
+                    echo "::error::Coolify built $built, not the tested commit ${{ github.sha }}. The live site may run untested code; redeploy the tested commit or check the Coolify resource's branch."
+                    exit 1
                   else
                     echo "Coolify built the tested commit."
                   fi
