@@ -4,8 +4,9 @@ The TypeScript types in `web/src/lib/api/types.ts` are the source of truth for s
 Envelopes: `{ "data": …, "meta"?: PageMeta }` on success, `{ "error": { "code", "message" } }`
 on failure. A JSON body that does not parse (bad syntax, wrong types, unknown fields) gets 400
 `bad_request` with the fixed message "invalid JSON body"; one over 2 MiB gets 413 `too_large`.
-An upstream failure (GitHub, spotify-tracker, the mail server) answers 503 with its own code
-(`github_unavailable`, `upstream_unavailable`, `mail_failed`), never 502: the proxy in front
+An upstream failure (GitHub, spotify-tracker, the mail server, media storage) answers 503 with
+its own code (`github_unavailable`, `upstream_unavailable`, `mail_failed`, `storage_unavailable`),
+never 502: the proxy in front
 replaces 502 and 504 bodies with an HTML error page, which would hide the JSON code.
 The browser always calls the same origin (`/api/...`); the SvelteKit server proxies
 to the Go API (`web/src/hooks.server.ts`) and adds `X-Client-IP`, `X-Client-Country` and
