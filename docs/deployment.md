@@ -48,7 +48,9 @@ bind to 127.0.0.1 only.
   Coolify to deploy the resource and waits until the deployment finishes. A
   commit on `main` that did not come from a merged PR is tested but never deployed.
   The deploy runs only if `main` still points at the tested commit; otherwise the newer run deploys.
-  When Coolify reports the commit it built and that is not the tested commit, the job fails.
+  When Coolify reports the commit it built and that is not the tested commit, the job fails,
+  unless `main` moved meanwhile and Coolify built the new `main` head: that commit passed
+  PR CI and its own run follows, so the job only posts a notice.
   The deploy job is **skipped while `vars.COOLIFY_RESOURCE_UUID` is unset**, so
   nothing is published until you decide to go live.
 
