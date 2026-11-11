@@ -463,3 +463,18 @@ func (f *fakeS3) setFailPuts(n int) {
 	f.failPuts = n
 	f.mu.Unlock()
 }
+
+// The S3 client fails a bucket that never answers but sets no total timeout,
+// which would cut off a large upload.
+func TestS3HTTPClientTimeouts(t *testing.T) {
+	c := s3HTTPClient()
+	if c.GetTimeout() != 0 {
+		t.Fatalf("total timeout = %v, want none", c.GetTimeout())
+	}
+	if tr := c.GetTransport(); tr.ResponseHeaderTimeout != s3ResponseHeaderTimeout || tr.TLSHandshakeTimeout == 0 {
+		t.Fatalf("transport timeouts = %v / %v", tr.ResponseHeaderTimeout, tr.TLSHandshakeTimeout)
+	}
+	if d := c.GetDialer(); d.Timeout != s3DialTimeout {
+		t.Fatalf("dial timeout = %v", d.Timeout)
+	}
+}
