@@ -36,17 +36,12 @@
 }
 
 /* Sticky site header (Header.svelte): 2*12px padding + 1px rule around the tallest
-   item. Below md that is the 44px brand row (69px); at md+ the 50px ThemeToggle
-   fieldset sets it (75px). Plus the top safe-area inset: with viewport-fit=cover
-   (app.html) the header pads itself down past the iOS status bar so its paper
-   background fills that strip. env() is 0 on desktop. */
+   item, which is 44px at every width (brand row, nav links, menu buttons): 69px.
+   Plus the top safe-area inset: with viewport-fit=cover (app.html) the header pads
+   itself down past the iOS status bar so its paper background fills that strip.
+   env() is 0 on desktop. */
 :root {
 	--header-h: calc(4.3125rem + env(safe-area-inset-top, 0px));
-}
-@media (min-width: 48rem) {
-	:root {
-		--header-h: calc(4.6875rem + env(safe-area-inset-top, 0px));
-	}
 }
 html {
 	scroll-padding-top: calc(var(--header-h) + 1rem);
