@@ -3,6 +3,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import { page } from '$app/state';
 	import { afterNavigate } from '$app/navigation';
+	import ThemeMenu from './ThemeMenu.svelte';
 	import ThemeToggle from './ThemeToggle.svelte';
 	import { NAV } from '#lib/site/defaults.js';
 	import { brandSize, brandSrc } from '#lib/brand.js';
@@ -49,7 +50,7 @@
 			</ul>
 		</nav>
 
-		<div class="hidden md:ml-2 md:block"><ThemeToggle /></div>
+		<div class="hidden md:ml-2 md:block"><ThemeMenu /></div>
 
 		<button
 			type="button"
